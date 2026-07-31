@@ -426,6 +426,7 @@ sta rompendo il gioco. Ognuna è motivata nella sezione indicata.
 | Boss finale catturabile | bloccato | **catturabile**, a tasso basso | §6.5 |
 | Theft Ball | non esiste | nostra, ruba ai Pokémon degli allenatori | §5 |
 | GIF di vittoria | non esistono | nostre, da uno zip scelto dall'utente | §25 |
+| GIF conservate | — | **mai**: si riscelgono a ogni avvio, di proposito | §25 |
 | Cattura | solo comando del turno | in lotta **+ un'ultima ball** a fine lotta | §5 |
 | Arceus Perfetto | non esiste | tipo Astrale + mosse sempre superefficaci | §22 |
 | Lugia/Ho-Oh Ombra | esistono solo in uno spin-off | ricolorati da noi | §22 |
@@ -1499,9 +1500,11 @@ diversi da 0 e 8 — entrambi danno barra rossa e nient'altro.
 
 ### Scelte prese, che una sessione nuova non deve "correggere"
 
-- **Le GIF stanno in memoria per la sessione**, non su disco: ricaricando la pagina lo zip
-  va riscelto. Non è stato chiesto di conservarle. Se un giorno servisse, la strada è
-  IndexedDB (i blob ci stanno).
+- 🔴 **Le GIF stanno in memoria per la sessione e NON vanno salvate su disco.**
+  Riscegliere lo zip a ogni avvio è **voluto**: gliel'ho proposto di conservarle in
+  IndexedDB dopo che aveva provato l'app sul telefono, e ha risposto di no —
+  *«è giusto che vadano ricaricate ad ogni partita se si vuole usare l'easter egg»*.
+  Fa parte del gioco: l'easter egg si riattiva ogni volta. **Non "sistemarlo".**
 - **Quando le GIF sono finite si ricomincia il giro** (`gifs.usate` si svuota): una run
   lunga batte più allenatori di quante GIF ci siano in uno zip normale.
 - **Un tocco sulla GIF la chiude in anticipo.** Non era richiesto: è una via d'uscita,
