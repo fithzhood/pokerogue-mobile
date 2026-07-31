@@ -59,10 +59,6 @@
         <!-- Animazioni delle mosse: disegnate sopra tutto, non intercettano il tocco -->
         <canvas id="anim-canvas"></canvas>
 
-        <!-- PREMIO GIF (easter egg): unica traccia visibile mentre lo zip si
-             scompatta in sottofondo. Sta sul bordo BASSO della scena. -->
-        <div id="gif-load" hidden><i></i></div>
-
       </div>
     </section>
 
@@ -77,6 +73,12 @@
 
     <!-- PREMIO GIF: la GIF di vittoria, a schermo intero sopra ogni cosa -->
     <div id="gif-prize" hidden></div>
+
+    <!-- PREMIO GIF (easter egg): unica traccia visibile mentre lo zip si
+         scompatta in sottofondo. Sta sul bordo basso dello SCHERMO, non della
+         scena: prima era dentro #scene e finiva a meta' altezza, sul confine
+         fra campo di lotta e comandi. -->
+    <div id="gif-load" hidden><i></i></div>
 
   </div>
 

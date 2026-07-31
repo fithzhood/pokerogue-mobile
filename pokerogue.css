@@ -830,14 +830,20 @@ html, body {
    ========================================================================== */
 #gif-load[hidden], #gif-prize[hidden] { display: none; }
 
-/* Barra di caricamento: sottile, sul bordo BASSO della scena.
+/* Barra di caricamento: sottile, sul bordo BASSO DELLO SCHERMO.
+   ⚠️ `fixed`, non `absolute`: stava dentro #scene e quindi si appoggiava al
+   bordo basso del CAMPO DI LOTTA, cioe' a meta' altezza del telefono, sul
+   confine con i comandi. Ora e' figlia di #game e ancorata allo schermo.
+   Regge perche' nessun antenato ha `transform`/`filter`, che farebbero
+   degradare `fixed` ad `absolute`.
    ⚠️ z-index 30, cioe' SOPRA le schermate meta (20): lo zip si sceglie dalla
    Home, che e' una schermata meta, quindi con un valore piu' basso la barra
-   resterebbe nascosta proprio mentre carica. #top-screen non crea un contesto
-   di impilamento (niente z-index), percio' il confronto col 20 di #meta
-   funziona davvero. */
+   resterebbe nascosta proprio mentre carica.
+   `max-width` + `margin-inline` la tengono dentro la cornice su PC, dove il
+   gioco e' largo 480px e non quanto la finestra. */
 #gif-load {
-  position: absolute; left: 0; right: 0; bottom: 0; top: auto;
+  position: fixed; left: 0; right: 0; bottom: 0; top: auto;
+  max-width: 480px; margin-inline: auto;
   height: 4px; z-index: 30;
   background: rgba(0, 0, 0, .35);
   pointer-events: none;               /* non ruba mai un tocco alla scena */
