@@ -7196,7 +7196,15 @@
   /*  AVVIO — carica i dati reali, poi comincia                             */
   /* ---------------------------------------------------------------------- */
   const DATA_V = 19;   // versione dei dati: alzala a ogni rigenerazione
-  function loadJson(name) { return fetch(`data/${name}.json?v=${DATA_V}`).then(r => r.json()); }
+  /* I dati arrivano dallo strato aggiornato se c'e' (vedi pokerogue-boot.js,
+     §28), altrimenti dai file locali. `window.PR` esiste solo quando la pagina
+     e' stata avviata dal guscio: aprendo i file a mano si ricade sul fetch. */
+  function loadJson(name) {
+    const percorso = `data/${name}.json`;
+    const locale = () => fetch(`${percorso}?v=${DATA_V}`).then(r => r.json());
+    if (!window.PR || !PR.file) return locale();
+    return PR.file(percorso).then(t => (t != null ? JSON.parse(t) : locale()));
+  }
 
   function boot() {
     cmd().innerHTML = `<div class="msgbox">Caricamento dati...</div>`;
@@ -7222,6 +7230,11 @@
         if (file) gifCaricaZip(file);
       });
       showHome();
+      /* Arrivati qui il gioco e' su e funzionante: si dice al cane da guardia
+         che questa versione e' buona. Se non lo dicessimo (perche' l'avvio e'
+         morto prima), al riavvio lo strato scaricato verrebbe buttato e si
+         tornerebbe a quello dell'APK. Vedi §28. */
+      if (window.PR && PR.avvioRiuscito) PR.avvioRiuscito();
     }).catch(err => {
       cmd().innerHTML = `<div class="msgbox">Errore nel caricamento dati.<br>${err}</div>`;
       console.error(err);
@@ -7240,6 +7253,11 @@
     }, 120);
   });
 
-  window.addEventListener("DOMContentLoaded", boot);
+  /* ⚠️ Non basta `DOMContentLoaded`: il guscio (§28) inserisce questo script
+     DOPO che quell'evento e' gia' scattato, quindi in app non arriverebbe mai e
+     il gioco resterebbe sulla schermata di caricamento. Se il documento e' gia'
+     pronto si parte subito. */
+  if (document.readyState === "loading") window.addEventListener("DOMContentLoaded", boot);
+  else boot();
 
 })();

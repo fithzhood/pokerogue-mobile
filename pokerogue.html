@@ -2,100 +2,58 @@
 <html lang="it">
 <head>
   <meta charset="UTF-8">
+  <!-- viewport-fit=cover: a schermo intero il gioco arriva fino ai bordi -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <!-- Cache-proof: il telefono non deve mai restare su una versione vecchia -->
   <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
+  <meta name="theme-color" content="#05060a">
   <title>PokeRogue Mobile</title>
-  <link rel="stylesheet" href="pokerogue.css?v=57">
+
+  <!-- ==========================================================================
+       Questa pagina e' solo il GUSCIO. Il gioco vero (struttura, stile e motore)
+       lo carica `pokerogue-boot.js`, che sceglie fra i file dentro l'APK e la
+       versione piu' recente scaricata dal sito — vedi §28 di HANDOFF.md.
+       Qui dentro deve restare il minimo indispensabile, perche' e' l'unico
+       pezzo che per cambiare richiede di rifare l'APK.
+       ====================================================================== -->
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      height: 100%; background: #05060a; color: #f4f6fb;
+      font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+      -webkit-user-select: none; user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      overflow: hidden;
+    }
+    #pr-boot {
+      position: fixed; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      text-align: center; padding: 24px;
+    }
+    #pr-boot .pr-ball {
+      width: 64px; height: 64px; border-radius: 50%;
+      background: linear-gradient(#6b6a9c 0 48%, #10131a 48% 52%, #8a8f92 52%);
+      box-shadow: 0 0 0 3px #10131a inset, 0 6px 18px rgba(0,0,0,.5);
+      animation: prSpin 1.4s ease-in-out infinite;
+      margin: 0 auto 14px;
+    }
+    #pr-boot .pr-msg { font-size: 15px; opacity: .85; line-height: 1.5; }
+    @keyframes prSpin {
+      0%, 100% { transform: rotate(-12deg) scale(1); }
+      50%      { transform: rotate(12deg) scale(1.06); }
+    }
+  </style>
 </head>
 <body>
 
-  <!-- Cornice del gioco: verticale, due schermi impilati -->
-  <div id="game">
-
-    <!-- ================= SCHERMO SUPERIORE: la scena ================= -->
-    <!-- Solo immagini/scena. NESSUN comando touch qui.               -->
-    <section id="top-screen">
-      <div id="scene">
-        <div id="arena"></div>
-        <div id="wave-indicator"></div>
-        <div id="trainer-portrait" hidden></div>
-        <div id="trainer-balls" hidden></div>
-
-        <!-- Oggetti tenuti, come la ModifierBar dell'originale:
-             quelli del giocatore in basso a sinistra, quelli del nemico in alto a destra -->
-        <div id="held-ally" class="held-bar"></div>
-        <div id="held-enemy" class="held-bar enemy"></div>
-
-        <!-- SECONDI slot: usati solo nelle lotte in doppio -->
-        <div class="battler-slot enemy2" hidden>
-          <div class="battler" id="enemy2-battler">
-            <div class="platform"></div>
-            <div class="idle idle-enemy"><div class="sprite" id="enemy2-sprite"></div></div>
-          </div>
-        </div>
-        <div class="battler-slot ally2" hidden>
-          <div class="battler" id="player2-battler">
-            <div class="platform"></div>
-            <div class="idle idle-ally"><div class="sprite" id="player2-sprite"></div></div>
-          </div>
-        </div>
-
-        <!-- Nemico: in alto a destra -->
-        <div class="battler-slot enemy">
-          <div class="battler" id="enemy-battler">
-            <div class="platform"></div>
-            <div class="idle idle-enemy"><div class="sprite" id="enemy-sprite"></div></div>
-          </div>
-        </div>
-
-        <!-- Alleato: in basso a sinistra -->
-        <div class="battler-slot ally">
-          <div class="battler" id="player-battler">
-            <div class="platform"></div>
-            <div class="idle idle-ally"><div class="sprite" id="player-sprite"></div></div>
-          </div>
-        </div>
-
-        <!-- Riquadri PS: SOVRAPPOSTI alla scena come nell'originale, non impilati
-             sopra/sotto lo sprite. Impilati rubavano 134px (il 24% della scena)
-             e costringevano i Pokémon a rimpicciolirsi o a toccarsi.
-             Quello del nemico sta dalla parte OPPOSTA al suo Pokémon, come in
-             PokéRogue: nemico in alto a sinistra, giocatore in basso a destra. -->
-        <div class="hp-panel side-enemy" id="enemy-hp-panel"></div>
-        <div class="hp-panel side-enemy second" id="enemy2-hp-panel" hidden></div>
-        <div class="hp-panel side-ally" id="player-hp-panel"></div>
-        <div class="hp-panel side-ally second" id="player2-hp-panel" hidden></div>
-
-        <!-- Animazioni delle mosse: disegnate sopra tutto, non intercettano il tocco -->
-        <canvas id="anim-canvas"></canvas>
-
-        <!-- PREMIO GIF (easter egg): unica traccia visibile mentre lo zip si
-             scompatta in sottofondo. Sta sul bordo BASSO della scena. -->
-        <div id="gif-load" hidden><i></i></div>
-
-      </div>
-    </section>
-
-    <!-- ================= SCHERMO INFERIORE: i comandi ================= -->
-    <!-- Tutto il touch avviene qui. Il contenuto cambia per stato.     -->
-    <section id="bottom-screen">
-      <div id="commands"><!-- riempito da pokerogue.js --></div>
-    </section>
-
-    <!-- Overlay a schermo intero per le schermate META (home/gacha/uova) -->
-    <div id="meta" hidden></div>
-
-    <!-- PREMIO GIF: la GIF di vittoria, a schermo intero sopra ogni cosa -->
-    <div id="gif-prize" hidden></div>
-
+  <div id="pr-boot">
+    <div>
+      <div class="pr-ball"></div>
+      <div class="pr-msg">Caricamento…</div>
+    </div>
   </div>
 
-  <!-- Selettore dello zip delle GIF: si apre SOLO col triplo tocco sul titolo
-       (easter egg). Fuori da #game perche' non deve occupare spazio. -->
-  <input type="file" id="gif-zip" accept=".zip,application/zip" hidden>
-
-  <script src="pokerogue.js?v=114"></script>
+  <script src="pokerogue-boot.js?v=1"></script>
 </body>
 </html>

@@ -1,0 +1,86 @@
+
+  <!-- Cornice del gioco: verticale, due schermi impilati -->
+  <div id="game">
+
+    <!-- ================= SCHERMO SUPERIORE: la scena ================= -->
+    <!-- Solo immagini/scena. NESSUN comando touch qui.               -->
+    <section id="top-screen">
+      <div id="scene">
+        <div id="arena"></div>
+        <div id="wave-indicator"></div>
+        <div id="trainer-portrait" hidden></div>
+        <div id="trainer-balls" hidden></div>
+
+        <!-- Oggetti tenuti, come la ModifierBar dell'originale:
+             quelli del giocatore in basso a sinistra, quelli del nemico in alto a destra -->
+        <div id="held-ally" class="held-bar"></div>
+        <div id="held-enemy" class="held-bar enemy"></div>
+
+        <!-- SECONDI slot: usati solo nelle lotte in doppio -->
+        <div class="battler-slot enemy2" hidden>
+          <div class="battler" id="enemy2-battler">
+            <div class="platform"></div>
+            <div class="idle idle-enemy"><div class="sprite" id="enemy2-sprite"></div></div>
+          </div>
+        </div>
+        <div class="battler-slot ally2" hidden>
+          <div class="battler" id="player2-battler">
+            <div class="platform"></div>
+            <div class="idle idle-ally"><div class="sprite" id="player2-sprite"></div></div>
+          </div>
+        </div>
+
+        <!-- Nemico: in alto a destra -->
+        <div class="battler-slot enemy">
+          <div class="battler" id="enemy-battler">
+            <div class="platform"></div>
+            <div class="idle idle-enemy"><div class="sprite" id="enemy-sprite"></div></div>
+          </div>
+        </div>
+
+        <!-- Alleato: in basso a sinistra -->
+        <div class="battler-slot ally">
+          <div class="battler" id="player-battler">
+            <div class="platform"></div>
+            <div class="idle idle-ally"><div class="sprite" id="player-sprite"></div></div>
+          </div>
+        </div>
+
+        <!-- Riquadri PS: SOVRAPPOSTI alla scena come nell'originale, non impilati
+             sopra/sotto lo sprite. Impilati rubavano 134px (il 24% della scena)
+             e costringevano i Pokémon a rimpicciolirsi o a toccarsi.
+             Quello del nemico sta dalla parte OPPOSTA al suo Pokémon, come in
+             PokéRogue: nemico in alto a sinistra, giocatore in basso a destra. -->
+        <div class="hp-panel side-enemy" id="enemy-hp-panel"></div>
+        <div class="hp-panel side-enemy second" id="enemy2-hp-panel" hidden></div>
+        <div class="hp-panel side-ally" id="player-hp-panel"></div>
+        <div class="hp-panel side-ally second" id="player2-hp-panel" hidden></div>
+
+        <!-- Animazioni delle mosse: disegnate sopra tutto, non intercettano il tocco -->
+        <canvas id="anim-canvas"></canvas>
+
+        <!-- PREMIO GIF (easter egg): unica traccia visibile mentre lo zip si
+             scompatta in sottofondo. Sta sul bordo BASSO della scena. -->
+        <div id="gif-load" hidden><i></i></div>
+
+      </div>
+    </section>
+
+    <!-- ================= SCHERMO INFERIORE: i comandi ================= -->
+    <!-- Tutto il touch avviene qui. Il contenuto cambia per stato.     -->
+    <section id="bottom-screen">
+      <div id="commands"><!-- riempito da pokerogue.js --></div>
+    </section>
+
+    <!-- Overlay a schermo intero per le schermate META (home/gacha/uova) -->
+    <div id="meta" hidden></div>
+
+    <!-- PREMIO GIF: la GIF di vittoria, a schermo intero sopra ogni cosa -->
+    <div id="gif-prize" hidden></div>
+
+  </div>
+
+  <!-- Selettore dello zip delle GIF: si apre SOLO col triplo tocco sul titolo
+       (easter egg). Fuori da #game perche' non deve occupare spazio. -->
+  <input type="file" id="gif-zip" accept=".zip,application/zip" hidden>
+
