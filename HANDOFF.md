@@ -3,6 +3,28 @@
 Documento per una **nuova sessione di Claude Code**. Leggilo tutto prima di toccare il codice.
 Aggiornato: 2026-07-31 · Stato: **giocabile end-to-end, 0 errori console**.
 
+## 🔴 Leggi questo prima di tutto: lo stato REALE
+
+Il documento qui sotto elenca molte cose "fatte e verificate". **Non farti l'idea che il
+gioco sia a posto.** Dopo averlo provato sul telefono per cinque minuti, il proprietario ha
+detto: *«ci sono un sacco di cose da sistemare, siamo lontani anni luce da avere
+un'esperienza gratificante come quella di PokéRogue originale, ci sono centinaia di piccole
+cose da sistemare»*.
+
+Non è in contraddizione con le verifiche: quelle dicono che **non ci sono errori** e che le
+meccaniche **girano**. Non dicono niente su come ci si *gioca* — ritmo, leggibilità,
+equilibrio, attriti dell'interfaccia. Quella parte non è mai stata affrontata.
+
+**Quindi**: la prossima sessione NON deve aggiungere feature né rifare collaudi automatici.
+Deve **partire dalla lista di difetti del proprietario** e lavorare sulla sensazione di
+gioco. Se la lista non c'è ancora, chiedigliela: ha detto che ci torna «con più calma e
+dettaglio».
+
+⚠️ E vale la regola del §23, che qui conta il doppio: **guardare, non leggere il DOM**.
+Nessuna delle "centinaia di piccole cose" sarebbe uscita da un'asserzione su `window.__game`.
+
+---
+
 ## Dove siamo — leggi prima questo
 
 Le sezioni **1-9** sono la mappa generale; le **10-25** raccontano cosa è stato fatto di
