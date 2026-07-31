@@ -1,0 +1,896 @@
+/* ============================================================================
+   pokerogue.css — layout verticale a due schermi + UI di lotta
+   Portrait. Target: Samsung Galaxy A25 5G. Unita' relative (vh/%/dvh).
+   ========================================================================== */
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --gap: 2.2vh;
+  --panel-bg: #2b2f38;
+  --panel-line: #10131a;
+  --ink: #f4f6fb;
+  --hp-green: #6fd36f;
+  --hp-yellow: #f2c94c;
+  --hp-red: #eb5757;
+}
+
+html, body {
+  height: 100%;
+  background: #05060a;
+  color: var(--ink);
+  font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+  -webkit-user-select: none; user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  overflow: hidden;
+  overflow-x: hidden;
+}
+
+/* Cornice: verticale, centrata, altezza piena. max-width per non deformare su PC. */
+#game {
+  width: 100%;
+  max-width: 480px;
+  height: 100dvh;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  background: #05060a;
+  overflow: hidden;   /* niente puo' sfondare la cornice */
+}
+
+/* ----------------------------- SCHERMO SUPERIORE ------------------------- */
+#top-screen {
+  flex: 0 0 68%;   /* scena grande ma non troppo alta su schermi molto allungati */
+  position: relative;
+  overflow: hidden;
+  border-bottom: 3px solid #000;
+}
+
+#scene {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(120% 80% at 50% 8%, #bfe4ff 0%, #8fd0f0 38%, #7ec0e6 60%, transparent 100%),
+    linear-gradient(#a7dbf2 0%, #cdeecb 62%, #a9dd93 100%);
+}
+
+/* Ogni combattente: slot che posiziona pannello HP + sprite. I combattenti
+   sono avvicinati verso il centro per non lasciare troppo cielo vuoto. */
+.battler-slot { position: absolute; display: flex; flex-direction: column; align-items: center; z-index: 4; }
+/* ⚠️ Serve davvero: `slot2()` nasconde i secondi slot con l'attributo `hidden`,
+   ma `[hidden]{display:none}` dello user-agent PERDE contro la regola di classe
+   qui sopra. Senza questa riga i due slot vuoti restavano disegnati in ogni
+   lotta singola: il loro `.sprite` senza immagine mostrava il bordo bianco
+   (i "cerchi") e il box-shadow (le "ombre senza senso"). */
+.battler-slot[hidden] { display: none; }
+/* Diagonale piena: il nemico occupa la fascia ALTA a destra, l'alleato quella
+   BASSA a sinistra. Prima stavano tutti e due schiacciati a metà scena (si
+   sovrapponevano di una decina di pixel) e il 40% in alto restava cielo vuoto.
+   Ora che i riquadri PS sono sovrapposti alla scena (vedi `.hp-panel` più sotto)
+   queste percentuali delimitano davvero lo spazio dei soli sprite. */
+.battler-slot.enemy { top: 5%;   right: 7%; }
+.battler-slot.ally  { bottom: 5%; left: 5%; }   /* 5%: la pedana resta dentro lo schermo */
+
+/* LOTTE IN DOPPIO — disposizione dei giochi veri: su ENTRAMBI i lati il
+   Pokémon di DESTRA sta più in BASSO di quello di sinistra, così la coppia
+   si legge in diagonale e si capisce chi è davanti e chi dietro.
+   ⚠️ Il lato alleato era invertito (il destro stava più in alto).
+     nemici   → `top` più grande = più in basso   (enemy2 a sinistra, enemy a destra)
+     alleati  → `bottom` più piccolo = più in basso (ally a sinistra, ally2 a destra) */
+.battler-slot.enemy2 { top: 12%;  right: 44%; }   /* sinistra, più in alto  */
+#game.double .battler-slot.enemy { top: 28%; right: 6%; }   /* destra, più in basso */
+#game.double .battler-slot.ally  { bottom: 19%; left: 4%; } /* sinistra, più in alto  */
+/* 34% e non di più: la coppia di alleati deve restare nella metà sinistra,
+   come nei giochi veri, o finisce sotto i riquadri PS in basso a destra */
+.battler-slot.ally2  { bottom: 3%; left: 34%; }   /* destra, più in basso */
+#game.double .battler-slot .sprite { transform-origin: bottom center; }
+#game.double .hp-panel { font-size: 10px; padding: 3px 6px; }
+/* Le pedane hanno larghezza/altezza INLINE (le imposta setPlatform ritagliando
+   l'arte del bioma), quindi qui non servirebbe a niente ridichiararle: si
+   rimpicciolisce con una trasformazione, che l'inline non può sovrascrivere. */
+#game.double .platform { transform: scale(.72); transform-origin: center bottom; }
+
+.battler { position: relative; display: flex; align-items: flex-end; justify-content: center; }
+
+/* Pedana ovale sotto lo sprite */
+.platform {
+  position: absolute;
+  bottom: -6px;
+  width: 108px; height: 26px;
+  border-radius: 50%;
+  background: rgba(60, 90, 40, .35);
+  filter: blur(1px);
+}
+.enemy .platform { width: 96px; height: 22px; }
+
+/* Placeholder dello sprite (in Fase 1 sara' l'immagine estratta da PokeRogue).
+   Il colore/label vengono impostati da JS in base alla specie.            */
+.sprite {
+  position: relative;
+  width: 96px; height: 96px;
+  border-radius: 50% 50% 46% 46%;
+  display: flex; align-items: center; justify-content: center;
+  text-align: center;
+  font-weight: 700; font-size: 12px; line-height: 1.15;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0,0,0,.6);
+  box-shadow: inset 0 -10px 18px rgba(0,0,0,.25), 0 6px 10px rgba(0,0,0,.28);
+  border: 2px solid rgba(255,255,255,.35);
+  transition: transform .12s ease, opacity .35s ease;
+}
+.enemy .sprite { width: 84px; height: 84px; }
+
+/* Animazioni feedback: scossa quando colpito, svanire al KO */
+.sprite.hit { animation: shake .32s ease; }
+.sprite.faint { opacity: 0; transform: translateY(18px) scale(.7); }
+@keyframes shake {
+  0%,100% { transform: translateX(0); }
+  20% { transform: translateX(-6px); } 40% { transform: translateX(6px); }
+  60% { transform: translateX(-4px); } 80% { transform: translateX(4px); }
+}
+
+/* Pannello HP (nome, livello, barra) */
+.hp-panel {
+  background: rgba(20,24,32,.82);
+  border: 2px solid rgba(255,255,255,.18);
+  border-radius: 10px;
+  padding: 5px 9px 7px;
+  min-width: 108px;
+  max-width: 52%;       /* non deborda mai dallo schermo superiore */
+  overflow: hidden;
+  box-shadow: 0 3px 8px rgba(0,0,0,.35);
+  /* Sovrapposti alla scena, agli angoli: ognuno dalla parte opposta al proprio
+     Pokémon, come i riquadri informativi dell'originale. Stando fuori dal flusso
+     non rubano più altezza agli sprite. */
+  position: absolute; z-index: 5;
+}
+.hp-panel[hidden] { display: none; }          /* la classe batterebbe [hidden] */
+/* sotto l'indicatore d'ondata (in alto a sinistra) E sotto il vassoio di ball
+   dell'allenatore, che sta anch'esso a sinistra: sono i due elementi con cui
+   si scontrerebbe */
+.hp-panel.side-enemy { top: 11%;   left: 4%; }      /* nemico: sprite a destra  */
+.hp-panel.side-ally  { bottom: 3%; right: 4%; }     /* alleato: sprite a sinistra */
+/* in doppio il secondo riquadro si accoda al primo: la percentuale di translateY
+   è riferita all'altezza del riquadro stesso, quindi si incolonnano da soli */
+.hp-panel.side-enemy.second { transform: translateY(calc(100% + 6px)); }
+.hp-panel.side-ally.second  { transform: translateY(calc(-100% - 6px)); }
+.hp-panel .row1 { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.hp-panel .name { font-weight: 700; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.status-badge {
+  display: inline-block; margin-left: 5px; padding: 1px 5px;
+  border-radius: 5px; font-size: 9px; font-weight: 800; vertical-align: middle;
+  color: #fff; letter-spacing: .3px;
+}
+.st-BURN      { background: #eb5757; }
+.st-PARALYSIS { background: #d9a400; }
+.st-SLEEP     { background: #8a7fb0; }
+.st-POISON    { background: #a040a0; }
+.st-FREEZE    { background: #4aa8d8; }
+.hp-panel .lvl  { font-size: 11px; opacity: .85; }
+.hp-bar-track {
+  margin-top: 4px; height: 8px; border-radius: 5px;
+  background: #10131a; overflow: hidden;
+}
+.hp-bar-fill {
+  height: 100%; width: 100%; border-radius: 5px;
+  background: var(--hp-green);
+  transition: width .5s ease, background-color .5s ease;
+}
+.hp-text { margin-top: 2px; font-size: 10px; text-align: right; opacity: .9; font-variant-numeric: tabular-nums; }
+.ability-line { margin-top: 1px; font-size: 9px; opacity: .75; font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ----------------------------- SCHERMO INFERIORE ------------------------- */
+#bottom-screen {
+  flex: 1 1 auto;
+  background: linear-gradient(#1a1d24, #12141a);
+  padding: var(--gap);
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+#commands { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+
+/* Griglia 2x2 riusata per menu principale e per le mosse */
+.grid2 {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: var(--gap);
+  min-width: 0;
+}
+
+.btn {
+  border: none; border-radius: 14px;
+  color: #fff; font-family: inherit; font-weight: 700;
+  /* font legato alla LARGHEZZA (non vh): su schermi alti non si gonfia */
+  font-size: clamp(17px, 5.6vw, 28px);
+  cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 4px;
+  box-shadow: 0 4px 0 rgba(0,0,0,.35), inset 0 2px 6px rgba(255,255,255,.18);
+  transition: transform .06s ease, filter .1s ease;
+  position: relative;
+  padding: 6px;
+  min-width: 0;         /* permette all'elemento griglia di restringersi */
+  overflow: hidden;     /* la parola lunga non sfonda mai il bordo */
+  text-align: center;
+}
+.btn:active { transform: translateY(3px); filter: brightness(1.08); box-shadow: 0 1px 0 rgba(0,0,0,.35), inset 0 2px 6px rgba(255,255,255,.18); }
+.btn:disabled { opacity: .45; filter: grayscale(.4); cursor: default; box-shadow: 0 4px 0 rgba(0,0,0,.35); }
+
+/* Menu principale: 4 tinte distinte */
+.btn.main-fight  { background: #d24b4b; }
+.btn.main-bag    { background: #d99a3a; }
+.btn.main-team   { background: #3aa563; }
+.btn.main-run    { background: #5a6472; }
+
+/* Pulsanti mossa: mostrano nome, tipo e PP; colore dal tipo (via JS) */
+.move-btn { padding: 4px; }
+.move-btn .move-name { font-size: clamp(15px, 4.6vw, 23px); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.move-btn .move-meta {
+  display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: center;
+  font-size: clamp(10px, 3vw, 14px); font-weight: 600; opacity: .95;
+}
+.type-tag {
+  padding: 1px 7px; border-radius: 999px;
+  font-size: clamp(9px, 2.6vw, 13px); letter-spacing: .3px;
+  background: rgba(0,0,0,.28);
+}
+.move-pp { font-variant-numeric: tabular-nums; }
+
+/* Riga inferiore quando si e' dentro le mosse: tasto Indietro a tutta larghezza */
+.back-row { margin-top: var(--gap); }
+.btn.back { width: 100%; background: #3a4250; font-size: clamp(15px, 4vw, 20px); box-shadow: 0 4px 0 rgba(0,0,0,.35); padding: 10px; }
+
+/* Casella messaggi (log di battaglia) — testo dall'alto, niente scroll.
+   Se il turno non entra, si prosegue con un tap (paginazione via JS). */
+.msgbox {
+  flex: 1;
+  background: rgba(10,12,18,.6);
+  border: 2px solid rgba(255,255,255,.14);
+  border-radius: 14px;
+  padding: 16px 16px 30px;
+  display: flex; flex-direction: column; justify-content: center; gap: 6px;
+  font-size: clamp(16px, 4.4vw, 23px); line-height: 1.32;
+  position: relative;
+  cursor: pointer;
+  overflow: hidden;   /* mai barre di scorrimento */
+}
+.msgbox .log-line { transition: opacity .12s ease; }
+.msgbox .log-line { opacity: .95; }
+.msgbox .log-line.accent { font-weight: 700; }
+.msgbox .cont {
+  position: absolute; right: 16px; bottom: 10px;
+  font-size: clamp(14px, 3vw, 20px); animation: blink 1s steps(1) infinite;
+}
+@keyframes blink { 50% { opacity: 0; } }
+
+/* Indicatore ondata (in alto a sinistra nella scena) */
+#wave-indicator {
+  position: absolute; top: 6px; left: 8px; z-index: 5;
+  background: rgba(10,12,20,.6); color: #fff;
+  padding: 2px 9px; border-radius: 999px;
+  font-size: clamp(11px, 3vw, 14px); font-weight: 700;
+  border: 1px solid rgba(255,255,255,.2);
+}
+
+/* Scelta starter: 3 pulsanti in colonna */
+.starter-grid { flex: 1; display: grid; grid-template-rows: 1fr 1fr 1fr; gap: var(--gap); }
+.starter-btn { width: 100%; }
+.starter-name { font-size: clamp(17px, 5vw, 26px); }
+.starter-types { font-size: clamp(11px, 3vw, 14px); font-weight: 600; opacity: .95; }
+
+/* Premi tra le ondate */
+.reward-name { font-size: clamp(15px, 4.4vw, 22px); }
+.reward-desc { font-size: clamp(10px, 3vw, 14px); font-weight: 600; opacity: .95; }
+.reward-btn { background: #3a6ea5; }
+.reward-btn:nth-child(2) { background: #3aa563; }
+.reward-btn:nth-child(3) { background: #a5713a; }
+.run-score { font-size: clamp(13px, 3.6vw, 17px); opacity: .9; }
+
+/* HUD nel prompt (squadra + ball) */
+.hud { font-size: .82em; opacity: .8; font-weight: 600; }
+
+/* Lista squadra (cambio / cambio forzato) */
+.party-list { flex: 1; display: flex; flex-direction: column; gap: 1.2vh; min-height: 0; }
+.party-row {
+  flex: 1; border: none; border-radius: 10px; text-align: left;
+  background: #2a3038; color: var(--ink); font-family: inherit;
+  padding: 6px 10px; cursor: pointer; display: flex; flex-direction: column; justify-content: center; gap: 3px;
+  box-shadow: 0 2px 0 rgba(0,0,0,.35); min-height: 0;
+}
+.party-row:active { transform: translateY(2px); }
+.party-row.disabled { opacity: .5; cursor: default; }
+.party-top { display: flex; justify-content: space-between; align-items: baseline; }
+.party-name { font-weight: 700; font-size: clamp(13px, 3.8vw, 18px); }
+.party-lv { font-size: clamp(10px, 2.8vw, 13px); opacity: .85; }
+.party-active { color: #7fd0ff; font-weight: 700; margin-left: 4px; }
+.party-ko { color: var(--hp-red); font-weight: 700; margin-left: 4px; }
+.party-hp-track { height: 6px; border-radius: 4px; background: #10131a; overflow: hidden; }
+.party-hp-fill { height: 100%; border-radius: 4px; transition: width .4s ease; }
+.party-hp-text { font-size: clamp(9px, 2.6vw, 12px); text-align: right; opacity: .85; font-variant-numeric: tabular-nums; }
+.box-line { text-align: center; font-size: clamp(11px, 3vw, 14px); opacity: .8; margin-top: 1vh; }
+
+/* Schermata cattura */
+.capture-grid { grid-template-rows: 1fr; }
+.btn.capture-yes { background: #d24b4b; }
+.btn.capture-no  { background: #5a6472; }
+.cap-sub { font-size: clamp(10px, 2.8vw, 13px); font-weight: 600; opacity: .95; margin-top: 3px; }
+
+/* Schermata finale (vittoria/sconfitta) */
+.endbox { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3vh; text-align: center; padding: 10px; }
+.endbox .title { font-size: clamp(28px, 8vw, 44px); font-weight: 800; }
+.endbox .title.win  { color: var(--hp-green); }
+.endbox .title.lose { color: var(--hp-red); }
+.btn.restart { background: #4a72d0; padding: 14px 26px; font-size: clamp(16px, 5vw, 24px); }
+
+/* Titoletto contesto (es. "Cosa deve fare Charizard?") sopra la griglia */
+.prompt-line { text-align: center; font-size: clamp(13px, 3.6vw, 18px); opacity: .85; margin-bottom: var(--gap); }
+
+/* ============================================================================
+   SCHERMATE META (home / gacha / uova) — overlay a schermo intero
+   ========================================================================== */
+#meta[hidden] { display: none; }
+#meta {
+  position: absolute; inset: 0; z-index: 20;
+  background: linear-gradient(#141824, #0c0f18);
+  color: var(--ink);
+  display: flex; flex-direction: column; justify-content: safe center; gap: 1.6vh;
+  padding: 3vh var(--gap);
+  overflow-y: auto;
+}
+/* i contenuti a lista (starter/shop/uova/squadra) hanno un flex:1 che riempie:
+   in quel caso il centraggio non lascia vuoti; le schermate corte (home/ME/
+   risultato) restano invece centrate verticalmente. Larghezza max leggibile. */
+#meta > * { width: 100%; max-width: 460px; margin-inline: auto; }
+.meta-title { text-align: center; font-size: clamp(24px, 7vw, 40px); font-weight: 800; letter-spacing: .5px; }
+.meta-title .accent2 { color: #ff9c54; }
+.meta-sub { text-align: center; font-size: clamp(12px, 3.2vw, 16px); opacity: .8; margin-top: .4vh; }
+.meta-stats { display: flex; justify-content: center; gap: 14px; margin: 2.4vh 0; flex-wrap: wrap; font-size: clamp(13px, 3.6vw, 17px); }
+.meta-stats span { background: rgba(255,255,255,.08); border-radius: 999px; padding: 4px 12px; }
+.meta-actions { display: flex; flex-direction: column; gap: 1.6vh; }
+.meta-btn {
+  border: none; border-radius: 14px; color: #fff; font-family: inherit; font-weight: 700;
+  font-size: clamp(17px, 5vw, 26px); padding: 16px; cursor: pointer;
+  box-shadow: 0 4px 0 rgba(0,0,0,.35), inset 0 2px 6px rgba(255,255,255,.15);
+}
+.meta-btn:active { transform: translateY(3px); }
+.meta-btn.primary { background: #d24b4b; }
+.meta-btn.gacha { background: #7b57c0; }
+.meta-btn.eggs { background: #3aa563; }
+.meta-btn.ghost { background: #3a4250; }
+.meta-btn:disabled { opacity: .45; }
+.meta-btn .sub { display: block; font-size: clamp(11px, 3vw, 14px); font-weight: 600; opacity: .9; margin-top: 3px; }
+
+/* Gacha */
+.gacha-stage { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2vh; text-align: center; }
+.egg-big { font-size: clamp(70px, 22vw, 120px); line-height: 1; filter: drop-shadow(0 6px 10px rgba(0,0,0,.4)); }
+.egg-big.shake { animation: eggshake .5s ease infinite; }
+@keyframes eggshake { 0%,100%{transform:rotate(0)} 25%{transform:rotate(-12deg)} 75%{transform:rotate(12deg)} }
+.gacha-result { font-size: clamp(16px, 4.6vw, 22px); font-weight: 700; }
+
+/* tier colori */
+.tier-COMMON { color: #cfd6e0; } .tier-RARE { color: #6cc1ff; }
+.tier-EPIC { color: #c98cff; } .tier-LEGENDARY { color: #ffcf4a; }
+
+/* Lista uova / sblocchi */
+.egg-list { display: flex; flex-direction: column; gap: 1.2vh; margin: 2vh 0; }
+.egg-row { display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,.06); border-radius: 10px; padding: 8px 12px; }
+.egg-row .ei { font-size: clamp(22px, 6vw, 30px); }
+.egg-row .en { flex: 1; font-weight: 700; font-size: clamp(13px, 3.6vw, 17px); }
+.egg-row .ew { font-size: clamp(11px, 3vw, 14px); opacity: .85; }
+.meta-empty { text-align: center; opacity: .7; margin: 3vh 0; font-size: clamp(13px, 3.6vw, 16px); }
+.unlock-grid { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin: 1.5vh 0; }
+.unlock-chip { background: rgba(255,255,255,.08); border-radius: 8px; padding: 3px 8px; font-size: clamp(10px, 2.8vw, 13px); }
+
+/* Negozio: striscia acquisti sotto le 3 scelte gratuite */
+.shop-strip { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-top: var(--gap); }
+.shop-row {
+  border: none; border-radius: 8px; background: #262c36; color: var(--ink);
+  font-family: inherit; font-size: clamp(10px, 2.8vw, 13px); font-weight: 600;
+  padding: 6px 4px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 2px;
+}
+.shop-row:disabled { opacity: .4; }
+.shop-price { opacity: .8; font-variant-numeric: tabular-nums; }
+.btn.reroll { background: #3a4250; }
+
+/* Barra HP boss: tacche dei segmenti (scudi) */
+.hp-bar-track { position: relative; }
+.seg-mark { position: absolute; top: 0; bottom: 0; width: 2px; background: rgba(10,12,18,.9); }
+
+/* ============================================================================
+   ASSET POKEROGUE — icone tipo/categoria (atlas), oggetti, uova, ball
+   ========================================================================== */
+/* Icona tipo (atlas types.png 32x14 per riga, scala 1.5x) */
+.ticon {
+  display: inline-block; width: 48px; height: 21px;
+  background: url("assets/ui/types.png?v=1") no-repeat;
+  background-size: 48px auto; image-rendering: pixelated;
+  border-radius: 3px;
+}
+.t-BUG{background-position:0 -21px}.t-DARK{background-position:0 -42px}.t-DRAGON{background-position:0 -63px}
+.t-ELECTRIC{background-position:0 -84px}.t-FAIRY{background-position:0 -105px}.t-FIGHTING{background-position:0 -126px}
+.t-FIRE{background-position:0 -147px}.t-FLYING{background-position:0 -168px}.t-GHOST{background-position:0 -189px}
+.t-GRASS{background-position:0 -210px}.t-GROUND{background-position:0 -231px}.t-ICE{background-position:0 -252px}
+.t-NORMAL{background-position:0 -273px}.t-POISON{background-position:0 -294px}.t-PSYCHIC{background-position:0 -315px}
+.t-ROCK{background-position:0 -336px}.t-STEEL{background-position:0 -357px}.t-WATER{background-position:0 -378px}
+
+/* Icona categoria mossa (categories.png 28x11 per colonna, scala 1.5x) */
+.cicon {
+  display: inline-block; width: 42px; height: 16px;
+  background: url("assets/ui/categories.png?v=1") no-repeat;
+  background-size: 126px auto; image-rendering: pixelated;
+}
+.c-PHYSICAL{background-position:0 0}.c-SPECIAL{background-position:-42px 0}.c-STATUS{background-position:-84px 0}
+
+/* Icona oggetto (png singoli, nativi ~24-32px) */
+.item-icon { width: 40px; height: 40px; object-fit: contain; image-rendering: pixelated; }
+.item-icon.small { width: 26px; height: 26px; }
+
+/* Sprite uovo (egg.png frame 0: 28x30) con tinta per tier */
+.egg-sprite {
+  display: inline-block; width: 56px; height: 60px;
+  background: url("assets/ui/egg.png?v=1") no-repeat;
+  background-size: 276px auto; background-position: 0 0;
+  image-rendering: pixelated;
+}
+.egg-sprite.big { width: 112px; height: 120px; background-size: 552px auto; }
+.egg-RARE      { filter: hue-rotate(150deg) saturate(1.5); }
+.egg-EPIC      { filter: hue-rotate(230deg) saturate(1.6); }
+.egg-LEGENDARY { filter: sepia(1) saturate(2.4) hue-rotate(-10deg) brightness(1.05); }
+.egg-sprite.shake { animation: eggshake .5s ease infinite; }
+
+/* Ball icons */
+.ball-icon { width: 30px; height: 30px; object-fit: contain; image-rendering: pixelated; }
+
+/* Negozio a schermo intero (dentro #meta) */
+.shopfull { display: flex; flex-direction: column; justify-content: center; gap: 1.8vh; flex: 1; min-height: 0; }
+.shop-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 1.4vh; }
+.shop-card {
+  border: none; border-radius: 14px; color: #fff; font-family: inherit; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  padding: 12px 8px; box-shadow: 0 4px 0 rgba(0,0,0,.35), inset 0 2px 6px rgba(255,255,255,.15);
+  min-height: 11vh;
+}
+.shop-card:active { transform: translateY(3px); }
+.shop-card:disabled { opacity: .45; }
+.shop-card .rn { font-weight: 800; font-size: clamp(14px, 4vw, 19px); text-align: center; }
+.shop-card .rd { font-size: clamp(10px, 2.9vw, 13px); opacity: .95; text-align: center; }
+.shop-buy-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.shop-buy {
+  border: none; border-radius: 10px; background: #262c36; color: var(--ink); font-family: inherit;
+  display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 8px 4px; cursor: pointer;
+  font-size: clamp(10px, 2.8vw, 13px); font-weight: 600;
+}
+.shop-buy:disabled { opacity: .4; }
+
+/* ============================================================================
+   SELEZIONE STARTER completa, dettaglio, chip, vista squadra, toggle mosse
+   ========================================================================== */
+/* toggle descrizione mosse in lotta */
+.back-row.two { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); }
+.move-btn.desc { justify-content: center; gap: 4px; padding: 8px 10px; }
+.move-desc-name { font-size: clamp(14px, 4vw, 20px); font-weight: 800; }
+.move-desc-text { font-size: clamp(10px, 2.8vw, 13px); line-height: 1.2; opacity: .95; overflow: hidden; }
+
+/* griglia dex starter */
+.starter-dex { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.4vh; margin: 2vh 0; overflow-y: auto; flex: 1; align-content: start; }
+.starter-cell {
+  border: 2px solid #555; border-radius: 12px; background: rgba(255,255,255,.06);
+  color: var(--ink); font-family: inherit; cursor: pointer; position: relative;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 2px; padding: 8px 4px 6px; min-height: 11vh;
+}
+.starter-cell:active { transform: translateY(2px); }
+.sc-icon { display: block; }
+.sc-name { font-size: clamp(11px, 3vw, 14px); font-weight: 700; }
+.sb-shiny, .sb-ribbon, .sb-pkrs { position: absolute; top: 4px; font-size: 13px; }
+.sb-shiny { right: 5px; } .sb-ribbon { right: 22px; } .sb-pkrs { left: 5px; }
+
+/* dettaglio starter */
+.sd-head { display: flex; gap: 14px; align-items: center; margin: 1.5vh 0; }
+.sd-sprite { flex: 0 0 auto; }
+.sd-info { flex: 1; min-width: 0; }
+.sd-name { font-size: clamp(18px, 5vw, 26px); font-weight: 800; }
+.sd-types { display: flex; gap: 5px; margin: 5px 0; }
+.sd-abrow { font-size: clamp(11px, 3vw, 14px); opacity: .9; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.chip {
+  border: none; border-radius: 999px; background: rgba(255,255,255,.12); color: var(--ink);
+  font-family: inherit; font-size: clamp(11px, 3vw, 14px); font-weight: 600; padding: 4px 10px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.chip.on { background: #4a72d0; color: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,.3) inset; }
+.sd-stats { display: flex; flex-direction: column; gap: 5px; margin: 1.5vh 0; }
+.stat-row { display: flex; align-items: center; gap: 8px; font-size: clamp(11px, 3vw, 14px); }
+.stat-lab { width: 42px; opacity: .85; }
+.stat-track { flex: 1; height: 9px; background: #10131a; border-radius: 5px; overflow: hidden; }
+.stat-fill { height: 100%; background: linear-gradient(90deg, #6fd36f, #f2c94c, #eb5757); border-radius: 5px; }
+.stat-val { width: 30px; text-align: right; font-variant-numeric: tabular-nums; opacity: .9; }
+.move-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 1vh 0 2vh; overflow-y: auto; }
+.move-chip { font-size: clamp(10px, 2.8vw, 13px); }
+.meta-actions.two-col { display: grid; grid-template-columns: 1fr 1.4fr; gap: 10px; }
+
+/* vista squadra a schermo intero (dal negozio) */
+.pd-list { display: flex; flex-direction: column; gap: 1.1vh; margin: 1.5vh 0; overflow-y: auto; flex: 1; }
+.pd-card { background: rgba(255,255,255,.06); border-radius: 12px; padding: 8px 12px; }
+.pd-card.ko { opacity: .5; }
+.pd-top { display: flex; justify-content: space-between; align-items: baseline; }
+.pd-name { font-weight: 800; font-size: clamp(13px, 3.8vw, 18px); }
+.pd-lv { font-size: clamp(11px, 3vw, 14px); opacity: .85; }
+.pd-types { display: flex; align-items: center; gap: 5px; margin: 4px 0; flex-wrap: wrap; }
+.pd-ab { font-size: clamp(10px, 2.8vw, 13px); opacity: .85; font-style: italic; }
+.pd-held { font-size: clamp(10px, 2.6vw, 12px); opacity: .8; }
+.pd-hp { font-size: clamp(11px, 3vw, 13px); margin-top: 3px; opacity: .9; }
+.pd-moves { opacity: .8; }
+
+/* header negozio con tasto squadra */
+.shop-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.team-btn { border: none; border-radius: 10px; background: #3aa563; color: #fff; font-family: inherit; font-weight: 700; font-size: clamp(12px, 3.2vw, 15px); padding: 8px 14px; cursor: pointer; white-space: nowrap; }
+.team-btn:active { transform: translateY(2px); }
+
+/* Ritratto allenatore nella scena (durante l'intro allenatore/rivale) */
+#trainer-portrait[hidden] { display: none; }
+/* Ritratto allenatore: in alto a destra, al posto del Pokémon nemico */
+#trainer-portrait {
+  position: absolute; right: 6%; top: 8%; z-index: 4;
+  image-rendering: pixelated;
+  animation: trainerIn .35s ease;
+}
+@keyframes trainerIn { from { transform: translateX(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* Vassoio poké ball dell'allenatore (in alto a sinistra): mostra la sua squadra,
+   piene = ancora da battere, spente = sconfitte, cerchio = in campo */
+#trainer-balls[hidden] { display: none; }
+#trainer-balls {
+  position: absolute; left: 8px; top: 30px; z-index: 5;
+  display: flex; gap: 4px; background: rgba(10,12,20,.5);
+  padding: 4px 7px; border-radius: 999px; border: 1px solid rgba(255,255,255,.15);
+}
+#trainer-balls .tb {
+  width: 18px; height: 18px; object-fit: contain; image-rendering: pixelated;
+}
+#trainer-balls .tb.down { filter: grayscale(1) brightness(.5); opacity: .6; }
+#trainer-balls .tb.active { box-shadow: 0 0 0 2px #ffe066, 0 0 6px #ffe066; border-radius: 50%; }
+
+/* Mystery encounter */
+.me-emoji { text-align: center; font-size: clamp(56px, 18vw, 96px); line-height: 1.1; margin: 1vh 0; filter: drop-shadow(0 4px 8px rgba(0,0,0,.4)); }
+.me-text { text-align: center; font-size: clamp(13px, 3.8vw, 18px); line-height: 1.4; opacity: .92; padding: 0 2vw; }
+.me-opts { display: flex; flex-direction: column; gap: 1.4vh; }
+.me-opt {
+  border: none; border-radius: 14px; background: #3a4658; color: var(--ink); font-family: inherit;
+  padding: 14px; cursor: pointer; text-align: center; display: flex; flex-direction: column; gap: 3px;
+  box-shadow: 0 4px 0 rgba(0,0,0,.3);
+}
+.me-opt:active { transform: translateY(3px); }
+.me-opt-l { font-weight: 700; font-size: clamp(15px, 4.2vw, 20px); }
+.me-opt-s { font-size: clamp(11px, 3vw, 14px); opacity: .85; }
+
+/* ============================================================================
+   IDLE ANIMATION + EFFETTI MOSSE + SPRITE NPC
+   ========================================================================== */
+/* respiro/oscillazione idle sul wrapper (non tocca hit/faint della .sprite) */
+.idle { display: inline-block; }
+.idle-ally  { animation: idleBob 2.6s ease-in-out infinite; transform-origin: bottom center; }
+.idle-enemy { animation: idleBob 3.0s ease-in-out infinite .3s; transform-origin: bottom center; }
+@keyframes idleBob {
+  0%,100% { transform: translateY(0) scaleY(1); }
+  50%     { transform: translateY(-4px) scaleY(1.02); }
+}
+
+/* Simbolo del sesso accanto al nome: azzurro ♂, rosa ♀ */
+.gen { font-weight: 700; margin-left: 2px; }
+.gen.g-MALE   { color: #6fb6f0; }
+.gen.g-FEMALE { color: #f08fc0; }
+
+/* Barretta PS nella scelta del bersaglio (lotte in doppio) */
+.tgt-hp { display: inline-block; width: 46px; height: 5px; border-radius: 3px;
+  background: rgba(0,0,0,.45); overflow: hidden; vertical-align: middle; }
+.tgt-hp span { display: block; height: 100%; }
+
+/* Barra degli oggetti tenuti (come la ModifierBar di PokeRogue):
+   alleato in basso a sinistra, avversario in alto a destra. */
+.held-bar {
+  position: absolute; display: flex; flex-wrap: wrap; gap: 2px;
+  max-width: 42%; pointer-events: none; z-index: 6;
+}
+.held-bar { left: 4px; bottom: 4px; align-content: flex-end; }
+/* ⚠️ `bottom: auto` serve davvero: la regola base qui sopra mette `bottom: 4px`
+   e questa aggiungeva solo `top`, quindi la barra del nemico si stirava per
+   TUTTA l'altezza della scena (541px). Con `flex-wrap` la seconda riga di
+   icone finiva a meta' schermo, in mezzo ai Pokemon. */
+.held-bar.enemy {
+  left: auto; right: 4px; top: 4px; bottom: auto;
+  justify-content: flex-end; align-content: flex-start;
+}
+.held-bar .hi {
+  position: relative;
+  width: 20px; height: 20px;
+  image-rendering: pixelated;
+  background-size: contain; background-repeat: no-repeat; background-position: center;
+  filter: drop-shadow(0 1px 1px rgba(0,0,0,.55));
+}
+.held-bar .hi span {
+  position: absolute; right: -2px; bottom: -3px;
+  font-size: 9px; font-weight: 700; color: #fff;
+  text-shadow: 0 0 3px #000, 0 0 3px #000;
+}
+
+/* Natura nel dettaglio squadra: si distingue dalle abilità */
+.pd-ab.pd-nat { background: rgba(200, 150, 60, .22); color: #e8c078; }
+
+/* Canvas delle animazioni delle mosse: copre la scena, sopra i combattenti.
+   I frame veri di PokeRogue vengono disegnati qui (griglia 96x96). */
+/* ⚠️ Le animazioni delle mosse vanno SOPRA lo sfondo ma SOTTO i combattenti:
+   a z-index 7 coprivano tutta la scena, Pokemon compresi, e certe mosse
+   nascondevano l'intera schermata. Ordine della scena, dal basso in alto:
+     #arena/sfondo (0) < #anim-canvas (3) < .battler-slot (4) <
+     riquadri PS (5) < oggetti tenuti (6) < overlay #meta (20) */
+#anim-canvas {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+  z-index: 3;
+}
+
+/* flash colorato sullo sprite quando viene colpito */
+.sprite.fx-flash { animation: fxFlash .35s ease; }
+@keyframes fxFlash {
+  0% { filter: brightness(2.2) drop-shadow(0 0 8px var(--fxc, #fff)); }
+  100% { filter: none; }
+}
+
+/* particelle dell'effetto mossa (sopra la scena) */
+.fx-particle {
+  position: absolute; z-index: 6; pointer-events: none;
+  font-size: 16px; transform: translate(-50%, -50%);
+  animation: fxBurst .6s ease-out forwards;
+  text-shadow: 0 0 6px currentColor;
+}
+@keyframes fxBurst {
+  0%   { opacity: 0; transform: translate(-50%,-50%) scale(.3); }
+  25%  { opacity: 1; }
+  100% { opacity: 0; transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(1.1); }
+}
+
+/* sprite NPC nei mystery encounter */
+.me-npc {
+  display: block; margin: 0 auto 1vh; image-rendering: pixelated;
+  filter: drop-shadow(0 5px 8px rgba(0,0,0,.5));
+  animation: trainerIn .35s ease;
+}
+
+/* Tasti nell'header del negozio (Evolvi + Squadra) */
+.shop-head-btns { display: flex; gap: 6px; flex-shrink: 0; }
+.team-btn.evolve-btn { background: #c9822e; }
+
+/* Pulsante Megaevoluzione / Gigamax in battaglia */
+.btn.transform-btn {
+  width: 100%; padding: 11px;
+  font-size: clamp(14px, 4vw, 19px); font-weight: 800; letter-spacing: .5px;
+  background: linear-gradient(90deg, #7b57c0, #c94ad0, #ff9c54);
+  background-size: 200% 100%;
+  animation: tfGlow 2.2s ease-in-out infinite;
+  box-shadow: 0 4px 0 rgba(0,0,0,.35), 0 0 14px rgba(201,74,208,.5);
+}
+@keyframes tfGlow { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+
+/* ============================================================================
+   MINI ICONE + SISTEMA A PUNTI STARTER
+   ========================================================================== */
+.mini-icon { display: inline-block; vertical-align: middle; margin-right: 4px; flex: 0 0 auto; }
+
+/* barra del budget punti */
+.budget-bar {
+  display: flex; justify-content: space-between; align-items: center;
+  background: rgba(255,255,255,.07); border-radius: 999px;
+  padding: 6px 14px; font-size: clamp(12px, 3.4vw, 16px);
+}
+.budget-bar b { color: #ffcf4a; }
+.budget-left { opacity: .8; font-size: .9em; }
+
+/* squadra in composizione */
+.starter-team { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; min-height: 5vh; align-items: center; }
+.team-slot {
+  border: 2px solid #4a72d0; border-radius: 10px; background: rgba(74,114,208,.18);
+  color: var(--ink); font-family: inherit; font-size: clamp(10px, 2.8vw, 13px); font-weight: 700;
+  padding: 4px 8px; cursor: pointer; display: flex; align-items: center; gap: 3px;
+}
+.team-slot .ts-cost { background: #4a72d0; border-radius: 999px; padding: 0 5px; font-size: .9em; }
+
+/* celle starter: scelto / troppo caro */
+.starter-cell.chosen { border-width: 3px; background: rgba(74,114,208,.25); box-shadow: 0 0 0 2px rgba(255,255,255,.25) inset; }
+.starter-cell.tooexp { opacity: .38; }
+
+/* I TRE STATI del dex, come nell'originale (starter-select-ui-handler):
+   sbloccato → a colori · visto → grigio (setTint 0x808080) · mai visto →
+   sagoma nera (setTint 0). Le celle bloccate non sono bottoni: non si toccano. */
+.starter-cell.visto, .starter-cell.ignoto {
+  cursor: default; border-color: #3a4150; background: rgba(255,255,255,.03);
+}
+.starter-cell.ignoto .mini-icon { filter: brightness(0); opacity: .55; }
+.starter-cell.visto  .mini-icon { filter: grayscale(1) brightness(.62); }
+.starter-cell.visto .sc-name, .starter-cell.ignoto .sc-name {
+  font-size: clamp(9px, 2.5vw, 12px); font-weight: 600; opacity: .5; letter-spacing: .3px;
+}
+
+/* barra dei filtri: generazione, tipo, stato, ordinamento e ricerca per nome */
+.filter-bar {
+  display: flex; flex-wrap: wrap; gap: 5px; margin: .6vh 0 0;
+}
+.filter-sel, .filter-q {
+  flex: 1 1 30%; min-width: 0;
+  background: rgba(255,255,255,.08); color: var(--ink);
+  border: 1px solid rgba(255,255,255,.18); border-radius: 8px;
+  padding: 5px 7px; font-family: inherit; font-size: clamp(11px, 3vw, 14px);
+}
+.filter-q { flex-basis: 100%; }
+.filter-sel option { background: #232a36; color: #fff; }
+
+.sc-cost { font-size: 8px; letter-spacing: -1px; color: #ffcf4a; line-height: 1; }
+
+/* passiva nel dettaglio e nella squadra */
+.sd-passive { font-size: clamp(10px, 2.8vw, 13px); opacity: .9; margin-top: 3px; }
+.sd-passive b { color: #9fd0ff; }
+.pd-ab.pd-pass { color: #9fd0ff; }
+
+/* Caramelle nel dettaglio starter + badge nella griglia */
+.sd-candy { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-top: 4px; font-size: clamp(10px, 2.8vw, 13px); }
+.candy-btn { font-size: clamp(9px, 2.5vw, 12px); background: rgba(255,207,74,.2); }
+.candy-btn:disabled { opacity: .4; cursor: default; }
+.sc-candy { position: absolute; bottom: 3px; right: 4px; font-size: 8px; opacity: .9; }
+
+/* Pulsanti lancio ball in battaglia */
+.btn.ball-btn { background: #3f7fbf; gap: 2px; padding: 6px; }
+.btn.ball-btn:disabled { filter: grayscale(1); }
+.btn.ball-btn .ball-icon { width: 26px; height: 26px; }
+
+/* Pedane con l'arte reale del bioma (sostituiscono l'ovale sfumato) */
+/* con l'arte reale: via il colore di fondo (altrimenti si vede un rettangolo) */
+.platform.has-art {
+  border-radius: 0; filter: none; background-color: transparent;
+  bottom: -12px;
+}
+.enemy .platform.has-art { bottom: -10px; }
+
+/* Livello ARENA: l'arte reale del bioma come fascia di terreno in basso.
+   L'arte è 320x180 (16:9): riempiendo una fascia si evita lo zoom estremo
+   che si avrebbe con "cover" su uno schermo verticale. */
+#arena {
+  position: absolute; inset: 0;
+  background-repeat: no-repeat;
+  /* Aspetto NATURALE (16:9) ancorato in basso: nessuna distorsione.
+     Sopra resta il cielo del bioma.
+     ⚠️ Qui c'era `background-size: 100% 100%`, che fa l'ESATTO CONTRARIO di
+     quello che il commento prometteva: l'arte del bioma e' 320x180 e la scena
+     in verticale e' 393x590, quindi veniva stirata più di tre volte in altezza
+     e il terreno si leggeva a bande orizzontali. `100% auto` la tiene in
+     proporzione e la appoggia al bordo basso. */
+  background-size: cover;
+  background-position: center bottom;
+  image-rendering: pixelated;
+  opacity: 0;
+  transition: opacity .25s ease;
+  pointer-events: none;
+
+}
+#arena.on { opacity: 1; }
+
+/* Azzeramento totale: rosso, e volutamente l'ultimo della lista */
+.meta-btn.danger { background: linear-gradient(#8c2f2f, #6d2222); }
+.reset-box {
+  background: rgba(255,90,90,.09); border: 1px solid rgba(255,120,120,.3);
+  border-radius: 12px; padding: 10px 14px; margin: 1.4vh 0;
+  display: flex; flex-direction: column; gap: 5px;
+}
+.reset-row { display: flex; gap: 10px; align-items: baseline; font-size: clamp(12px, 3.3vw, 15px); }
+.reset-row span:first-child { width: 1.4em; flex: 0 0 auto; }
+
+/* ---- BOSS FINALI: versioni Ombra ed effetti permanenti ------------------
+   Le versioni "Ombra" (Lugia, Ho-Oh) non esistono nei dati di PokéRogue —
+   vengono da Pokémon XD, uno spin-off — quindi si ricolora lo sprite normale.
+   ⚠️ `hue-rotate` da solo NON basta: su Lugia (bianco/azzurro) vira al VERDE
+   e su Ho-Oh dà un viola da pagliaccio. Bisogna prima appiattire in scala di
+   grigi e poi ricolorare, così la tinta finale non dipende dai colori di
+   partenza. Provato sui due sprite veri prima di scegliere questi valori. */
+.sprite.ombra {
+  filter: grayscale(1) sepia(1) hue-rotate(245deg) saturate(6) brightness(.4) contrast(1.2)
+          drop-shadow(0 0 6px rgba(120, 60, 200, .75));
+}
+/* Arceus Perfetto: pioggia di stelline attorno allo sprite. Sono due strati di
+   gradienti radiali che ruotano e pulsano: nessuna immagine da caricare. */
+.sprite.stelle { position: relative; filter: drop-shadow(0 0 7px rgba(255, 240, 170, .8)); }
+.sprite.stelle::before, .sprite.stelle::after {
+  content: ""; position: absolute; inset: -22%;
+  pointer-events: none; border-radius: 50%;
+  background:
+    radial-gradient(circle at 12% 22%, #fff 0 1.5px, transparent 2px),
+    radial-gradient(circle at 82% 14%, #ffe9a8 0 2px, transparent 2.5px),
+    radial-gradient(circle at 26% 84%, #fff 0 1.5px, transparent 2px),
+    radial-gradient(circle at 92% 70%, #fff2c4 0 1.5px, transparent 2px),
+    radial-gradient(circle at 58% 4%, #fff 0 1.5px, transparent 2px),
+    radial-gradient(circle at 4% 56%, #ffe9a8 0 2px, transparent 2.5px);
+  animation: stelline 3.2s linear infinite;
+}
+.sprite.stelle::after { animation-duration: 4.6s; animation-direction: reverse; opacity: .75; }
+@keyframes stelline {
+  0%   { transform: rotate(0deg)   scale(1);    opacity: .35; }
+  50%  { transform: rotate(180deg) scale(1.07); opacity: 1; }
+  100% { transform: rotate(360deg) scale(1);    opacity: .35; }
+}
+
+/* ============================================================================
+   PREMIO GIF (easter egg) — §25
+   Due soli pezzi di interfaccia: la barra di caricamento sul bordo basso della
+   scena e l'overlay a schermo intero con la GIF di vittoria.
+   ⚠️ Le due regole `[hidden]` qui sotto servono davvero: `display` dichiarato
+   in una regola di ID/classe BATTE `[hidden]{display:none}` dello user-agent
+   (stessa trappola di `.battler-slot[hidden]`, §19). Senza, gli elementi
+   restano disegnati anche da nascosti.
+   ========================================================================== */
+#gif-load[hidden], #gif-prize[hidden] { display: none; }
+
+/* Barra di caricamento: sottile, sul bordo BASSO della scena.
+   ⚠️ z-index 30, cioe' SOPRA le schermate meta (20): lo zip si sceglie dalla
+   Home, che e' una schermata meta, quindi con un valore piu' basso la barra
+   resterebbe nascosta proprio mentre carica. #top-screen non crea un contesto
+   di impilamento (niente z-index), percio' il confronto col 20 di #meta
+   funziona davvero. */
+#gif-load {
+  position: absolute; left: 0; right: 0; bottom: 0; top: auto;
+  height: 4px; z-index: 30;
+  background: rgba(0, 0, 0, .35);
+  pointer-events: none;               /* non ruba mai un tocco alla scena */
+}
+#gif-load i {
+  display: block; height: 100%; width: 0;
+  background: linear-gradient(90deg, #ff9c54, #ffd479);
+  box-shadow: 0 0 6px rgba(255, 156, 84, .9);
+  transition: width .25s linear;
+}
+/* Zip illeggibile o senza immagini: la barra diventa rossa e sparisce da sola.
+   E' l'unico modo che ha l'easter egg di dire "non ha funzionato", visto che
+   non deve mostrare nessun messaggio. */
+#gif-load.errore i { background: #ff5252; box-shadow: 0 0 6px rgba(255, 82, 82, .9); width: 100%; }
+
+/* La GIF: copre TUTTA la cornice del gioco, sopra qualsiasi altra schermata. */
+#gif-prize {
+  position: absolute; inset: 0; z-index: 60;
+  display: flex; align-items: center; justify-content: center;
+  background: #000;
+  animation: gifEntra .28s ease-out;
+}
+/* "Dimensioni ottimizzate": la GIF riempie il piu' possibile senza deformarsi
+   ne' sbordare, qualunque sia il suo formato (verticale, quadrato, panoramico).
+   ⚠️ Serve `width/height: 100%` + `object-fit: contain`, NON `max-width`: le GIF
+   sono piccole (250x169 quella di prova) e con i soli `max-*` restavano a
+   grandezza naturale in mezzo a uno schermo nero. */
+#gif-prize img {
+  width: 100%; height: 100%;
+  object-fit: contain;
+  image-rendering: auto;   /* ingrandite: meglio sfumate che a scaletta */
+}
+@keyframes gifEntra { from { opacity: 0; } to { opacity: 1; } }
+
+/* ============================================================================
+   SALVATAGGI — schermata dei 3 slot (§26)
+   ========================================================================== */
+.slot-list { display: flex; flex-direction: column; gap: 1.4vh; margin: 2vh 0; }
+.slot-card {
+  width: 100%; text-align: left;
+  background: rgba(255, 255, 255, .07);
+  border: 2px solid rgba(255, 255, 255, .14);
+  border-radius: 14px; padding: 10px 14px;
+  color: var(--ink); font: inherit; cursor: pointer;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.slot-card.pieno { border-color: #ff9c54; background: rgba(255, 156, 84, .12); }
+.slot-card.rotto { border-color: #ff5252; opacity: .8; }
+.slot-card:active { transform: scale(.985); }
+.slot-n { font-size: clamp(14px, 4vw, 18px); font-weight: 700; }
+.slot-info { font-size: clamp(11px, 3vw, 14px); opacity: .8; }
+/* Mini-icone della squadra salvata. `image-rendering: pixelated` perche' sono
+   ritagli di atlas a bassa risoluzione, come nel resto del gioco. */
+.slot-team { display: flex; flex-wrap: wrap; gap: 2px; align-items: center; min-height: 26px; }
+.slot-team .mini { display: inline-block; background-repeat: no-repeat; image-rendering: pixelated; }
+.slot-team.big { justify-content: center; margin: 1.5vh 0; }
