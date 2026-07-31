@@ -1454,7 +1454,7 @@ nuove che **sovrascrivono l'handoff**, compresa la regola «niente file picker»
    dall'altro) aprono il **selettore di file del telefono**.
 2. Si sceglie un **file `.zip` pieno di GIF**.
 3. Lo zip si scompatta **in sottofondo**, una voce alla volta: si continua a giocare, e
-   l'unica cosa visibile è una **barra di caricamento sul bordo basso della scena**.
+   l'unica cosa visibile è una **barra di caricamento sul bordo basso dello SCHERMO**.
 4. Battuto un **allenatore**, compare **a schermo intero** una GIF **estratta a caso fra
    quelle già pronte e non ancora usate**.
 5. Dura **tanti secondi quanta è l'ondata** (ondata 15 → 15 secondi). Poi la partita
@@ -1470,7 +1470,7 @@ nuove che **sovrascrivono l'handoff**, compresa la regola «niente file picker»
 | Scelta e visione | `gifPesca()` / `gifMostra(secondi, poi)` |
 | Triplo tocco | `gifTocco()`, agganciato in `showHome()` |
 | Aggancio alla vittoria | `onWaveCleared()` — vedi sotto |
-| HTML | `#gif-load` (dentro `#scene`), `#gif-prize`, `<input id="gif-zip">` |
+| HTML | `#gif-load` (figlia di `#game`), `#gif-prize`, `<input id="gif-zip">` |
 | CSS | blocco «PREMIO GIF» in fondo a `pokerogue.css` |
 
 **`onWaveCleared()` è stata spezzata in due.** Adesso è solo il guardiano del premio GIF;
@@ -1523,6 +1523,10 @@ diversi da 0 e 8 — entrambi danno barra rossa e nient'altro.
 - **La barra deve stare SOPRA `#meta` (z-index 30, non 8).** Lo zip si sceglie dalla Home,
   che è una schermata meta a z-index 20: con un valore più basso la barra resta nascosta
   proprio mentre carica. Funziona perché `#top-screen` non crea un contesto di impilamento.
+- ⚠️ **Correzione dal telefono (2026-07-31)**: stava dentro `#scene`, quindi si appoggiava al
+  bordo basso del CAMPO DI LOTTA — a metà altezza del telefono, sul confine coi comandi.
+  Ora è figlia di `#game` e `position: fixed`, cioè sul bordo basso dello schermo. Regge
+  perché nessun antenato ha `transform`/`filter`, che degraderebbero `fixed` ad `absolute`.
 
 ### Come si prova (il selettore di file NON si guida da script)
 
