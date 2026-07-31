@@ -23,15 +23,15 @@ pedane di END e ordine di sovrapposizione (§23) · Regigigas (§24) ·
 **GIF di vittoria da uno zip scelto dall'utente (§25)** ·
 **3 slot di salvataggio (§26)** · **giro di collaudo con tre difetti veri corretti (§27)**.
 
-**Restano aperte 2 cose**, in ordine di valore:
-1. **Fase 9 — l'APK** (§6.6). Mai iniziata, ed è l'unica che cambia *come ci si gioca*.
-   Gli asset pesano **128 MB reali**: è la voce con più incognite, va provata presto.
-   ⚠️ Per misurare usa `du -sb --apparent-size assets` — `du -sh` dice ~158 MB perché conta
-   i blocchi e i file sono 13.000 e piccoli.
-   ⚠️ L'APK deve reggere l'`<input type="file">` del §25: Capacitor lo gestisce
-   (`BridgeWebChromeClient.onShowFileChooser`), ma **va provato sul telefono**.
-2. **Fusioni** (DNA Splicers) — accantonate dal proprietario, non farle senza chiedere.
-   Restano anche i `BattlerTagType` più esotici e la Terastallizzazione (esclusa da lui).
+**Fase 9 FATTA (§28)**: il gioco è online su
+<https://fithzhood.github.io/pokerogue-mobile/pokerogue.html>, l'APK contiene tutti gli
+asset e **si aggiorna da solo dalla rete** senza reinstallazioni.
+🔴 **Per pubblicare una modifica c'è UN SOLO comando**: `node tools/pubblica.mjs "…"`.
+Farlo a mano dimenticando il manifesto = l'aggiornamento non arriva mai sul telefono.
+
+**Resta aperta 1 cosa**:
+- **Fusioni** (DNA Splicers) — accantonate dal proprietario, non farle senza chiedere.
+  Restano anche i `BattlerTagType` più esotici e la Terastallizzazione (esclusa da lui).
 
 ### Le tre trappole che mi hanno morso più volte
 
@@ -1723,3 +1723,131 @@ Run guidata **dall'ondata 1 alla 200 con vittoria** (🏆 CAMPIONE), passando pe
 capipalestra, Superquattro, Campione, boss finale, lotte in doppio, incontri misteriosi,
 furti, negozio e cambi di bioma: **0 errori console**, 37 GIF di vittoria mostrate, lo slot
 liberato a fine partita.
+
+---
+
+## 28. L'APK e l'aggiornamento a caldo (2026-07-31) — Fase 9
+
+Richiesta del proprietario: **«se facciamo delle modifiche al gioco quelle devono arrivare
+sul cellulare senza ricreare l'APK e reinstallarlo»**. E, nella stessa occasione, ha
+**revocato la regola «offline totale»**: riguardava solo l'assenza di login e password, non
+il divieto di usare la rete. Le regole del §7 vanno lette con questa correzione.
+
+### Com'e' fatto
+
+Il gioco e' spezzato in due, e i due pezzi viaggiano per strade diverse:
+
+| Pezzo | Dove sta | Come si aggiorna |
+|---|---|---|
+| **Asset** — sprite, animazioni, arene, icone (135 MiB, 14.700 file) | dentro l'APK | serve un **APK nuovo** |
+| **Cervello** — `pokerogue-app.html` + `.css` + `.js` + `data/*.json` (2,3 MB) | dentro l'APK **e** su GitHub Pages | **da solo, dalla rete** |
+| **Guscio** — `pokerogue.html` + `pokerogue-boot.js` | dentro l'APK | serve un **APK nuovo** (voluto: e' lui che decide cosa caricare) |
+
+Il perche' di questa divisione: dei 142 MB, **126,7 sono sprite** che ormai non cambiano
+piu' (il dex e' completo). Quello che tocchiamo davvero a ogni sessione sta in meno di
+2,3 MB, e una modifica tipica al solo motore muove **~400 KB**.
+
+### Il giro completo
+
+1. All'avvio `pokerogue-boot.js` guarda in IndexedDB se c'e' uno strato scaricato valido.
+   Se c'e' lo usa, altrimenti usa i file dell'APK. **Il gioco parte comunque**, anche senza
+   rete.
+2. Passati 4 secondi — a gioco gia' avviato — se c'e' rete scarica `versione.json` dal sito.
+   Se la revisione e' piu' alta, prende i file cambiati in sottofondo.
+3. **L'aggiornamento si applica al riavvio successivo**, mai a meta' partita.
+
+I file sono salvati con **chiave = impronta del contenuto**, e il manifesto si scrive per
+**ultimo**: se lo scarico si interrompe non resta mai uno strato a meta', e i file non
+cambiati non si riscaricano (provato: una modifica al solo `pokerogue.js` scarica **1 file
+su 15**).
+
+### 🔴 Il cane da guardia — la parte che conta davvero
+
+Un push sbagliato non deve poter lasciare il telefono con un gioco che non si apre.
+
+- Prima di avviare uno strato di rete si scrive la sua revisione in `pokerogue_ota_try`.
+- Il gioco, quando e' davvero su, chiama `PR.avvioRiuscito()` che la cancella
+  (ultima riga di `boot()` in `pokerogue.js`).
+- Se all'avvio dopo quella sentinella c'e' ancora, quella revisione **non era partita**:
+  finisce in `pokerogue_ota_bad`, lo strato viene buttato e si torna a quello dell'APK.
+  Non verra' nemmeno riscaricata.
+
+⚠️ **Il primo tentativo era sbagliato e l'ho scoperto solo provandolo davvero.**
+`avvioRiuscito()` cancellava la sentinella **sempre**, anche quando il gioco era partito
+dalla copia dell'APK dopo un fallimento. Risultato: la revisione guasta non veniva mai
+bocciata e si ritentava al riavvio dopo — il telefono avrebbe **oscillato fra "si apre" e
+"schermo nero"** all'infinito. Ora la sentinella la cancella solo chi l'ha scritta
+(`revInProva`), e chi fallisce entra nella lista dei bocciati.
+
+Sequenza verificata per intero, in browser, con un finto sito remoto:
+rev 1 (APK) → **rev 2 buona, applicata** → **rev 4 con errore di sintassi**: primo avvio
+schermo nero, secondo avvio la butta e riparte dall'APK → **rev 5 buona, applicata**.
+Cioe': un push sbagliato costa **un avvio**, si ripara da solo, e non blocca i push
+successivi.
+
+### Come si pubblica una modifica — UN SOLO COMANDO
+
+```bash
+node tools/pubblica.mjs "cosa ho cambiato"
+node tools/pubblica.mjs "nuovi sprite" --assets
+```
+
+Fa manifesto → copia nel repo → commit → push, in quest'ordine.
+🔴 **Non fare i passaggi a mano**: saltare `make-manifest.mjs` significa che il telefono
+**non si accorge di niente** e l'aggiornamento non arriva mai. E' l'errore piu' facile da
+fare e il piu' difficile da diagnosticare.
+
+`--assets` alza `assetsRev` e serve quando si toccano sprite/animazioni/arene: quella roba
+sta solo nell'APK, quindi va rifatto il pacchetto.
+
+### Il progetto Android
+
+`C:\Users\lfili\CapacitorApps\pokerogue-mobile` (fuori da OneDrive, come da pipeline).
+
+⚠️ **Qui si diverge dalla pipeline abituale del proprietario**, che fa APK con
+`server.url` puntato a Pages (guscio vuoto che scarica tutto). Qui **no**: `capacitor.config.json`
+non ha `server`, e `webDir: "www"` contiene tutto il gioco. Serve perche' il gioco deve
+partire e funzionare anche senza campo.
+
+- **Schermo intero vero** (richiesta esplicita: niente barre ne' sopra ne' sotto):
+  `MainActivity.java` usa `WindowInsetsControllerCompat.hide(systemBars())` con
+  `BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE`, piu' `LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES`
+  per arrivare sotto il foro della fotocamera. ⚠️ Va rimesso in
+  `onWindowFocusChanged`: dopo una notifica o una strisciata le barre tornerebbero.
+- `android:screenOrientation="portrait"` nel manifesto, solo permesso INTERNET.
+- **`www/index.html` e' un trampolino di due righe** verso `pokerogue.html`: Capacitor apre
+  `index.html` e basta. La regola «mai index.html» riguarda il SITO, dove convivono piu'
+  app; dentro l'APK c'e' solo questo gioco e i suoi file tengono i loro nomi.
+- Icona: da `pokerogue.jpeg` (554×554, ball su bianco) via `tools/`… no, via lo script in
+  `icone/` — bianco tolto con riempimento dai bordi **piu' un'erosione di 2 px**, altrimenti
+  la compressione JPEG lascia un alone chiaro che su fondo scuro si vede benissimo.
+  Applicata anche la correzione nota della pipeline: l'inset del 16,7% va tolto dal solo
+  `<background>` in `ic_launcher.xml`, e `capacitor-assets` lo riscrive a ogni run.
+
+### Trappole trovate montando tutto questo
+
+- 🔴 **`DOMContentLoaded` non scatta piu'.** Il guscio inserisce `pokerogue.js` **dopo** che
+  l'evento e' gia' passato, quindi `boot()` non partiva e restava la schermata di
+  caricamento. Ora: `if (document.readyState === "loading") …addEventListener… else boot()`.
+- Le animazioni (`data/anims/`, 913 file, 4,7 MB) sono state **escluse dal manifesto**:
+  non passano da `loadJson` ma da `prefetchAnim`, che le legge dall'APK. Metterle dentro
+  voleva dire far scaricare 7 MB per non usarli. Contano come asset.
+- Il browser normale **non** usa niente di tutto questo: i file del sito sono gia' gli
+  ultimi. L'aggiornatore si accende solo in app, o con `?ota` per provarlo.
+
+### Agganci di debug
+
+```js
+__ota.stato()      // cosa sta usando, cosa e' pronta, quali revisioni ha bocciato
+__ota.controlla()  // forza il controllo adesso, senza aspettare i 4 secondi
+__ota.azzera()     // butta lo strato scaricato e la lista dei bocciati
+__ota.remoto()     // il versione.json del sito
+```
+
+E per provare tutto il giro da PC, senza aspettare che Pages ripubblichi:
+`pokerogue.html?ota&remoto=http://localhost:5514/una-cartella-finta/`
+
+### Indirizzi
+
+- Repo: <https://github.com/fithzhood/pokerogue-mobile> (pubblico)
+- Sito: <https://fithzhood.github.io/pokerogue-mobile/pokerogue.html>
