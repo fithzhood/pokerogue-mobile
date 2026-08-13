@@ -943,7 +943,9 @@
     const def = (isPhysical ? defender.stats.def : defender.stats.spdef) * stageMult(crit ? Math.min(0, defStage) : defStage) * defAb;
 
     // abilita': boost di potenza per tipo (Aiutofuoco/Erbaiuto a HP bassi, ecc.)
-    let power = move.power;
+    // `opts.potenza` sovrascrive la potenza: la usano le mosse a potenza
+    // VARIABILE (Colpo Basso, Vortexpalla, Flagello…), che nel dato hanno -1
+    let power = opts.potenza != null ? opts.potenza : move.power;
     const lowHp = findAb(attacker, "lowHpTypeBoost");
     if (lowHp && move.type === lowHp.moveType && attacker.hp <= attacker.maxHp / 3) power *= lowHp.mult;
     const tb = findAb(attacker, "typeBoost");
@@ -4234,14 +4236,14 @@
         prefetchAnim(key);
         segnaFx(messages, iAnnuncio, move.type, sideOf(foe), key);
       }
-    } else if (move.category !== "STATUS" && messages.fx) {
-      /* Mossa d'attacco a POTENZA -1: sono le 75 a danno FISSO (Movimento
-         Sismico, Ombra Notte, Ira di Drago…). Il danno non è ancora
-         implementato, ma almeno l'animazione va mostrata: prima queste mosse
-         non facevano proprio niente a schermo. */
-      const key = animKeyForMove(move.id);
-      prefetchAnim(key);
-      segnaFx(messages, iAnnuncio, move.type, sideOf(foe), key);
+    } else if (move.category !== "STATUS") {
+      // mossa d'attacco senza potenza fissa nei dati (`power: -1`)
+      landed = dannoSenzaPotenza(actor, foe, move, messages);
+      if (landed && messages.fx) {
+        const key = animKeyForMove(move.id);
+        prefetchAnim(key);
+        segnaFx(messages, iAnnuncio, move.type, sideOf(foe), key);
+      }
     } else if (move.category === "STATUS" && messages.fx) {
       // Anche le mosse di stato hanno la loro animazione: si ancora al bersaglio
       // (che per le mosse su se' stessi e' chi la usa).
@@ -4283,6 +4285,82 @@
     if (messages.length) messages[messages.length - 1] += "\n" + t;
     else messages.push(t);
   }
+
+  /* ======================================================================
+     MOSSE SENZA POTENZA FISSA (`power: -1` nei dati)
+
+     Erano 75 e non facevano NIENTE: né danno né animazione, perché il motore
+     entrava nel ramo del danno solo con `power > 0`. 36 sono mosse Z, che nel
+     gioco non compaiono mai; le altre 39 sono mosse vere, e diverse sono
+     classiche (Movimento Sismico, Superzanna, Colpo Basso, Flagello…).
+
+     Due famiglie:
+       DANNO FISSO      il danno è un numero, non passa dalla formula
+                        (`FixedDamageAttr` e derivate dell'originale)
+       POTENZA VARIABILE la potenza si calcola e poi il danno è quello normale
+
+     ⚠️ Restano fuori quelle che richiedono memoria del turno che non teniamo
+     (Contrattacco, Specchiovelo, Metalscoppio, Ritorsione, Pazienza): a loro
+     si dà una potenza ragionevole, meglio di un colpo a vuoto.
+     ====================================================================== */
+  const DANNO_FISSO = {
+    SONIC_BOOM:   () => 20,
+    DRAGON_RAGE:  () => 40,
+    SEISMIC_TOSS: (a) => a.level,
+    NIGHT_SHADE:  (a) => a.level,
+    PSYWAVE:      (a) => Math.max(1, Math.floor(a.level * (0.5 + Math.random()))),
+    SUPER_FANG:      (a, d) => Math.max(1, Math.floor(d.hp / 2)),
+    NATURES_MADNESS: (a, d) => Math.max(1, Math.floor(d.hp / 2)),
+    RUINATION:       (a, d) => Math.max(1, Math.floor(d.hp / 2)),
+    GUARDIAN_OF_ALOLA: (a, d) => Math.max(1, Math.floor(d.hp * 0.75)),
+    // Rimonta: pareggia i PS, solo se chi la usa ne ha meno
+    ENDEAVOR:     (a, d) => Math.max(0, d.hp - a.hp),
+    // Azzardo: infligge i PS di chi la usa, che poi cade
+    FINAL_GAMBIT: (a) => a.hp,
+  };
+
+  /* Potenza calcolata. Le formule sono quelle dei giochi. */
+  const POTENZA_VARIABILE = {
+    // per PESO del bersaglio (kg)
+    LOW_KICK:   (a, d) => pesoPotenza(S[d.speciesId].weight),
+    GRASS_KNOT: (a, d) => pesoPotenza(S[d.speciesId].weight),
+    // per RAPPORTO di peso fra chi attacca e chi subisce
+    HEAVY_SLAM: (a, d) => rapportoPeso(a, d),
+    HEAT_CRASH: (a, d) => rapportoPeso(a, d),
+    // per VELOCITÀ
+    GYRO_BALL:    (a, d) => Math.max(1, Math.min(150, Math.floor(25 * d.stats.spd / Math.max(1, a.stats.spd)))),
+    ELECTRO_BALL: (a, d) => { const r = a.stats.spd / Math.max(1, d.stats.spd);
+      return r >= 4 ? 150 : r >= 3 ? 120 : r >= 2 ? 80 : r >= 1 ? 60 : 40; },
+    // per PS RIMASTI di chi la usa (più è ridotto, più fa male)
+    FLAIL:    (a) => scalaHp(a.hp / a.maxHp),
+    REVERSAL: (a) => scalaHp(a.hp / a.maxHp),
+    // per PS RIMASTI del bersaglio
+    WRING_OUT:   (a, d) => Math.max(1, Math.floor(120 * d.hp / d.maxHp)),
+    CRUSH_GRIP:  (a, d) => Math.max(1, Math.floor(120 * d.hp / d.maxHp)),
+    HARD_PRESS:  (a, d) => Math.max(1, Math.floor(100 * d.hp / d.maxHp)),
+    // per quante volte il bersaglio si è potenziato
+    PUNISHMENT: (a, d) => Math.min(200, 60 + 20 * Object.values(d.stages).filter(v => v > 0).reduce((s, v) => s + v, 0)),
+    // per PP rimasti (l'ultimo colpo è devastante)
+    TRUMP_CARD: (a, _d, m) => { const pp = (a.moves.find(x => x.id === m.id) || {}).pp || 0;
+      return pp >= 4 ? 40 : pp === 3 ? 50 : pp === 2 ? 60 : pp === 1 ? 80 : 200; },
+    MAGNITUDE: () => [10, 30, 50, 70, 90, 110, 150][Math.floor(Math.random() * 7)],
+    PRESENT:   () => [40, 80, 120][Math.floor(Math.random() * 3)],
+    // amicizia: non la teniamo, si usa il valore di una squadra affiatata
+    RETURN: () => 102, PIKA_PAPOW: () => 102, VEEVEE_VOLLEY: () => 102,
+    FRUSTRATION: () => 60,
+  };
+  /* Ripiego per le mosse che avrebbero bisogno di stato che non teniamo. */
+  const POTENZA_RIPIEGO = 60;
+
+  const pesoPotenza = (kg) => !kg ? 40
+    : kg >= 200 ? 120 : kg >= 100 ? 100 : kg >= 50 ? 80 : kg >= 25 ? 60 : kg >= 10 ? 40 : 20;
+  function rapportoPeso(a, d) {
+    const pa = S[a.speciesId].weight || 1, pd = S[d.speciesId].weight || 1;
+    const r = pa / pd;
+    return r >= 5 ? 120 : r >= 4 ? 100 : r >= 3 ? 80 : r >= 2 ? 60 : 40;
+  }
+  const scalaHp = (f) => f > 0.6875 ? 20 : f > 0.3542 ? 40 : f > 0.2083 ? 80
+    : f > 0.1042 ? 100 : f > 0.0417 ? 150 : 200;
 
   /* Appende l'animazione della mossa all'evento dell'annuncio. Se il log non
      sa farlo (array semplice usati da qualche chiamante) si ripiega sull'ultimo. */
@@ -4359,9 +4437,39 @@
     return r < 0.35 ? 2 : r < 0.70 ? 3 : r < 0.85 ? 4 : 5;
   }
 
+  /* Danno delle mosse che nei dati non hanno potenza. Ritorna true se il colpo
+     è andato a segno (serve a decidere se applicare gli effetti). */
+  function dannoSenzaPotenza(actor, foe, move, messages) {
+    // l'immunità di tipo vale anche per il danno fisso
+    if (typeMultiplier(move.type, foe.types) === 0) {
+      stessoMomento(messages, `Non ha effetto su ${foe.name}...`);
+      return false;
+    }
+    const fisso = DANNO_FISSO[move.id];
+    if (fisso) {
+      const d = Math.max(0, Math.floor(fisso(actor, foe, move)));
+      if (d <= 0) { stessoMomento(messages, "Ma non ha funzionato!"); return false; }
+      const dato = bossClamp(foe, d, messages);      // gli scudi del boss valgono comunque
+      foe.hp = Math.max(0, foe.hp - dato); foe._justHit = true;
+      if (messages.snap) messages.snap();
+      stessoMomento(messages, `${foe.name} perde ${dato} PS!`);
+      if (foe.hp <= 0) foe.fainted = true;
+      // Azzardo: chi la usa ci rimette tutto
+      if (move.id === "FINAL_GAMBIT") {
+        actor.hp = 0; actor.fainted = true; actor._justHit = true;
+        stessoMomento(messages, `${actor.name} ci ha messo tutto!`);
+      }
+      return true;
+    }
+    // potenza calcolata: da qui in poi è un colpo normale
+    const f = POTENZA_VARIABILE[move.id];
+    const potenza = f ? Math.max(1, Math.floor(f(actor, foe, move))) : POTENZA_RIPIEGO;
+    return doDamage(actor, foe, move, messages, potenza);
+  }
+
   // Applica il danno (gestisce OHKO, multi-colpo, critico, drain, contraccolpo).
   // Ritorna true se la mossa ha colpito (non immune).
-  function doDamage(actor, foe, move, messages) {
+  function doDamage(actor, foe, move, messages, potenza) {
     const attrs = move.attrs || [];
     const forceCrit = attrs.some(a => a.kind === "critOnly");
     const highCrit = attrs.some(a => a.kind === "highCrit");
@@ -4399,7 +4507,7 @@
     let total = 0, lastEff = 1, anyCrit = false, immune = false, done = 0;
     for (let h = 0; h < hits; h++) {
       if (foe.fainted) break;
-      const res = computeDamage(actor, foe, move, { forceCrit, highCrit, critStage: critBonus });
+      const res = computeDamage(actor, foe, move, { forceCrit, highCrit, critStage: critBonus, potenza });
       if (res.immune) { immune = true; break; }
       let raw = Math.max(1, Math.floor(res.damage * lensPenalty));
       const dealt = bossClamp(foe, raw, messages);  // scudi del boss
