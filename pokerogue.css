@@ -13,6 +13,18 @@
   --hp-green: #6fd36f;
   --hp-yellow: #f2c94c;
   --hp-red: #eb5757;
+
+  /* ZONA SICURA IN CIMA — il telefono ha gli ANGOLI ARROTONDATI e il FORO
+     DELLA FOTOCAMERA: quello che si disegna nei primi pixel in alto si perde.
+     La pagina e' `viewport-fit=cover` (arriva fino ai bordi, e va bene), ma
+     tutto cio' che porta INFORMAZIONE va spinto sotto questa soglia.
+     ⚠️ `env()` da solo non basta: a schermo intero, con le barre di sistema
+     nascoste, l'inset dichiarato dal sistema puo' essere 0 anche quando il
+     foro c'e' comunque. Per questo si prende il PIU' GRANDE fra l'inset vero
+     e un minimo di sicurezza. */
+  --safe-top: max(env(safe-area-inset-top, 0px), 26px);
+  /* gli angoli arrotondati mangiano anche i lati */
+  --safe-x: max(env(safe-area-inset-left, 0px), 10px);
 }
 
 html, body {
@@ -167,7 +179,9 @@ html, body {
 /* sotto l'indicatore d'ondata (in alto a sinistra) E sotto il vassoio di ball
    dell'allenatore, che sta anch'esso a sinistra: sono i due elementi con cui
    si scontrerebbe */
-.hp-panel.side-enemy { top: 11%;   left: 4%; }      /* nemico: sprite a destra  */
+/* ⚠️ Il riquadro del nemico e' l'elemento in cima che porta piu' informazione
+   (nome, livello, PS): va tenuto sotto il foro della fotocamera. */
+.hp-panel.side-enemy { top: calc(var(--safe-top) + 8%); left: calc(var(--safe-x) + 1%); }
 .hp-panel.side-ally  { bottom: 3%; right: 4%; }     /* alleato: sprite a sinistra */
 /* in doppio il secondo riquadro si accoda al primo: la percentuale di translateY
    è riferita all'altezza del riquadro stesso, quindi si incolonnano da soli */
@@ -310,7 +324,7 @@ html, body {
 
 /* Indicatore ondata (in alto a sinistra nella scena) */
 #wave-indicator {
-  position: absolute; top: 6px; left: 8px; z-index: 5;
+  position: absolute; top: calc(var(--safe-top) + 4px); left: calc(var(--safe-x) + 2px); z-index: 5;
   background: rgba(10,12,20,.6); color: #fff;
   padding: 2px 9px; border-radius: 999px;
   font-size: clamp(11px, 3vw, 14px); font-weight: 700;
@@ -379,7 +393,8 @@ html, body {
   background: linear-gradient(#141824, #0c0f18);
   color: var(--ink);
   display: flex; flex-direction: column; justify-content: safe center; gap: 1.6vh;
-  padding: 3vh var(--gap);
+  /* il titolo delle schermate meta finiva sotto il foro della fotocamera */
+  padding: calc(var(--safe-top) + 1.5vh) calc(var(--gap) + var(--safe-x) - 10px) 3vh;
   overflow-y: auto;
 }
 /* i contenuti a lista (starter/shop/uova/squadra) hanno un flex:1 che riempie:
@@ -556,6 +571,8 @@ html, body {
   display: inline-flex; align-items: center; gap: 4px;
 }
 .chip.on { background: #4a72d0; color: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,.3) inset; }
+/* abilità non ancora sbloccata: si vede, ma col lucchetto */
+.chip.ab-chip.chiusa { opacity: .45; cursor: default; font-style: italic; }
 .sd-stats { display: flex; flex-direction: column; gap: 5px; margin: 1.5vh 0; }
 .stat-row { display: flex; align-items: center; gap: 8px; font-size: clamp(11px, 3vw, 14px); }
 .stat-lab { width: 42px; opacity: .85; }
@@ -607,7 +624,7 @@ html, body {
 #trainer-portrait[hidden] { display: none; }
 /* Ritratto allenatore: in alto a destra, al posto del Pokémon nemico */
 #trainer-portrait {
-  position: absolute; right: 6%; top: 8%; z-index: 4;
+  position: absolute; right: calc(var(--safe-x) + 3%); top: calc(var(--safe-top) + 6%); z-index: 4;
   image-rendering: pixelated;
   animation: trainerIn .35s ease;
 }
@@ -617,7 +634,7 @@ html, body {
    piene = ancora da battere, spente = sconfitte, cerchio = in campo */
 #trainer-balls[hidden] { display: none; }
 #trainer-balls {
-  position: absolute; left: 8px; top: 30px; z-index: 5;
+  position: absolute; left: calc(var(--safe-x) + 2px); top: calc(var(--safe-top) + 30px); z-index: 5;
   display: flex; gap: 4px; background: rgba(10,12,20,.5);
   padding: 4px 7px; border-radius: 999px; border: 1px solid rgba(255,255,255,.15);
 }

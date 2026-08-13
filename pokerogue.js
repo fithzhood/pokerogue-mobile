@@ -149,6 +149,7 @@
       formsSeen: {},     // forme estetiche già catturate: { dex: {formKey: true} }
       seen: {},          // specie INCONTRATE (anche senza catturarle): { SPECIE: true }
       eggMoves: {},      // mosse da uovo sbloccate: { SPECIE: maschera di bit 0-15 }
+      abils: {},         // abilità sbloccate: { SPECIE: 1|2|4 } (4 = nascosta)
     };
   }
 
@@ -489,16 +490,59 @@
   }
 
   // Sceglie l'abilita' della specie (a caso tra le normali; fallback nascosta).
-  function pickAbility(sp) {
-    // Abilamuleto: piu' probabile che compaia l'abilita' NASCOSTA
-    const nasc = (game.charms && game.charms.ability) || 0;
-    if (nasc && sp.abilities.hidden && ABIL[sp.abilities.hidden]
-        && Math.random() < Math.min(0.6, 0.2 * nasc)) return ABIL[sp.abilities.hidden];
-    const pool = (sp.abilities.normal && sp.abilities.normal.length)
-      ? sp.abilities.normal
-      : (sp.abilities.hidden ? [sp.abilities.hidden] : []);
-    const id = pool.length ? pool[Math.floor(Math.random() * pool.length)] : null;
-    return id && ABIL[id] ? ABIL[id] : null;
+  /* Abilità di un esemplare che compare in campo. Come `generateAbilityIndex`:
+     l'abilità NASCOSTA è rara — 1 su 256 — e le due normali si tirano a sorte.
+     L'Abilamuleto alza la probabilità della nascosta (solo sui selvatici).
+     Ritorna anche l'INDICE (0,1,2), che serve per registrare nel dex quale
+     abilità hai davvero catturato. */
+  const TASSO_NASCOSTA = 256;            // BASE_HIDDEN_ABILITY_RATE
+  function pickAbilityIndex(sp, isTrainer) {
+    const nasc = (!isTrainer && game.charms && game.charms.ability) || 0;
+    const tasso = Math.max(2, Math.floor(TASSO_NASCOSTA / (1 + nasc)));
+    if (sp.abilities.hidden && ABIL[sp.abilities.hidden]
+        && Math.floor(Math.random() * tasso) === 0) return 2;
+    const n = (sp.abilities.normal || []).length;
+    return n > 1 ? Math.floor(Math.random() * 2) : 0;
+  }
+  function abilityByIndex(sp, i) {
+    const id = i === 2 ? sp.abilities.hidden : (sp.abilities.normal || [])[i];
+    if (id && ABIL[id]) return ABIL[id];
+    const alt = (sp.abilities.normal || [])[0] || sp.abilities.hidden;
+    return alt && ABIL[alt] ? ABIL[alt] : null;
+  }
+  function pickAbility(sp, isTrainer) { return abilityByIndex(sp, pickAbilityIndex(sp, isTrainer)); }
+
+  /* ======================================================================
+     ABILITÀ SBLOCCATE (dex) — `starterData.abilityAttr` dell'originale
+     Maschera per specie: 1 = prima abilità · 2 = seconda · 4 = NASCOSTA.
+     Gli starter di partenza hanno solo la PRIMA. Le altre si sbloccano
+     catturando (o schiudendo) un esemplare che ce l'ha — e la nascosta
+     capita 1 volta su 256, quindi è una conquista vera.
+     ====================================================================== */
+  const ABIL_1 = 1, ABIL_2 = 2, ABIL_H = 4;
+  const abilMaskOf = (k) => {
+    const m = (meta.abils && meta.abils[k]) || 0;
+    // gli starter di partenza hanno sempre almeno la prima abilità
+    return m || ABIL_1;
+  };
+  function registraAbilita(speciesId, indice) {
+    meta.abils = meta.abils || {};
+    const bit = indice === 2 ? ABIL_H : (1 << indice);
+    const prima = meta.abils[speciesId] || 0;
+    if (prima & bit) return null;
+    meta.abils[speciesId] = prima | bit;
+    const sp = S[speciesId];
+    const ab = abilityByIndex(sp, indice);
+    return ab ? { it: ab.it, nascosta: indice === 2 } : null;
+  }
+  /* Le abilità che puoi SCEGLIERE per quella specie nella schermata starter. */
+  function abilitaSbloccate(k) {
+    const sp = S[k], mask = abilMaskOf(k), out = [];
+    const norm = sp.abilities.normal || [];
+    if (norm[0] && (mask & ABIL_1)) out.push(norm[0]);
+    if (norm[1] && (mask & ABIL_2)) out.push(norm[1]);
+    if (sp.abilities.hidden && (mask & ABIL_H)) out.push(sp.abilities.hidden);
+    return out.length ? out : (norm[0] ? [norm[0]] : []);
   }
 
   /* ---- FORME (Unown, Vivillon, Rotom, Oricorio…) -------------------------
@@ -659,6 +703,10 @@
     else if (opts.variant === undefined) form = formAt(speciesId, speciesFormIndex(speciesId,
       { gender, nature, isTrainer: opts.isTrainer, trainerTypes: opts.trainerTypes,
         ignoreArena: opts.ignoreArena }));
+    /* Quale delle tre abilità tocca a questo esemplare (la nascosta è 1/256).
+       `opts.abilIndex` la impone: lo usano la scelta starter e la cattura,
+       che devono conservare quella che avevi davanti. */
+    const abilIdx = opts.abilIndex != null ? opts.abilIndex : pickAbilityIndex(sp, opts.isTrainer);
     const srcStats = (form && form.baseStats) ? form.baseStats : sp.baseStats;
     const bs = {};
     for (const k in sp.baseStats) {
@@ -691,7 +739,8 @@
       boss,
       fainted: false,
       // la forma può imporre l'abilità (Rotom Lavaggio, Lycanroc Crepuscolo…)
-      ability: (form && form.ability && ABIL[form.ability]) ? ABIL[form.ability] : pickAbility(sp),
+      ability: (form && form.ability && ABIL[form.ability]) ? ABIL[form.ability] : abilityByIndex(sp, abilIdx),
+      abilIndex: abilIdx,      // 0/1 normali, 2 NASCOSTA — serve al dex alla cattura
       // PASSIVA: attiva solo se sbloccata con le caramelle (come PokeRogue)
       passiveAbility: (sp.passive && ABIL[sp.passive] && meta.passiveOn && meta.passiveOn[speciesId]) ? ABIL[sp.passive] : null,
       ivs: opts.ivs || rollIVs(),
@@ -1453,7 +1502,13 @@
     hideMeta();
     game.party = starterTeam.map(e => {
       const mon = makeFighter(e.k, START_LEVEL, { shiny: e.shiny, ivs: bestIVsFor(e.k) || rollIVs(), ignoreArena: true });
-      if (e.ability && ABIL[e.ability]) mon.ability = ABIL[e.ability];
+      if (e.ability && ABIL[e.ability]) {
+        mon.ability = ABIL[e.ability];
+        // tiene allineato l'indice: 2 = nascosta (serve se poi lo si registra)
+        const sp = S[e.k];
+        mon.abilIndex = sp.abilities.hidden === e.ability ? 2
+          : Math.max(0, (sp.abilities.normal || []).indexOf(e.ability));
+      }
       if (e.moves && e.moves.length) mon.moves = e.moves.map(id => ({ id, pp: M[id].pp, maxPp: M[id].pp }));
       if (e.pkrs) mon.pokerus = true;
       return mon;
@@ -2751,18 +2806,76 @@
       const msgs = [`Lanci una Theft Ball su ${m.name}…`];
       if (caught) {
         const mon = makeFighter(m.speciesId, m.level, { shiny: m.shiny, ivs: m.ivs, variant: m.variant });
-        if (game.party.length < PARTY_MAX) { game.party.push(mon); msgs.push(`🕶 Rubato! ${mon.name} è tuo!`); }
-        else { game.box.push(mon); msgs.push(`🕶 Rubato! ${mon.name} va nel box.`); }
-        registerCaught(m.speciesId, m.shiny, m.ivs, msgs, m.variant);
+        accogliPokemon(mon, msgs, "🕶 Rubato!");
+        registerCaught(m.speciesId, m.shiny, m.ivs, msgs, m.variant, m.abilIndex);
       } else msgs.push(`${m.name} è sfuggito alla Theft Ball!`);
       renderScene();
-      queueMessages(msgs, () => openShop());
+      queueMessages(msgs, () => chiediPostoInSquadra(() => openShop()));
     });
     metaEl().querySelector('[data-act="skip"]').onclick = () => { hideMeta(); openShop(); };
   }
 
+  /* ======================================================================
+     ARRIVO IN SQUADRA — con la squadra piena si SCEGLIE
+
+     Prima il Pokemon appena preso finiva d'ufficio nel box e non c'era modo
+     di metterlo in campo senza aspettare. Ora, se i sei posti sono occupati,
+     dopo la narrazione si apre una schermata: chi cede il posto? Il
+     sostituito va al PC (il box), non si perde.
+     ⚠️ La scelta NON puo' avvenire subito: siamo dentro la costruzione dei
+     messaggi. Si mette da parte in `game.nuovoArrivato` e la si fa dopo, con
+     `chiediPostoInSquadra`, che va infilata nella continuazione.
+     ====================================================================== */
+  function accogliPokemon(mon, msgs, preso) {
+    if (game.party.length < PARTY_MAX) {
+      game.party.push(mon);
+      msgs.push(`${preso} ${mon.name} si unisce alla squadra!`);
+      return;
+    }
+    game.nuovoArrivato = mon;
+    msgs.push(`${preso} ${mon.name}! Ma hai già sei Pokémon con te…`);
+  }
+
+  /* Schermata di scelta. Se non c'e' nessun arrivato, prosegue e basta. */
+  function chiediPostoInSquadra(poi) {
+    const mon = game.nuovoArrivato;
+    if (!mon) { poi(); return; }
+    game.nuovoArrivato = null;
+    const cards = game.party.map((p, i) => {
+      const ratio = Math.max(0, p.hp / p.maxHp);
+      const col = ratio > 0.5 ? "var(--hp-green)" : ratio > 0.2 ? "var(--hp-yellow)" : "var(--hp-red)";
+      const types = p.types.map(t => `<span class="ticon t-${t}"></span>`).join("");
+      return `<button class="pd-card sceglibile ${p.fainted ? "ko" : ""}" data-i="${i}">
+          <div class="pd-top"><span class="pd-name">${miniIcon(p.dex, 1.1)}${p.shiny ? "✨" : ""}${p.name.replace("✨", "")}</span><span class="pd-lv">Lv.${p.level}</span></div>
+          <div class="pd-types">${types}${p.ability ? `<span class="pd-ab">${p.ability.it}</span>` : ""}</div>
+          <div class="party-hp-track"><div class="party-hp-fill" style="width:${ratio * 100}%;background:${col};"></div></div>
+          <div class="pd-hp">${Math.max(0, p.hp)}/${p.maxHp} PS</div>
+        </button>`;
+    }).join("");
+    showMetaScreen(`
+      <div class="meta-title" style="font-size:clamp(19px,5.6vw,30px)">Squadra al completo</div>
+      <div class="meta-sub">chi cede il posto a <b>${mon.name}</b> (Lv.${mon.level})? Chi esce va al PC.</div>
+      <div class="pd-list">${cards}</div>
+      <div class="meta-actions"><button class="meta-btn ghost" data-act="pc">📦 Manda ${mon.name} al PC</button></div>`);
+    const chiudi = (testo) => { hideMeta(); queueMessages([testo], poi); };
+    metaEl().querySelectorAll(".pd-card[data-i]").forEach(b => b.onclick = () => {
+      const i = parseInt(b.dataset.i, 10);
+      const uscito = game.party[i];
+      game.box.push(uscito);
+      game.party[i] = mon;
+      // se se n'e' andato quello in campo, scende subito il nuovo
+      if (game.active === i) setActive(i);
+      renderScene();
+      chiudi(`${uscito.name} va al PC. ${mon.name} prende il suo posto!`);
+    });
+    metaEl().querySelector('[data-act="pc"]').onclick = () => {
+      game.box.push(mon);
+      chiudi(`${mon.name} è stato trasferito al PC.`);
+    };
+  }
+
   // Registra una specie catturata nel meta: starter sbloccato, caramella, IV migliori.
-  function registerCaught(speciesId, shiny, ivs, messages, variant) {
+  function registerCaught(speciesId, shiny, ivs, messages, variant, abilIndex) {
     if (variant && registerForm(S[speciesId].dex, variant) && messages) {
       const tot = collectableForms(speciesId);
       const got = Object.keys(meta.formsSeen[S[speciesId].dex]).length;
@@ -2788,6 +2901,17 @@
     meta.candy[speciesId] = (meta.candy[speciesId] || 0) + 1;
     messages.push(`🍬 +1 Caramella ${S[speciesId].it} (totale ${meta.candy[speciesId]})`);
     if (recordIVs(speciesId, ivs)) messages.push(`📈 Nuovi IV migliori per ${S[speciesId].it}!`);
+    /* L'abilità che AVEVA questo esemplare si sblocca per la specie: da qui in
+       poi la puoi scegliere quando lo schieri come starter. La nascosta capita
+       1 volta su 256, quindi vale la pena dirlo forte. */
+    if (abilIndex != null) {
+      const nuova = registraAbilita(rootOf(speciesId), abilIndex);
+      if (nuova && messages) {
+        messages.push(nuova.nascosta
+          ? `🔓✨ Abilità NASCOSTA sbloccata per ${S[rootOf(speciesId)].it}: ${nuova.it}!`
+          : `🔓 Nuova abilità sbloccata per ${S[rootOf(speciesId)].it}: ${nuova.it}`);
+      }
+    }
     saveMeta();
   }
 
@@ -2816,14 +2940,13 @@
     const messages = [`Lanci una ${ball.it} su ${enemy.name}…`];
     if (caught) {
       const mon = makeFighter(enemy.speciesId, enemy.level, { shiny: enemy.shiny, ivs: enemy.ivs, variant: enemy.variant }); // fresco, HP/PP pieni
-      if (game.party.length < PARTY_MAX) { game.party.push(mon); messages.push(`Preso! ${mon.name} si unisce alla squadra!`); }
-      else { game.box.push(mon); messages.push(`Preso! ${mon.name} va nel box (squadra piena).`); }
+      accogliPokemon(mon, messages, "Preso!");
       // meta-progressione: starter sbloccato + caramella + IV migliori
-      registerCaught(enemy.speciesId, enemy.shiny, enemy.ivs, messages, enemy.variant);
+      registerCaught(enemy.speciesId, enemy.shiny, enemy.ivs, messages, enemy.variant, enemy.abilIndex);
     } else {
       messages.push(`Oh no! ${enemy.name} si è liberato!`);
     }
-    queueMessages(messages, () => openShop());
+    queueMessages(messages, () => chiediPostoInSquadra(() => openShop()));
   }
 
   // Estrae frame 0 + dimensioni foglio da un atlas, gestendo i due formati
@@ -4645,9 +4768,8 @@
     if (caught) {
       const mon = makeFighter(enemy.speciesId, enemy.level, { shiny: enemy.shiny, ivs: enemy.ivs, variant: enemy.variant });
       const stolen = !!enemy.trainer;
-      if (game.party.length < PARTY_MAX) { game.party.push(mon); log.push(stolen ? `🕶 Rubato! ${mon.name} è tuo!` : `Preso! ${mon.name} si unisce alla squadra!`); }
-      else { game.box.push(mon); log.push(stolen ? `🕶 Rubato! ${mon.name} va nel box.` : `Preso! ${mon.name} va nel box (squadra piena).`); }
-      registerCaught(enemy.speciesId, enemy.shiny, enemy.ivs, log, enemy.variant);
+      accogliPokemon(mon, log, stolen ? "🕶 Rubato!" : "Preso!");
+      registerCaught(enemy.speciesId, enemy.shiny, enemy.ivs, log, enemy.variant, enemy.abilIndex);
       enemy.fainted = true;                        // esce dal campo
       game.capturedThisWave = true;                // niente seconda offerta a fine lotta
       if (stolen) {
@@ -4656,7 +4778,7 @@
         if (game.trainerTotal) { game.trainerDefeated++; renderTrainerBalls(); }
       }
       renderScene();
-      playEvents(log.events, () => {
+      playEvents(log.events, () => chiediPostoInSquadra(() => {
         if (stolen && game.enemyQueue.length) {   // l'allenatore manda il prossimo
           const next = game.enemyQueue.shift();
           const l2 = makeLog();
@@ -4667,7 +4789,7 @@
           return;
         }
         onWaveCleared();                           // cattura/furto finale: ondata superata
-      });
+      }));
       return;
     }
 
@@ -6414,14 +6536,17 @@
        il che rendeva la partenza molto piu' forte del normale. */
     const learnPool = [...new Set((LEARN[k] || []).filter(([lv]) => lv > 0 && lv <= 5).map(x => x[1]).filter(id => M[id]))];
     const eggPool = unlockedEggMoves(k).filter(id => !learnPool.includes(id));
-    const abilPool = [...(sp.abilities.normal || []), ...(sp.abilities.hidden ? [sp.abilities.hidden] : [])];
+    /* Solo le abilità SBLOCCATE: le altre si vedono ma grigie e non si possono
+       scegliere, così si capisce che esistono e che vanno conquistate. */
+    const abilPool = abilitaSbloccate(k);
+    const abilTutte = [...(sp.abilities.normal || []), ...(sp.abilities.hidden ? [sp.abilities.hidden] : [])];
     starterCfg = {
       k, shiny, pkrs,
       ability: abilPool[0],
       /* selezione di partenza: come nell'originale, le prime 4 dell'elenco
          "mosse di livello, poi mosse da uovo" (`speciesStarterMoves`) */
       moves: [...learnPool, ...eggPool].slice(0, 4),
-      learnPool, eggPool, abilPool,
+      learnPool, eggPool, abilPool, abilTutte,
     };
     renderStarterDetail();
   }
@@ -6430,7 +6555,13 @@
     const c = starterCfg, sp = S[c.k];
     const bs = sp.baseStats;
     const statBar = (lab, v) => `<div class="stat-row"><span class="stat-lab">${lab}</span><div class="stat-track"><div class="stat-fill" style="width:${Math.min(100, v / STAT_MAX * 100)}%"></div></div><span class="stat-val">${v}</span></div>`;
-    const abils = c.abilPool.map((a, i) => `<button class="chip ${c.ability === a ? "on" : ""}" data-ab="${a}">${(ABIL[a] || {}).it || a}${i === c.abilPool.length - 1 && sp.abilities.hidden === a ? " (H)" : ""}</button>`).join("");
+    /* Tutte e tre le abilità sono in elenco, ma quelle non ancora sbloccate
+       sono chiuse col lucchetto: si vede cosa c'è da conquistare. */
+    const abils = (c.abilTutte || c.abilPool).map(a => {
+      const libera = c.abilPool.includes(a);
+      const nascosta = sp.abilities.hidden === a;
+      return `<button class="chip ab-chip ${c.ability === a ? "on" : ""} ${libera ? "" : "chiusa"}" data-ab="${a}" ${libera ? "" : "disabled"}>${libera ? "" : "🔒 "}${(ABIL[a] || {}).it || a}${nascosta ? " (H)" : ""}</button>`;
+    }).join("");
     /* Le mosse da uovo si mostrano in fondo e marcate: sono la ricompensa delle
        schiuse, non qualcosa che hai per diritto. La 4a e' la RARA. */
     const chip = (id, uovo) => {
