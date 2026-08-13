@@ -1106,6 +1106,12 @@
       push(t) { events.push(snapEvent(t)); },
       // marca l'ultimo evento con un effetto visivo (tipo mossa + bersaglio + quale mossa)
       fx(type, side, move) { if (events.length) events[events.length - 1].fx = { type, side, move }; },
+      /* Come `fx`, ma su un evento PRECISO. Serve perche' l'animazione della
+         mossa va sul messaggio «X usa Y!», che fotografa la situazione PRIMA
+         del colpo. Attaccandola all'ultimo evento finiva su un messaggio gia'
+         successivo al danno (spesso «X e' esausto!»): si vedeva il nemico
+         cadere e solo dopo partiva l'animazione che avrebbe dovuto colpirlo. */
+      fxAt(i, type, side, move) { if (events[i]) events[i].fx = { type, side, move }; },
       // marca l'ultimo evento con un'animazione COMUNE o di CARICA (stati, cure,
       // oggetti, mosse a due turni). Si ancora al Pokemon indicato da `side`,
       // che vale sia per il giocatore sia per l'avversario.
@@ -3462,6 +3468,9 @@
 
     // 2. consuma PP e annuncia
     moveInst.pp = Math.max(0, moveInst.pp - 1);
+    /* Indice dell'annuncio: e' QUI che va appesa l'animazione della mossa,
+       perche' e' l'unico evento che fotografa il campo prima del colpo. */
+    const iAnnuncio = messages.length;
     messages.push(`${actor.name} usa ${move.it}!`);
     // Mosse a due turni (Volo, Solarraggio...): da noi colpiscono subito, ma
     // l'animazione di CARICA si vede lo stesso, su chi la usa, prima del colpo.
@@ -3486,14 +3495,14 @@
       if (landed && messages.fx) {
         const key = animKeyForMove(move.id);   // la sua, o quella di ripiego
         prefetchAnim(key);
-        messages.fx(move.type, sideOf(foe), key);
+        segnaFx(messages, iAnnuncio, move.type, sideOf(foe), key);
       }
     } else if (move.category === "STATUS" && messages.fx) {
       // Anche le mosse di stato hanno la loro animazione: si ancora al bersaglio
       // (che per le mosse su se' stessi e' chi la usa).
       const key = animKeyForMove(move.id);
       prefetchAnim(key);
-      messages.fx(move.type, sideOf(foe), key);
+      segnaFx(messages, iAnnuncio, move.type, sideOf(foe), key);
     }
 
     // 4-bis. mosse che cambiano il METEO (l'estrattore non le marca: sono poche
@@ -3505,6 +3514,13 @@
 
     // 5. effetti (mattoncini). Se la mossa da danno non e' andata a segno, niente effetti.
     if (landed) applyMoveAttrs(actor, foe, move, messages);
+  }
+
+  /* Appende l'animazione della mossa all'evento dell'annuncio. Se il log non
+     sa farlo (array semplice usati da qualche chiamante) si ripiega sull'ultimo. */
+  function segnaFx(messages, i, type, side, key) {
+    if (messages.fxAt) messages.fxAt(i, type, side, key);
+    else messages.fx(type, side, key);
   }
 
   // Blocchi di stato prima della mossa. Ritorna false se l'attore non agisce.
@@ -4384,7 +4400,6 @@
     cmd().querySelector('[data-act="skip"]').onclick = () => openShop();
   }
 
-  let moveDescMode = false;   // toggle: mostra descrizioni al posto dei nomi
   /* ---------------- LANCIO BALL IN BATTAGLIA ----------------
      Come nei giochi veri: si lancia durante la lotta, consuma il turno, e si
      possono lanciare quante ball si vuole. Le ball normali funzionano solo sui
@@ -4487,13 +4502,6 @@
       const mv = M[mi.id];
       const ty = T[mv.type];
       const disabled = mi.pp <= 0 ? "disabled" : "";
-      if (moveDescMode) {
-        return `
-          <button class="btn move-btn desc" data-i="${i}" ${disabled} style="background:${ty.color};">
-            <span class="move-desc-name">${mv.it}</span>
-            <span class="move-desc-text">${mv.effect || "Nessun effetto particolare."}</span>
-          </button>`;
-      }
       return `
         <button class="btn move-btn" data-i="${i}" ${disabled}
                 style="background:${ty.color};">
@@ -4509,21 +4517,110 @@
     cmd().innerHTML = `
       <div class="grid2">${buttons}</div>
       <div class="back-row two">
-        <button class="btn back" data-act="desc">${moveDescMode ? "📊 Dati" : "📖 Descrizioni"}</button>
+        <button class="btn back" data-act="desc">📖 Descrizioni</button>
         <button class="btn back" data-act="back">Indietro</button>
       </div>`;
 
     cmd().querySelectorAll(".move-btn").forEach(b => {
-      b.onclick = () => {
-        const i = parseInt(b.dataset.i, 10);
-        // in doppio con due avversari in piedi si sceglie CHI colpire
-        const bersagli = enemiesOnField();
-        if (game.double && bersagli.length > 1) showTargetMenu(i, bersagli);
-        else playerChooseMove(i);
-      };
+      b.onclick = () => usaMossa(parseInt(b.dataset.i, 10));
     });
-    cmd().querySelector('[data-act="desc"]').onclick = () => { moveDescMode = !moveDescMode; showMoves(); };
+    cmd().querySelector('[data-act="desc"]').onclick = () => showSchedaMosse();
     cmd().querySelector('[data-act="back"]').onclick = showMainMenu;
+  }
+
+  /* Lancia la mossa scelta (in doppio passa prima dalla scelta del bersaglio). */
+  function usaMossa(i) {
+    const bersagli = enemiesOnField();
+    if (game.double && bersagli.length > 1) showTargetMenu(i, bersagli);
+    else playerChooseMove(i);
+  }
+
+  /* SCHEDA DELLE MOSSE — a schermo intero (§ richiesta di Luca).
+     Prima le descrizioni erano un "modo" che SOSTITUIVA i dati dentro i
+     pulsanti: non si vedevano insieme, il testo lungo veniva tagliato dal
+     bordo basso, e il modo restava acceso. Qui invece si vede tutto — tipo,
+     categoria, potenza, precisione, PP, priorità, effetto e probabilità — in
+     una schermata che può scorrere, e da cui si può anche far partire la
+     mossa. Finita la scelta si torna alla lotta: niente da spegnere. */
+  function showSchedaMosse() {
+    const chi = currentChooser() || game.player;
+    const cards = chi.moves.map((mi, i) => {
+      const mv = M[mi.id], ty = T[mv.type];
+      const senzaPp = mi.pp <= 0;
+      const dato = (lab, val) => `<span class="ms-dato"><i>${lab}</i>${val}</span>`;
+      const righe = [
+        dato("Potenza", mv.power ? mv.power : "—"),
+        dato("Precisione", mv.accuracy > 0 ? mv.accuracy + "%" : "sempre a segno"),
+        dato("PP", `${mi.pp}/${mi.maxPp}`),
+      ];
+      if (mv.priority) righe.push(dato("Priorità", (mv.priority > 0 ? "+" : "") + mv.priority));
+      if (mv.effectChance > 0) righe.push(dato("Effetto", mv.effectChance + "%"));
+      const extra = effettiInParole(mv);
+      return `<div class="ms-card ${senzaPp ? "vuota" : ""}" style="border-color:${ty.color}">
+          <div class="ms-head" style="background:${ty.color}">
+            <span class="ms-nome">${mv.it}</span>
+            <span class="ms-badge"><span class="ticon t-${mv.type}"></span><span class="cicon c-${mv.category}"></span></span>
+          </div>
+          <div class="ms-dati">${righe.join("")}</div>
+          <div class="ms-testo">${mv.effect || "Nessun effetto particolare."}</div>
+          ${extra ? `<div class="ms-extra">${extra}</div>` : ""}
+          <button class="meta-btn primary ms-usa" data-i="${i}" ${senzaPp ? "disabled" : ""}>${senzaPp ? "PP esauriti" : "▶ Usa " + mv.it}</button>
+        </div>`;
+    }).join("");
+    showMetaScreen(`
+      <div class="meta-title" style="font-size:clamp(19px,5.6vw,30px)">Mosse di ${chi.name}</div>
+      <div class="ms-list">${cards}</div>
+      <div class="meta-actions"><button class="meta-btn ghost" data-act="back">↩ Indietro</button></div>`);
+    metaEl().querySelectorAll(".ms-usa").forEach(b => b.onclick = () => {
+      if (b.disabled) return;
+      hideMeta(); usaMossa(parseInt(b.dataset.i, 10));
+    });
+    metaEl().querySelector('[data-act="back"]').onclick = () => { hideMeta(); showMoves(); };
+  }
+
+  /* I "mattoncini" della mossa detti in italiano: sono gli effetti veri che il
+     motore applica, non sempre chiari dal testo ufficiale. */
+  function effettiInParole(mv) {
+    const STAT_IT = { ATK: "Attacco", DEF: "Difesa", SPATK: "Att. Sp.", SPDEF: "Dif. Sp.", SPD: "Velocità", ACC: "Precisione", EVA: "Elusione" };
+    const parti = [];
+    for (const a of (mv.attrs || [])) {
+      switch (a.kind) {
+        case "status": parti.push(`può causare ${(STATUS_IT[a.status] || a.status).toLowerCase()}`); break;
+        case "statStage": {
+          const chi = a.self ? "a sé" : "al bersaglio";
+          const q = Math.abs(a.stages) >= 2 ? "molto " : "";
+          parti.push(`${a.stages > 0 ? "alza" : "abbassa"} ${q}${a.stats.map(s => STAT_IT[s] || s).join(", ")} ${chi}`);
+          break;
+        }
+        case "flinch": parti.push("può far tentennare"); break;
+        case "multiHit": parti.push(a.mode === "_2" ? "colpisce 2 volte" : "colpisce da 2 a 5 volte"); break;
+        case "highCrit": parti.push("più facile fare brutto colpo"); break;
+        case "critOnly": parti.push("sempre brutto colpo"); break;
+        case "recoil": parti.push(`contraccolpo: ${Math.round(a.ratio * 100)}% del danno`); break;
+        case "drain": parti.push(`assorbe il ${Math.round(a.ratio * 100)}% del danno`); break;
+        case "heal": parti.push(`cura ${Math.round(a.ratio * 100)}% dei PS massimi`); break;
+        case "confuse": parti.push("può confondere"); break;
+        case "ohko": parti.push("KO in un colpo"); break;
+        case "protect": parti.push(a.endure ? "resiste al colpo" : "protegge dagli attacchi"); break;
+        case "trap": parti.push("intrappola il bersaglio"); break;
+        case "leechseed": parti.push("semina il bersaglio"); break;
+        case "recharge": parti.push("il turno dopo si deve riposare"); break;
+        case "perish": parti.push("canto del destino: KO dopo 3 turni"); break;
+        case "infatuate": parti.push("può infatuare"); break;
+        case "encore": parti.push("costringe a ripetere la mossa"); break;
+        case "taunt": parti.push("provoca: solo mosse d'attacco"); break;
+        case "torment": parti.push("vieta di ripetere la stessa mossa"); break;
+        case "drowsy": parti.push("fa addormentare il turno dopo"); break;
+        case "nightmare": parti.push("incubo: danno mentre dorme"); break;
+        case "ingrain": parti.push("radica e cura ogni turno"); break;
+        case "aquaring": parti.push("velo d'acqua: cura ogni turno"); break;
+        case "saltcure": parti.push("sotto sale: danno ogni turno"); break;
+        case "curse": parti.push("maledizione"); break;
+        case "terrain": parti.push("cambia il terreno"); break;
+      }
+    }
+    if (mv.charging) parti.push("si carica un turno prima di colpire");
+    return parti.length ? "▸ " + parti.join(" · ") : "";
   }
 
   // Mostra un messaggio "non disponibile" e torna al menu al tap/tempo.
