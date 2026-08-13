@@ -209,6 +209,9 @@ html, body {
   25%      { transform: rotate(-22deg) translateX(-3px); }
   75%      { transform: rotate(22deg)  translateX(3px); }
 }
+/* dopo la cattura la ball CHIUSA resta in campo (il Pokemon è dentro): se
+   sparisse tutto, sembrerebbe scappato */
+.ball-lancio.rimane { animation: none; filter: drop-shadow(0 0 7px rgba(255,214,74,.75)); }
 /* scatto finale: la ball si chiude e manda un lampo */
 .ball-lancio.presa { animation: ballPresa .6s ease-out forwards; }
 @keyframes ballPresa {

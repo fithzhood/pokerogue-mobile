@@ -1821,6 +1821,7 @@
   }
 
   function deployEnemy(f, messages) {
+    pulisciBallScena();      // via la ball rimasta dalla cattura precedente
     game.enemy = f;
     // oggetti tenuti: solo la prima volta che entra in campo
     if (!f._heldGiven) { f._heldGiven = true; giveEnemyHeldItems(f, !!f.trainerMon); }
@@ -2333,6 +2334,7 @@
   }
 
   function nextWave() {
+    pulisciBallScena();      // il campo riparte pulito
     /* SALVATAGGIO AUTOMATICO (§26): si scrive PRIMA di incrementare, quindi lo
        slot contiene sempre "ondate completate". Riprendendo si rigioca da qui
        con un avversario nuovo. */
@@ -2949,6 +2951,15 @@
      ⚠️ Vive sopra la scena ma SOTTO gli overlay meta (z-index 20).
      ====================================================================== */
   const BALL_IMG_KEY = { balls: "pb", greatballs: "gb", ultraballs: "ub", rogueballs: "rb", theftballs: "tb", masterballs: "mb" };
+
+  /* Toglie dal campo la ball rimasta dopo una cattura riuscita e rimette a
+     posto lo sprite avversario (che era stato "risucchiato"). Va chiamata
+     quando entra un nuovo avversario o comincia una nuova ondata. */
+  function pulisciBallScena() {
+    document.querySelectorAll(".ball-lancio").forEach(b => b.remove());
+    const s = document.getElementById("enemy-sprite");
+    if (s) { s.style.transition = ""; s.style.transform = ""; s.style.opacity = ""; }
+  }
   function animaBall(ballKey, esito, onDone) {
     const scena = document.getElementById("scene");
     const bersaglio = document.getElementById("enemy-sprite");
@@ -2977,7 +2988,13 @@
     /* ⚠️ Ripulire SEMPRE lo sprite: se restasse `scale(.05)`/`opacity:0` per
        un'interruzione, il Pokemon avversario sparirebbe dal campo e non
        tornerebbe piu'. Chi ha vinto lo toglie di scena per conto suo. */
+    /* ⚠️ A CATTURA RIUSCITA la ball chiusa RESTA in campo e il Pokemon resta
+       dentro: se togliessimo la ball e il Pokemon insieme, il campo tornerebbe
+       vuoto e sembrerebbe scappato. La si toglie quando entra il prossimo
+       avversario (`pulisciBallScena`, chiamata da `deployEnemy` e `nextWave`).
+       A cattura FALLITA invece si rimette tutto a posto: il Pokemon riappare. */
     const finisci = () => {
+      if (esito.preso) { ball.classList.add("rimane"); onDone(); return; }
       ball.remove();
       bersaglio.style.transition = "";
       bersaglio.style.transform = "";
