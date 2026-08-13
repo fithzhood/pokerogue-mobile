@@ -130,15 +130,21 @@ La config sta in `OneDrive/.claude/launch.json` (python http.server, porta 5512)
 ⚠️ Se un'altra sessione tiene occupata la 5512 c'è la gemella **`pokerogue-mobile-b` sulla
 5513**: usa quella invece di litigare per la porta.
 
-**Cache-proof obbligatorio** (regola del proprietario): a **ogni** modifica incrementa la versione
-nei riferimenti: `pokerogue.css?v=N`, `pokerogue.js?v=N` in `pokerogue.html`, e
-`data/${name}.json?v=N` nella funzione `loadJson` del JS.
-Versioni attuali: **css v=57 · js v=114 · data v=19**.
-La versione dei dati sta in **una sola costante**, `DATA_V` in `pokerogue.js` (vale sia per
-`data/*.json` sia per `data/anims/*.json`).
-⚠️ Prima di modificare, **rileggi le versioni vere** invece di fidarti di questa riga:
-`grep -o 'pokerogue\.\(js\|css\)?v=[0-9]*' pokerogue.html` e `grep 'const DATA_V' pokerogue.js`.
-(Questa riga era rimasta indietro di 24 versioni: succede.)
+**Cache-proof** (regola del proprietario). ⚠️ **Questo paragrafo era rimasto a un meccanismo
+superato** e mi ha fatto perdere un giro (§30.5): da quando c'è `pokerogue-boot.js` (§28)
+`pokerogue.html` è solo un guscio e **non contiene più nessun `?v=`**. Il gioco vero viene
+caricato dal boot come `pokerogue.css?v=<rev>` / `pokerogue.js?v=<rev>`, dove `rev` è quella
+di `versione.json` — e quel file lo rigenera **`node tools/make-manifest.mjs`**.
+
+- **Dopo ogni modifica, prima di provarla nel browser**: `node tools/make-manifest.mjs`
+  (è il passo 1 di `pubblica.mjs` e non pubblica niente). Se lo salti, il browser ti serve la
+  versione vecchia allo stesso URL e finisci a cercare un bug che hai già corretto.
+- `node tools/pubblica.mjs "…"` lo fa da sé: per pubblicare basta quello.
+- **I dati** hanno ancora una versione loro, `DATA_V` in `pokerogue.js` (vale sia per
+  `data/*.json` sia per `data/anims/*.json`): va alzata **a mano** quando rigeneri i JSON.
+- Rileggi sempre i valori veri invece di fidarti di questa riga:
+  `head -3 versione.json` e `grep 'const DATA_V' pokerogue.js`.
+  (Revisione a fine sessione 2026-08-14: **rev 49 · data v=20**.)
 
 **Debug utile:**
 - `?fast` → narrazione a 40ms invece di 780ms (test rapidi)
