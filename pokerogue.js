@@ -126,12 +126,60 @@
   const META_KEY = "pokerogue_mobile_meta_v1";
   // Tier uovo: ondate per la schiusa + peso nel gacha. (numeri ridotti: le run
   // sono corte ma le uova PERSISTONO tra le run, quindi si schiudono col tempo)
+  /* Le ondate per la schiusa restano le NOSTRE (ridotte: nell'originale sono
+     10/25/50/100 e una run corta non ne vedrebbe mai schiudere una). */
   const EGG_TIERS = {
-    COMMON:    { it: "Comune",      hatch: 8,  weight: 68 },
-    RARE:      { it: "Raro",        hatch: 16, weight: 25 },
-    EPIC:      { it: "Epico",       hatch: 30, weight: 6 },
-    LEGENDARY: { it: "Leggendario", hatch: 50, weight: 1 },
+    COMMON:    { it: "Comune",      hatch: 8 },
+    RARE:      { it: "Raro",        hatch: 16 },
+    EPIC:      { it: "Epico",       hatch: 30 },
+    LEGENDARY: { it: "Leggendario", hatch: 50 },
   };
+
+  /* ======================================================================
+     GACHA — le TRE macchine dell'originale (`GachaType`)
+
+       🎯 MOSSE       alza il tasso della mossa da uovo RARA
+                      (`BOOSTED_RARE_EGGMOVE_RATES` invece di quelle normali)
+       👑 LEGGENDARIO sposta di 1/256 le soglie verso il leggendario, e un uovo
+                      di tier LEGGENDARIO ha il 50% di diventare la SPECIE IN
+                      EVIDENZA del giorno
+       ✨ CROMATICO   raddoppia il tasso di cromatico (1/64 invece di 1/128)
+
+     Le soglie del tier sono quelle vere, su 256: COMMON 204 · RARE 44 ·
+     EPIC 7 · LEGENDARY 1. (Le nostre erano 68/25/6/1 su 100, molto più
+     generose: senza la scala giusta l'offset del gacha leggendario non
+     vorrebbe dire niente.)
+     ====================================================================== */
+  const GACHA = {
+    MOVE:      { it: "Gacha Mosse",       emoji: "🎯", sub: "più probabile la mossa da uovo RARA" },
+    LEGENDARY: { it: "Gacha Leggendario", emoji: "👑", sub: "più uova leggendarie, e la specie in evidenza" },
+    SHINY:     { it: "Gacha Cromatico",   emoji: "✨", sub: "doppia probabilità di cromatico" },
+  };
+  const SOGLIA_COMMON = 52, SOGLIA_RARE = 8, SOGLIA_EPIC = 1;   // su 256
+  const GACHA_LEGGENDARIO_OFFSET = 1;
+  const TASSO_SHINY_GACHA = 128, TASSO_SHINY_GACHA_SU = 64;
+  const RARE_EGGMOVE_SU = { COMMON: 16, RARE: 12, EPIC: 6, LEGENDARY: 3 };
+  const GACHA_EGG_HA_RATE = 192;      // 1/192: il nato ha l'abilità NASCOSTA
+
+  /* Tier dell'uovo: `rollEggTier` dell'originale, soglie su 256. */
+  function rollEggTier(tipo) {
+    const off = tipo === "LEGENDARY" ? GACHA_LEGGENDARIO_OFFSET : 0;
+    const v = Math.floor(Math.random() * 256);
+    if (v >= SOGLIA_COMMON + off) return "COMMON";
+    if (v >= SOGLIA_RARE + off) return "RARE";
+    if (v >= SOGLIA_EPIC + off) return "EPIC";
+    return "LEGENDARY";
+  }
+
+  /* SPECIE IN EVIDENZA del gacha leggendario: cambia ogni giorno, uguale per
+     tutti i tiri di quel giorno (come `getLegendaryGachaSpeciesForTimestamp`,
+     che ruota su base giornaliera). Eternatus è escluso, come nell'originale. */
+  function specieInEvidenza() {
+    const pool = SPECIES_KEYS.filter(k => S[k].eggTier === "LEGENDARY" && k !== "ETERNATUS");
+    if (!pool.length) return null;
+    const giorno = Math.floor(Date.now() / 86400000);
+    return pool[giorno % pool.length];
+  }
   function defaultMeta() {
     return {
       vouchers: 3,   // qualche voucher iniziale per provare subito il gacha
@@ -164,8 +212,9 @@
   /* Quale slot sblocca una schiusa. Copia di `rollEggMoveIndex`: 1 su X e' la
      rara, altrimenti una delle 3 comuni a caso. X dipende dal tier dell'uovo. */
   const RARE_EGGMOVE_RATES = { COMMON: 48, RARE: 24, EPIC: 12, LEGENDARY: 6 };
-  function rollEggMoveIndex(tier) {
-    const base = RARE_EGGMOVE_RATES[tier] || 48;
+  function rollEggMoveIndex(tier, potenziato) {
+    const tabella = potenziato ? RARE_EGGMOVE_SU : RARE_EGGMOVE_RATES;
+    const base = tabella[tier] || tabella.COMMON;
     return Math.floor(Math.random() * base) ? Math.floor(Math.random() * 3) : 3;
   }
 
@@ -181,9 +230,9 @@
 
   /* Sblocca uno slot. Ritorna il nome della mossa se era davvero nuova
      (come `setEggMoveUnlocked`, che torna false se ce l'avevi gia'). */
-  function unlockEggMove(k, tier) {
+  function unlockEggMove(k, tier, potenziato) {
     if (!EGGM[k]) return null;
-    const i = rollEggMoveIndex(tier);
+    const i = rollEggMoveIndex(tier, potenziato);
     const id = EGGM[k][i];
     if (!id || !M[id]) return null;
     meta.eggMoves = meta.eggMoves || {};
@@ -3437,13 +3486,22 @@
     return [dst[0] + tx * (dst[2] - dst[0]), dst[1] + ty * (dst[3] - dst[1])];
   }
 
-  /* Posizione di uno sprite del frame, nello spazio-animazione. */
-  function animPos(f, U, Tg, src, dst) {
+  /* Posizione di uno sprite del frame, nello spazio-animazione.
+     `kY` = quanto è più alto il nostro campo rispetto ai 180 dell'originale. */
+  function animPos(f, U, Tg, src, dst, kY) {
     let x = f.x + UF_X, y = f.y + UF_Y;
     if (f.focus === 1)      { x += Tg.x - TF_X; y += Tg.y - TF_Y; }  // bersaglio
     else if (f.focus === 2) { x += U.x - UF_X;  y += U.y - UF_Y;  }  // chi attacca
     else if (f.focus === 3) { const p = animTransform(src, dst, x, y); x = p[0]; y = p[1]; }
-    // focus 4 (schermo): resta assoluto nello spazio dell'animazione
+    else {
+      /* focus 4 = ANCORATO ALLO SCHERMO. Nell'originale il campo è alto 180 e
+         queste grafiche cadono a metà scena; il nostro è verticale e alto ~470
+         in unità di animazione, quindi la stessa coordinata finiva nel quarto
+         IN ALTO — dove stava il nemico PRIMA che lo abbassassimo. Da lì
+         l'impressione che le immagini delle mosse non lo seguissero.
+         Si riporta in scala sull'altezza vera del campo. */
+      y *= (kY || 1);
+    }
     return { x, y, flip: f.mirror ? -1 : 1 };
   }
 
@@ -3515,6 +3573,10 @@
     const cols = shMeta.c || 1;
     const cells = shMeta.k || 1;
     const src = [UF_X, UF_Y, TF_X, TF_Y], dst = [U.x, U.y, Tg.x, Tg.y];
+    /* Il campo dell'originale e' 320x180; il nostro e' verticale e in unita'
+       di animazione risulta molto piu' alto. Serve alle grafiche ancorate
+       allo SCHERMO (focus 4), che se no restano nel quarto in alto. */
+    const kY = (rect.height / scale) / 180;
     const hue = anim.hue ? `hue-rotate(${anim.hue}deg)` : "";
 
     // eventi di sfondo, raggruppati per frame
@@ -3559,7 +3621,7 @@
       // gli sprite del frame, in ordine di priorita'
       const list = (frames[i] || []).map(unpackAnimFrame).sort((a, b) => a.pri - b.pri);
       for (const f of list) {
-        const p = animPos(f, U, Tg, src, dst);
+        const p = animPos(f, U, Tg, src, dst, kY);
 
         if (f.target === 2) {
           // grafica dell'effetto: una cella 96x96 del foglio
@@ -3993,6 +4055,14 @@
         prefetchAnim(key);
         segnaFx(messages, iAnnuncio, move.type, sideOf(foe), key);
       }
+    } else if (move.category !== "STATUS" && messages.fx) {
+      /* Mossa d'attacco a POTENZA -1: sono le 75 a danno FISSO (Movimento
+         Sismico, Ombra Notte, Ira di Drago…). Il danno non è ancora
+         implementato, ma almeno l'animazione va mostrata: prima queste mosse
+         non facevano proprio niente a schermo. */
+      const key = animKeyForMove(move.id);
+      prefetchAnim(key);
+      segnaFx(messages, iAnnuncio, move.type, sideOf(foe), key);
     } else if (move.category === "STATUS" && messages.fx) {
       // Anche le mosse di stato hanno la loro animazione: si ancora al bersaglio
       // (che per le mosse su se' stessi e' chi la usa).
@@ -5455,6 +5525,17 @@
   function showMetaScreen(html) { const m = metaEl(); m.innerHTML = html; m.hidden = false; }
   function hideMeta() { metaEl().hidden = true; }
 
+  /* Quale REVISIONE sta girando, e se ce n'è una più nuova già scaricata che
+     aspetta il riavvio. Serve davvero: l'aggiornamento a caldo si applica al
+     riavvio SUCCESSIVO a quello che l'ha scaricato, quindi senza questa riga
+     non c'è modo di sapere dal telefono se si sta giocando la versione nuova
+     o quella di prima. */
+  function etichettaRevisione() {
+    const r = (window.PR && PR.rev) || 0;
+    const dove = (window.PR && PR.daRete) ? "da rete" : "da APK";
+    return `rev ${r} · ${dove}`;
+  }
+
   function showHome() {
     game.phase = "HOME";
     clearTimeout(game.timer);
@@ -5473,7 +5554,8 @@
         <button class="meta-btn gacha" data-a="gacha">🎰 Gacha Uova<span class="sub">${meta.vouchers} voucher disponibili</span></button>
         <button class="meta-btn eggs" data-a="eggs">🥚 Le mie Uova<span class="sub">${eggs} in incubazione · ${unlocked} starter sbloccati</span></button>
         <button class="meta-btn danger" data-a="reset">⚠️ Azzera tutto<span class="sub">cancella ogni progresso</span></button>
-      </div>`);
+      </div>
+      <div class="rev-line">${etichettaRevisione()}</div>`);
     // easter egg: tre tocchi sul titolo aprono il selettore dello zip di GIF (§25)
     metaEl().querySelector(".meta-title").onclick = gifTocco;
     metaEl().querySelector('[data-a="run"]').onclick = showSlots;
@@ -5520,40 +5602,56 @@
   }
 
   // Estrae il tier dell'uovo dal gacha (con pity: dopo 20 tiri, EPIC garantito).
-  function pullEgg() {
+  /* Tira un uovo dalla macchina scelta. Il TIPO resta appiccicato all'uovo:
+     è alla SCHIUSA che fa effetto (cromatico, mossa da uovo, specie in
+     evidenza), non al momento del tiro. */
+  function pullEgg(tipo) {
+    tipo = GACHA[tipo] ? tipo : "MOVE";
     let tier;
-    if (meta.pullsSinceEpic >= 20) { tier = Math.random() < 0.15 ? "LEGENDARY" : "EPIC"; }
-    else {
-      const total = Object.values(EGG_TIERS).reduce((s, t) => s + t.weight, 0);
-      let r = Math.random() * total;
-      for (const k in EGG_TIERS) { r -= EGG_TIERS[k].weight; if (r <= 0) { tier = k; break; } }
-    }
+    // pietà: dopo 20 tiri senza niente di buono, uno EPICO garantito
+    if (meta.pullsSinceEpic >= 20) tier = Math.random() < 0.15 ? "LEGENDARY" : "EPIC";
+    else tier = rollEggTier(tipo);
     meta.pullsSinceEpic = (tier === "EPIC" || tier === "LEGENDARY") ? 0 : meta.pullsSinceEpic + 1;
-    const egg = { tier, waves: EGG_TIERS[tier].hatch };
+    const egg = { tier, tipo, waves: EGG_TIERS[tier].hatch };
+    // il gacha leggendario "fissa" la specie in evidenza del giorno del tiro
+    if (tipo === "LEGENDARY") egg.evidenza = specieInEvidenza();
     meta.eggs.push(egg);
     return egg;
   }
 
+  /* Le tre macchine dell'originale, una sotto l'altra. `result` è l'uovo
+     appena uscito, se si arriva qui da un tiro. */
   function showGacha(result) {
     game.phase = "GACHA";
     const canPull = meta.vouchers > 0;
+    const evid = specieInEvidenza();
     const stage = result
       ? `<span class="egg-sprite big shake egg-${result.tier}"></span>
          <div class="gacha-result">È un <span class="tier-${result.tier}">Uovo ${EGG_TIERS[result.tier].it}</span>!</div>
-         <div class="meta-sub">si schiude superando ${result.waves} ondate</div>`
-      : `<span class="egg-sprite big" style="opacity:.55"></span><div class="meta-sub">Usa un voucher per un uovo misterioso.<br>I tier rari danno Pokémon più forti… ma ci mettono di più.</div>`;
+         <div class="meta-sub">dal ${GACHA[result.tipo].emoji} ${GACHA[result.tipo].it} · si schiude superando ${result.waves} ondate</div>`
+      : `<span class="egg-sprite big" style="opacity:.55"></span>
+         <div class="meta-sub">Scegli la macchina: cambia cosa è più probabile che l'uovo ti dia.</div>`;
+    const macchine = Object.keys(GACHA).map(k => {
+      const sub = k === "LEGENDARY" && evid
+        ? `in evidenza oggi: <b>${S[evid].it}</b>` : GACHA[k].sub;
+      return `<button class="meta-btn gacha macchina" data-g="${k}" ${canPull ? "" : "disabled"}>
+          <span class="mac-tit">${GACHA[k].emoji} ${GACHA[k].it}</span>
+          <span class="mac-sub">${sub}</span>
+        </button>`;
+    }).join("");
     showMetaScreen(`
       <div class="meta-title">Gacha Uova</div>
       <div class="meta-stats"><span>🎟 ${meta.vouchers} voucher</span></div>
       <div class="gacha-stage">${stage}</div>
-      <div class="meta-actions">
-        <button class="meta-btn gacha" data-a="pull" ${canPull ? "" : "disabled"}>🥚 Tira un uovo (1 🎟)</button>
-        <button class="meta-btn ghost" data-a="back">Indietro</button>
-      </div>`);
-    metaEl().querySelector('[data-a="pull"]').onclick = () => {
+      <div class="macchine">${macchine}</div>
+      <div class="meta-actions"><button class="meta-btn ghost" data-a="back">Indietro</button></div>`);
+    metaEl().querySelectorAll(".macchina").forEach(b => b.onclick = () => {
       if (meta.vouchers <= 0) return;
-      meta.vouchers--; const egg = pullEgg(); saveMeta(); showGacha(egg);
-    };
+      meta.vouchers--;
+      const egg = pullEgg(b.dataset.g);
+      saveMeta();
+      showGacha(egg);
+    });
     metaEl().querySelector('[data-a="back"]').onclick = showHome;
   }
 
@@ -5561,7 +5659,7 @@
     game.phase = "EGGS";
     const list = meta.eggs.length
       ? `<div class="egg-list">${meta.eggs.slice().sort((a, b) => a.waves - b.waves).map(e =>
-          `<div class="egg-row"><span class="egg-sprite egg-${e.tier}" style="width:34px;height:36px;background-size:167px auto;"></span><span class="en tier-${e.tier}">Uovo ${EGG_TIERS[e.tier].it}</span><span class="ew">tra ${e.waves} ondate</span></div>`).join("")}</div>`
+          `<div class="egg-row"><span class="egg-sprite egg-${e.tier}" style="width:34px;height:36px;background-size:167px auto;"></span><span class="en tier-${e.tier}">${(GACHA[e.tipo] || GACHA.MOVE).emoji} Uovo ${EGG_TIERS[e.tier].it}</span><span class="ew">tra ${e.waves} ondate</span></div>`).join("")}</div>`
       : `<div class="meta-empty">Nessun uovo in incubazione.<br>Vai al Gacha per ottenerne!</div>`;
     const unlocked = Object.keys(meta.unlocked).filter(k => S[k]);
     showMetaScreen(`
@@ -5583,18 +5681,36 @@
     if (hatched.length) {
       meta.eggs = meta.eggs.filter(e => e.waves > 0);
       for (const egg of hatched) {
-        const pool = speciesOfTier(egg.tier);
-        const sp = pool[Math.floor(Math.random() * pool.length)];
-        const shiny = Math.random() < 1 / 40;
+        const tipo = egg.tipo || "MOVE";
+        /* SPECIE: il gacha LEGGENDARIO, su un uovo di tier leggendario, ha il
+           50% di dare la specie in evidenza di quel giorno (come `rollSpecies`). */
+        let sp = null;
+        if (tipo === "LEGENDARY" && egg.tier === "LEGENDARY" && egg.evidenza
+            && S[egg.evidenza] && Math.random() < 0.5) {
+          sp = egg.evidenza;
+        } else {
+          const pool = speciesOfTier(egg.tier);
+          sp = pool[Math.floor(Math.random() * pool.length)];
+        }
+        // CROMATICO: 1/128, ma il gacha cromatico raddoppia (1/64)
+        const tassoShiny = tipo === "SHINY" ? TASSO_SHINY_GACHA_SU : TASSO_SHINY_GACHA;
+        const shiny = Math.floor(Math.random() * tassoShiny) === 0;
         if (!meta.unlocked[sp] || shiny) meta.unlocked[sp] = shiny ? 2 : (meta.unlocked[sp] || 1);
         meta.stats.hatched++;
         meta.candy = meta.candy || {};
         meta.candy[sp] = (meta.candy[sp] || 0) + 3;   // le uova danno più caramelle
-        if (messages) messages.push(`🥚 Un uovo si è schiuso! È nato ${S[sp].it}${shiny ? " ✨SHINY" : ""} — sbloccato come starter!`);
+        if (messages) messages.push(`🥚 Un uovo ${GACHA[tipo].emoji} si è schiuso! È nato ${S[sp].it}${shiny ? " ✨CROMATICO" : ""} — sbloccato come starter!`);
+        /* ABILITÀ NASCOSTA: 1 su 192, come `GACHA_EGG_HA_RATE`. È l'altra via
+           per sbloccarla, oltre a catturare un esemplare che ce l'ha. */
+        if (S[sp].abilities.hidden && Math.floor(Math.random() * GACHA_EGG_HA_RATE) === 0) {
+          const nuova = registraAbilita(rootOf(sp), 2);
+          if (nuova && messages) messages.push(`🔓✨ È nato con l'abilità NASCOSTA: ${nuova.it} sbloccata per ${S[sp].it}!`);
+        }
         /* Ogni schiusa sblocca UNA mossa da uovo della specie nata: e' l'unico
            modo di ottenerle, ed e' cio' che fa crescere le mosse iniziali
-           selezionabili nel menu di partenza. */
-        const em = unlockEggMove(sp, egg.tier);
+           selezionabili nel menu di partenza. Il gacha MOSSE rende molto piu'
+           probabile che tocchi la RARA (`BOOSTED_RARE_EGGMOVE_RATES`). */
+        const em = unlockEggMove(sp, egg.tier, tipo === "MOVE");
         if (em && messages) {
           messages.push(em.rara
             ? `🥚✨ ${S[sp].it} ha imparato la mossa da uovo RARA ${em.it}!`

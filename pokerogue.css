@@ -530,6 +530,21 @@ html, body {
 .meta-btn:active { transform: translateY(3px); }
 .meta-btn.primary { background: #d24b4b; }
 .meta-btn.gacha { background: #7b57c0; }
+/* Riga della revisione in fondo alla Home: dice se il telefono sta girando
+   la versione nuova o quella di prima (l'aggiornamento si applica al riavvio
+   successivo a quello che l'ha scaricata). */
+.rev-line { text-align: center; font-size: clamp(9px, 2.4vw, 11px); opacity: .45; margin-top: 1.2vh; }
+
+/* Le TRE macchine del gacha, una sotto l'altra: titolo + cosa favorisce */
+.macchine { display: flex; flex-direction: column; gap: 1.1vh; margin: 1vh 0; }
+.meta-btn.macchina {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  padding: 9px 14px; text-align: left; line-height: 1.25;
+}
+.mac-tit { font-size: clamp(14px, 4vw, 18px); font-weight: 800; }
+.mac-sub { font-size: clamp(10px, 2.9vw, 13px); opacity: .85; font-weight: 500; }
+.meta-btn.macchina[data-g="LEGENDARY"] { background: #b08128; }
+.meta-btn.macchina[data-g="SHINY"] { background: #2f7fa8; }
 .meta-btn.eggs { background: #3aa563; }
 .meta-btn.ghost { background: #3a4250; }
 .meta-btn:disabled { opacity: .45; }
