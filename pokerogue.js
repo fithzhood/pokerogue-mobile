@@ -2476,6 +2476,104 @@
 
   /* ---------------- Level-up: evoluzioni + nuove mosse ---------------- */
   // Evolve il Pokemon nella specie `toId` mantenendo la percentuale di HP.
+  /* ======================================================================
+     ANIMAZIONE DI EVOLUZIONE — e si può interrompere, come nei giochi veri
+
+     La sequenza: buio in scena, il Pokemon al centro, sagome bianche che si
+     alternano sempre più in fretta fra la vecchia e la nuova forma, lampo,
+     nuova forma. Un pulsante «✖ Interrompi» resta visibile per tutto il
+     tempo: se lo premi, l'evoluzione si ferma e il Pokemon resta com'è
+     (si riproporra' al prossimo livello, come nell'originale).
+     ⚠️ Funziona anche per i membri in PANCHINA: lo sprite lo dipinge questa
+     schermata, non si appoggia a quello in campo.
+     ====================================================================== */
+  function animaEvoluzione(p, toId, fine) {
+    const scena = document.getElementById("scene");
+    if (!scena) { fine(false); return; }
+    const nsp = S[toId];
+    const vecchio = p.name, nuovo = nsp.it;
+
+    const ov = document.createElement("div");
+    ov.id = "evo-overlay";
+    ov.innerHTML = `<div class="evo-sprite" id="evoSprite"></div>
+                    <div class="evo-testo">${vecchio} si sta evolvendo…</div>`;
+    scena.appendChild(ov);
+    const el = ov.querySelector("#evoSprite");
+
+    // dipinge un frame di sprite dentro l'elemento dell'overlay
+    const dipingi = (s) => {
+      if (!s || !el) return;
+      const f = s.frame, k = Math.min(2.6, 150 / f.h, 150 / f.w);
+      el.style.width = (f.w * k) + "px";
+      el.style.height = (f.h * k) + "px";
+      el.style.backgroundImage = `url("${s.sheet}")`;
+      el.style.backgroundPosition = `-${f.x * k}px -${f.y * k}px`;
+      el.style.backgroundSize = `${s.sheet_w * k}px ${s.sheet_h * k}px`;
+    };
+
+    let annullato = false, tmr = null;
+    const pulisci = () => { clearTimeout(tmr); ov.remove(); cmd().innerHTML = ""; };
+
+    // il tasto per fermarla sta nella fascia comandi, dove si tocca sempre
+    game.phase = "MESSAGE";
+    cmd().innerHTML = `<div class="msgbox evo-box"><div class="log-line">${vecchio} si sta evolvendo…</div>
+      <button class="btn back evo-stop">✖ Interrompi</button></div>`;
+    cmd().querySelector(".evo-stop").onclick = () => {
+      if (annullato) return;
+      annullato = true;
+      pulisci();
+      fine(false);
+    };
+
+    Promise.all([
+      loadSprite(S[p.speciesId].dex, "back", p.shiny),
+      loadSprite(nsp.dex, "back", p.shiny),
+    ]).then(([sVecchio, sNuovo]) => {
+      if (annullato) return;
+      dipingi(sVecchio);
+      // 8 alternanze che accelerano: 260 ms → 90 ms
+      const passi = [260, 240, 210, 180, 150, 130, 110, 90, 90, 90];
+      let i = 0;
+      const passo = () => {
+        if (annullato) return;
+        if (i >= passi.length) {
+          // lampo finale e nuova forma
+          el.classList.add("evo-lampo");
+          dipingi(sNuovo);
+          el.classList.remove("evo-sagoma");
+          ov.querySelector(".evo-testo").textContent = `${nuovo}!`;
+          tmr = setTimeout(() => { if (!annullato) { pulisci(); fine(true); } }, 900);
+          return;
+        }
+        // a sagoma bianca mostra la forma NUOVA, a colori quella vecchia
+        const sagoma = i % 2 === 0;
+        el.classList.toggle("evo-sagoma", sagoma);
+        dipingi(sagoma ? sNuovo : sVecchio);
+        tmr = setTimeout(passo, passi[i++]);
+      };
+      passo();
+    }).catch(() => { if (!annullato) { pulisci(); fine(true); } });
+  }
+
+  /* Coda delle evoluzioni maturate: UNA alla volta, con la sua animazione. */
+  function processEvos(done) {
+    const item = (game.pendingEvos || []).shift();
+    if (!item) { done(); return; }
+    const { mon, to } = item;
+    // nel frattempo potrebbe essere caduto o essere gia' cambiato
+    if (!mon || mon.speciesId === to) { processEvos(done); return; }
+    animaEvoluzione(mon, to, (proseguito) => {
+      const msgs = [];
+      if (proseguito) {
+        evolve(mon, to, msgs);
+      } else {
+        mon.evoRifiutata = true;      // ci riproverà al prossimo livello
+        msgs.push(`Cosa?! ${mon.name} ha smesso di evolversi!`);
+      }
+      queueMessages(msgs, () => processEvos(done));
+    });
+  }
+
   function evolve(p, toId, messages) {
     const from = p.name;
     const nsp = S[toId];
@@ -2591,7 +2689,10 @@
       (e.friendship && p.level >= FRIENDSHIP_LEVEL) ||
       (!e.item && !e.friendship && e.level && p.level >= e.level)
     ));
-    if (evo) evolve(p, evo.to, messages);
+    /* ⚠️ L'evoluzione NON avviene qui: si mette in coda. Qui siamo dentro la
+       costruzione dei messaggi, mentre l'evoluzione ha un'animazione (e si può
+       interrompere), quindi va gestita dopo, da `processEvos`. */
+    if (evo) { game.pendingEvos = game.pendingEvos || []; game.pendingEvos.push({ mon: p, to: evo.to }); }
     const from = p.movesCheckedTo != null ? p.movesCheckedTo : p.level;
     const gained = (LEARN[p.speciesId] || []).filter(([lv, id]) => lv > from && lv <= p.level && M[id]);
     p.movesCheckedTo = p.level;
@@ -2723,13 +2824,14 @@
       messages.push(`🕶 Tra le cose di ${game.enemy.trainer} c'è un bottino speciale…`);
     }
     const wasTrainer = !!game.enemy.trainer;
-    queueMessages(messages, () => processLearns(() => {
+    // prima le EVOLUZIONI (con la loro animazione), poi le mosse da imparare
+    queueMessages(messages, () => processEvos(() => processLearns(() => {
       // ULTIMA BALL (una sola) solo se il selvatico è stato SCONFITTO, non catturato
       if (!wasBoss && !wasTrainer && !game.capturedThisWave) { offerCapture(); return; }
       // allenatore (NON il Rivale): con una Theft Ball puoi rubargli un Pokémon
       if (wasTrainer && !game.trainerIsRival && (game.theftballs || 0) > 0 && game.trainerRoster.length) { offerSteal(); return; }
       openShop();
-    }));
+    })));
   }
 
   function gameOver(reason) {
@@ -7296,7 +7398,12 @@
   }
 
   // Caramelle fuori-lotta: livelli e mosse senza prompt (auto-impara solo se c'e' posto)
-  function checkLevelUpsQuiet(p) { const dummy = { push: () => {} }; checkLevelUps(p, dummy); game.pendingLearns = []; }
+  function checkLevelUpsQuiet(p) {
+    const dummy = { push: () => {} };
+    checkLevelUps(p, dummy);
+    // controllo "silenzioso": niente code, né mosse da sostituire né evoluzioni
+    game.pendingLearns = []; game.pendingEvos = [];
+  }
 
   /* Completa una scelta "dinamica": decide QUALE vitamina/tipo/pietra/bacca. */
   function fillPick(item) {
@@ -7484,12 +7591,17 @@
         <button class="me-opt" data-act="back"><span class="me-opt-l">Indietro</span></button></div>`);
     metaEl().querySelectorAll(".me-opt[data-i]").forEach(b => b.onclick = () => {
       const e = evos[parseInt(b.dataset.i, 10)];
-      game.stones[e.stone]--;
-      const msgs = [];
-      evolve(e.mon, e.to, msgs);   // aggiorna specie/stat/sprite (già ricalcola)
       hideMeta();                  // narrazione sul bottom screen
       renderScene();
-      queueMessages(msgs, () => back());
+      // anche con la pietra si vede l'animazione, e si può fermare: in quel
+      // caso la pietra NON si consuma
+      animaEvoluzione(e.mon, e.to, (proseguito) => {
+        const msgs = [];
+        if (proseguito) { game.stones[e.stone]--; evolve(e.mon, e.to, msgs); }
+        else msgs.push(`Cosa?! ${e.mon.name} ha smesso di evolversi!`);
+        renderScene();
+        queueMessages(msgs, () => back());
+      });
     });
     metaEl().querySelector('[data-act="back"]').onclick = back;
   }
