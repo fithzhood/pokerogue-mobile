@@ -573,6 +573,23 @@ html, body {
 .chip.on { background: #4a72d0; color: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,.3) inset; }
 /* abilità non ancora sbloccata: si vede, ma col lucchetto */
 .chip.ab-chip.chiusa { opacity: .45; cursor: default; font-style: italic; }
+/* Chip + pulsantino ⓘ che apre lo snippet "cosa fa". Stanno insieme e non si
+   spezzano su due righe. */
+.chip-wrap { display: inline-flex; align-items: stretch; gap: 2px; }
+.chip-i {
+  background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.22);
+  color: var(--ink); border-radius: 999px; cursor: pointer;
+  font-family: inherit; font-size: clamp(11px, 3vw, 14px);
+  padding: 0 7px; line-height: 1;
+}
+.chip-i.on { background: #4a72d0; border-color: rgba(255,255,255,.5); }
+/* Riquadro con la descrizione: uno solo aperto per volta */
+.snippet {
+  background: rgba(0,0,0,.35); border: 2px solid rgba(255,255,255,.16);
+  border-radius: 10px; padding: 7px 10px; margin: 6px 0;
+}
+.snip-top { display: flex; align-items: center; gap: 6px; font-size: clamp(12px, 3.3vw, 15px); margin-bottom: 3px; }
+.snip-testo { font-size: clamp(11px, 3vw, 13px); line-height: 1.35; opacity: .92; }
 .sd-stats { display: flex; flex-direction: column; gap: 5px; margin: 1.5vh 0; }
 .stat-row { display: flex; align-items: center; gap: 8px; font-size: clamp(11px, 3vw, 14px); }
 .stat-lab { width: 42px; opacity: .85; }

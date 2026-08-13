@@ -6551,6 +6551,44 @@
     renderStarterDetail();
   }
 
+  /* ======================================================================
+     SNIPPET "cosa fa" — nella scheda starter si vedevano solo i NOMI di
+     abilità e mosse. Ogni chip ha adesso una ⓘ che apre (e richiude, al
+     secondo tocco) un riquadro con la descrizione e i dati veri.
+     Ne resta aperto UNO alla volta: su un telefono, aprirli tutti insieme
+     farebbe scorrere la pagina all'infinito.
+     ====================================================================== */
+  const aperto = (tipo, id) => !!(starterCfg && starterCfg.info
+    && starterCfg.info.tipo === tipo && starterCfg.info.id === id);
+  function apriInfo(tipo, id) {
+    starterCfg.info = aperto(tipo, id) ? null : { tipo, id };
+    renderStarterDetail();
+  }
+  /* Riquadro della mossa: gli stessi dati della scheda in lotta, in piccolo. */
+  function snippetMossa(id) {
+    const mv = M[id]; if (!mv) return "";
+    const extra = effettiInParole(mv);
+    const dati = [
+      `<span class="ms-dato"><i>Potenza</i>${mv.power || "—"}</span>`,
+      `<span class="ms-dato"><i>Precisione</i>${mv.accuracy > 0 ? mv.accuracy + "%" : "sempre"}</span>`,
+      `<span class="ms-dato"><i>PP</i>${mv.pp}</span>`,
+      mv.effectChance > 0 ? `<span class="ms-dato"><i>Effetto</i>${mv.effectChance}%</span>` : "",
+    ].join("");
+    return `<div class="snippet" style="border-color:${T[mv.type].color}">
+      <div class="snip-top"><b>${mv.it}</b> <span class="ticon t-${mv.type}"></span><span class="cicon c-${mv.category}"></span></div>
+      <div class="ms-dati">${dati}</div>
+      <div class="snip-testo">${mv.effect || "Nessun effetto particolare."}</div>
+      ${extra ? `<div class="ms-extra">${extra}</div>` : ""}
+    </div>`;
+  }
+  function snippetAbilita(a) {
+    const ab = ABIL[a]; if (!ab) return "";
+    return `<div class="snippet">
+      <div class="snip-top"><b>${ab.it}</b></div>
+      <div class="snip-testo">${ab.description || "Nessuna descrizione."}</div>
+    </div>`;
+  }
+
   function renderStarterDetail() {
     const c = starterCfg, sp = S[c.k];
     const bs = sp.baseStats;
@@ -6560,15 +6598,21 @@
     const abils = (c.abilTutte || c.abilPool).map(a => {
       const libera = c.abilPool.includes(a);
       const nascosta = sp.abilities.hidden === a;
-      return `<button class="chip ab-chip ${c.ability === a ? "on" : ""} ${libera ? "" : "chiusa"}" data-ab="${a}" ${libera ? "" : "disabled"}>${libera ? "" : "🔒 "}${(ABIL[a] || {}).it || a}${nascosta ? " (H)" : ""}</button>`;
+      return `<span class="chip-wrap">
+        <button class="chip ab-chip ${c.ability === a ? "on" : ""} ${libera ? "" : "chiusa"}" data-ab="${a}" ${libera ? "" : "disabled"}>${libera ? "" : "🔒 "}${(ABIL[a] || {}).it || a}${nascosta ? " (H)" : ""}</button>
+        <button class="chip-i ${aperto("ab", a) ? "on" : ""}" data-i-ab="${a}" title="cosa fa">ⓘ</button>
+      </span>`;
     }).join("");
     /* Le mosse da uovo si mostrano in fondo e marcate: sono la ricompensa delle
        schiuse, non qualcosa che hai per diritto. La 4a e' la RARA. */
     const chip = (id, uovo) => {
       const mv = M[id], on = c.moves.includes(id);
       const raro = uovo && isRareEggMove(c.k, id);
-      return `<button class="chip move-chip ${on ? "on" : ""} ${uovo ? "egg" : ""} ${raro ? "rara" : ""}" data-mv="${id}" style="${on ? "background:" + T[mv.type].color : ""}">
-        <span class="ticon t-${mv.type}"></span>${uovo ? (raro ? "🥚✨ " : "🥚 ") : ""}${mv.it}</button>`;
+      return `<span class="chip-wrap">
+        <button class="chip move-chip ${on ? "on" : ""} ${uovo ? "egg" : ""} ${raro ? "rara" : ""}" data-mv="${id}" style="${on ? "background:" + T[mv.type].color : ""}">
+          <span class="ticon t-${mv.type}"></span>${uovo ? (raro ? "🥚✨ " : "🥚 ") : ""}${mv.it}</button>
+        <button class="chip-i ${aperto("mv", id) ? "on" : ""}" data-i-mv="${id}" title="cosa fa">ⓘ</button>
+      </span>`;
     };
     const moves = c.learnPool.map(id => chip(id, false)).join("")
                 + c.eggPool.map(id => chip(id, true)).join("");
@@ -6585,6 +6629,7 @@
           <div class="sd-name">${c.shiny ? "✨" : ""}${sp.it} ${c.pkrs ? '<span class="sb-pkrs">💜</span>' : ""} ${hasRibbon(c.k) ? "🎀" : ""}</div>
           <div class="sd-types">${sp.types.map(t => `<span class="ticon t-${t}"></span>`).join("")}</div>
           <div class="sd-abrow">Abilità: ${abils}</div>
+          ${c.info && c.info.tipo === "ab" ? snippetAbilita(c.info.id) : ""}
           <div class="sd-passive">Passiva: <b>${(ABIL[sp.passive] || {}).it || "—"}</b>${meta.passiveOn && meta.passiveOn[c.k] ? " ✅" : " 🔒"} · Costo: <b>${starterCost(c.k)}</b> punti</div>
           <div class="sd-candy">🍬 ${candyOf(c.k)} caramelle
             <button class="chip candy-btn" data-cc="1" ${candyOf(c.k) >= costCutPrice(c.k) && starterCost(c.k) > 1 ? "" : "disabled"}>−1 costo (${costCutPrice(c.k)})</button>
@@ -6598,6 +6643,7 @@
       </div>
       <div class="meta-sub">Mosse iniziali (max 4 · scelte ${c.moves.length}/4)</div>
       <div class="move-chips">${moves}</div>
+      ${c.info && c.info.tipo === "mv" ? snippetMossa(c.info.id) : ""}
       ${eggNote}
       <div class="meta-actions two-col">
         <button class="meta-btn ghost" data-act="back">Indietro</button>
@@ -6636,6 +6682,9 @@
       else if (c.moves.length < 4) c.moves.push(id);
       renderStarterDetail();
     });
+    // le ⓘ aprono/chiudono lo snippet "cosa fa"
+    metaEl().querySelectorAll("[data-i-ab]").forEach(b => b.onclick = () => apriInfo("ab", b.dataset.iAb));
+    metaEl().querySelectorAll("[data-i-mv]").forEach(b => b.onclick = () => apriInfo("mv", b.dataset.iMv));
     metaEl().querySelector('[data-act="back"]').onclick = renderStarterSelect;
     metaEl().querySelector('[data-act="go"]').onclick = () => {
       // aggiunge alla squadra iniziale (sistema a punti), poi torna alla scelta
