@@ -106,6 +106,35 @@ html, body {
    come nei giochi veri, o finisce sotto i riquadri PS in basso a destra */
 .battler-slot.ally2  { bottom: 3%; left: 34%; }   /* destra, più in basso */
 #game.double .battler-slot .sprite { transform-origin: bottom center; }
+/* ============================================================================
+   LANCIO DELLA BALL — vola, risucchia, cade, dondola, e scatta o si apre.
+   Sta sopra i Pokemon (z-index 5) ma sotto gli overlay meta (20).
+   ========================================================================== */
+.ball-lancio {
+  position: absolute; z-index: 6;
+  width: 30px; height: 40px; margin: -20px 0 0 -15px;   /* ancorata al centro */
+  background-size: contain; background-repeat: no-repeat; background-position: center;
+  image-rendering: pixelated;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 3px rgba(0,0,0,.5));
+}
+/* mentre e' aperta lampeggia di bianco: e' il momento in cui risucchia o libera */
+.ball-lancio.aperta { filter: drop-shadow(0 0 8px #fff) brightness(2.2); transform: scale(1.15); }
+/* dondolio: due oscillazioni per scossa, come nei giochi */
+.ball-lancio.dondola { animation: ballDondola .46s ease-in-out; }
+@keyframes ballDondola {
+  0%, 100% { transform: rotate(0deg); }
+  25%      { transform: rotate(-22deg) translateX(-3px); }
+  75%      { transform: rotate(22deg)  translateX(3px); }
+}
+/* scatto finale: la ball si chiude e manda un lampo */
+.ball-lancio.presa { animation: ballPresa .6s ease-out forwards; }
+@keyframes ballPresa {
+  0%   { filter: drop-shadow(0 0 0 #ffd64a) brightness(1); transform: scale(1); }
+  30%  { filter: drop-shadow(0 0 14px #ffd64a) brightness(2); transform: scale(1.25); }
+  100% { filter: drop-shadow(0 0 4px #ffd64a) brightness(1.1); transform: scale(1); }
+}
+
 /* Bersaglio scegliibile toccando direttamente il Pokemon in campo (lotte in
    doppio). L'anello pulsante dice quali sprite rispondono al tocco.
    ⚠️ Sta sul `.battler` (dentro lo slot), non sullo slot: cosi' l'area

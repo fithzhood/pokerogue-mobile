@@ -2759,14 +2759,116 @@
     const p = shakeProb(modifiedCatchRate(enemy, ballMult, useHp)) / 65536;
     return Math.max(1, Math.min(100, Math.round(Math.pow(Math.min(1, p), 4) * 100)));
   }
-  function rollCapture(enemy, ballMult, useHp) {
+  /* Tira la cattura E dice QUANTE scosse ha retto la ball: serve
+     all'animazione, che deve dondolare esattamente quelle volte prima di
+     aprirsi (o di chiudersi con lo scatto). */
+  function rollCaptureDettaglio(enemy, ballMult, useHp) {
     const p = shakeProb(modifiedCatchRate(enemy, ballMult, useHp));
     // CATTURA CRITICA (esiste nell'originale): una sola scossa invece di quattro.
     // Il Presamuleto la rende piu' probabile.
     const critPct = Math.min(0.25, 0.05 * ((game.charms && game.charms.catching) || 0));
-    const scosse = (critPct && Math.random() < critPct) ? 1 : 4;
-    for (let i = 0; i < scosse; i++) if (Math.random() * 65536 >= p) return false;
-    return true;
+    const critica = !!(critPct && Math.random() < critPct);
+    const totale = critica ? 1 : 4;
+    for (let i = 0; i < totale; i++) {
+      if (Math.random() * 65536 >= p) return { preso: false, scosse: i, critica };
+    }
+    return { preso: true, scosse: totale, critica };
+  }
+  function rollCapture(enemy, ballMult, useHp) {
+    return rollCaptureDettaglio(enemy, ballMult, useHp).preso;
+  }
+
+  /* ======================================================================
+     ANIMAZIONE DEL LANCIO — la ball vola, risucchia, cade, DONDOLA, e poi
+     o scatta chiusa o si apre e lascia libero il Pokemon.
+     Il numero di dondolii NON e' decorativo: e' quello vero uscito dal tiro
+     (`rollCaptureDettaglio`), come nei giochi. Una ball che dondola tre volte
+     e poi si apre e' un'informazione, non un effetto.
+     ⚠️ Vive sopra la scena ma SOTTO gli overlay meta (z-index 20).
+     ====================================================================== */
+  const BALL_IMG_KEY = { balls: "pb", greatballs: "gb", ultraballs: "ub", rogueballs: "rb", theftballs: "tb", masterballs: "mb" };
+  function animaBall(ballKey, esito, onDone) {
+    const scena = document.getElementById("scene");
+    const bersaglio = document.getElementById("enemy-sprite");
+    if (!scena || !bersaglio) { onDone(); return; }
+    const rs = scena.getBoundingClientRect();
+    let rb = bersaglio.getBoundingClientRect();
+    /* ⚠️ L'ULTIMA BALL si lancia su un Pokemon gia' a terra: il suo sprite puo'
+       essere azzerato. In quel caso si mira alla PEDANA avversaria, se no la
+       ball volerebbe nell'angolo in alto a sinistra. */
+    if (!rb.width || !rb.height) {
+      const slot = document.querySelector(".battler-slot.enemy");
+      rb = slot ? slot.getBoundingClientRect() : rb;
+    }
+    const ax = (rb.width ? rb.left - rs.left + rb.width / 2 : rs.width * 0.72);
+    const ay = (rb.height ? rb.top - rs.top + rb.height / 2 : rs.height * 0.35);
+    // parte dal basso a sinistra, da dove sta il tuo Pokemon
+    const px = rs.width * 0.18, py = rs.height * 0.82;
+
+    const ball = document.createElement("div");
+    ball.className = "ball-lancio";
+    ball.style.backgroundImage = `url('${ballIcon(BALL_IMG_KEY[ballKey] || "pb")}')`;
+    ball.style.left = px + "px";
+    ball.style.top = py + "px";
+    scena.appendChild(ball);
+
+    /* ⚠️ Ripulire SEMPRE lo sprite: se restasse `scale(.05)`/`opacity:0` per
+       un'interruzione, il Pokemon avversario sparirebbe dal campo e non
+       tornerebbe piu'. Chi ha vinto lo toglie di scena per conto suo. */
+    const finisci = () => {
+      ball.remove();
+      bersaglio.style.transition = "";
+      bersaglio.style.transform = "";
+      bersaglio.style.opacity = "";
+      onDone();
+    };
+    const dopo = (ms, fn) => setTimeout(fn, ms);
+
+    // 1. volo ad arco fino al bersaglio
+    requestAnimationFrame(() => {
+      ball.style.transition = "left .45s linear, top .45s cubic-bezier(.2,-.6,.6,1)";
+      ball.style.left = ax + "px";
+      ball.style.top = ay + "px";
+    });
+    dopo(470, () => {
+      // 2. risucchio: il Pokemon si rimpicciolisce dentro la ball
+      ball.classList.add("aperta");
+      bersaglio.style.transition = "transform .28s ease-in, opacity .28s ease-in";
+      bersaglio.style.transformOrigin = "center";
+      bersaglio.style.transform = "scale(.05)";
+      bersaglio.style.opacity = "0";
+      dopo(300, () => {
+        ball.classList.remove("aperta");
+        // 3. la ball cade a terra
+        ball.style.transition = "top .3s cubic-bezier(.5,0,.9,.6)";
+        ball.style.top = (ay + rs.height * 0.10) + "px";
+        dopo(320, () => {
+          // 4. i dondolii veri
+          let n = 0;
+          const dondola = () => {
+            if (n >= esito.scosse) return chiusura();
+            n++;
+            ball.classList.add("dondola");
+            dopo(460, () => { ball.classList.remove("dondola"); dopo(140, dondola); });
+          };
+          const chiusura = () => {
+            if (esito.preso) {
+              // scatto: la ball si chiude e lampeggia
+              ball.classList.add("presa");
+              dopo(650, finisci);
+            } else {
+              // si apre e il Pokemon torna fuori
+              ball.classList.add("aperta");
+              bersaglio.style.transition = "transform .3s ease-out, opacity .3s ease-out";
+              bersaglio.style.transform = "";
+              bersaglio.style.opacity = "1";
+              dopo(420, finisci);
+            }
+          };
+          dondola();
+        });
+      });
+    });
   }
 
   const BALL_TYPES = [
@@ -2805,7 +2907,7 @@
       const caught = rollCapture(m, 2, 1);
       const msgs = [`Lanci una Theft Ball su ${m.name}…`];
       if (caught) {
-        const mon = makeFighter(m.speciesId, m.level, { shiny: m.shiny, ivs: m.ivs, variant: m.variant });
+        const mon = makeFighter(m.speciesId, m.level, { shiny: m.shiny, ivs: m.ivs, variant: m.variant, abilIndex: m.abilIndex });
         accogliPokemon(mon, msgs, "🕶 Rubato!");
         registerCaught(m.speciesId, m.shiny, m.ivs, msgs, m.variant, m.abilIndex);
       } else msgs.push(`${m.name} è sfuggito alla Theft Ball!`);
@@ -2936,10 +3038,19 @@
     if (!ball || (game[ballKey] || 0) <= 0) return;
     game[ballKey]--;
     const enemy = game.enemy;
-    const caught = ball.mult >= 255 ? true : rollCapture(enemy, ball.mult, psUltimaBall(enemy));
-    const messages = [`Lanci una ${ball.it} su ${enemy.name}…`];
+    const esito = ball.mult >= 255
+      ? { preso: true, scosse: 1, critica: true }
+      : rollCaptureDettaglio(enemy, ball.mult, psUltimaBall(enemy));
+    // stessa animazione del lancio in battaglia (§ dondolio)
+    game.phase = "MESSAGE";
+    cmd().innerHTML = `<div class="msgbox"><div class="log-line">Lanci una ${ball.it} su ${enemy.name}…</div></div>`;
+    animaBall(ballKey, esito, () => risolviUltimaBall(enemy, esito.preso));
+  }
+
+  function risolviUltimaBall(enemy, caught) {
+    const messages = [];
     if (caught) {
-      const mon = makeFighter(enemy.speciesId, enemy.level, { shiny: enemy.shiny, ivs: enemy.ivs, variant: enemy.variant }); // fresco, HP/PP pieni
+      const mon = makeFighter(enemy.speciesId, enemy.level, { shiny: enemy.shiny, ivs: enemy.ivs, variant: enemy.variant, abilIndex: enemy.abilIndex }); // fresco, HP/PP pieni
       accogliPokemon(mon, messages, "Preso!");
       // meta-progressione: starter sbloccato + caramella + IV migliori
       registerCaught(enemy.speciesId, enemy.shiny, enemy.ivs, messages, enemy.variant, enemy.abilIndex);
@@ -4761,12 +4872,21 @@
 
     game[ballKey]--;
     const enemy = game.enemy;
+    /* Il tiro si fa ORA, ma prima di raccontarlo si mostra l'animazione: la
+       ball deve dondolare esattamente le volte che ha retto davvero. */
+    const esito = ball.mult >= 255
+      ? { preso: true, scosse: 1, critica: true }
+      : rollCaptureDettaglio(enemy, ball.mult);
+    game.phase = "MESSAGE";                    // niente comandi durante il lancio
+    cmd().innerHTML = `<div class="msgbox"><div class="log-line">Lanci una ${ball.it} su ${enemy.name}…</div></div>`;
+    animaBall(ballKey, esito, () => risolviLancio(ballKey, ball, enemy, esito.preso));
+  }
+
+  function risolviLancio(ballKey, ball, enemy, caught) {
     const log = makeLog();
-    log.push(`Lanci una ${ball.it} su ${enemy.name}…`);
-    const caught = ball.mult >= 255 ? true : rollCapture(enemy, ball.mult);
 
     if (caught) {
-      const mon = makeFighter(enemy.speciesId, enemy.level, { shiny: enemy.shiny, ivs: enemy.ivs, variant: enemy.variant });
+      const mon = makeFighter(enemy.speciesId, enemy.level, { shiny: enemy.shiny, ivs: enemy.ivs, variant: enemy.variant, abilIndex: enemy.abilIndex });
       const stolen = !!enemy.trainer;
       accogliPokemon(mon, log, stolen ? "🕶 Rubato!" : "Preso!");
       registerCaught(enemy.speciesId, enemy.shiny, enemy.ivs, log, enemy.variant, enemy.abilIndex);
