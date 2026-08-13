@@ -5574,8 +5574,20 @@
        risalto, così l'occhio trova le cose notevoli anche in mezzo. */
     const righe = String(text).split("\n").filter(r => r.length)
       .map(r => `<div class="log-line${ACCENT.test(r) ? " accent" : ""}">${r}</div>`).join("");
-    cmd().innerHTML = `<div class="msgbox">${righe}<span class="cont">▸</span></div>`;
-    cmd().querySelector(".msgbox").onclick = advanceMessages;
+    cmd().innerHTML = `<div class="msgbox"><div class="msg-testo">${righe}</div><span class="cont">▸</span></div>`;
+    const box = cmd().querySelector(".msgbox");
+    box.onclick = advanceMessages;
+    /* Se il testo è più alto della casella si può scorrere col dito: lo si
+       segnala con la velatura in basso. Il tocco resta quello che avanza —
+       trascinare scorre e basta, senza far passare il messaggio. */
+    const testo = box.querySelector(".msg-testo");
+    if (testo.scrollHeight > testo.clientHeight + 1) {
+      box.classList.add("scorre");
+      testo.addEventListener("scroll", () => {
+        const infondo = testo.scrollTop + testo.clientHeight >= testo.scrollHeight - 2;
+        box.classList.toggle("scorre", !infondo);
+      });
+    }
   }
 
   /* ====================================================================== */

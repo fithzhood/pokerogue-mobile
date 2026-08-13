@@ -452,12 +452,31 @@ html, body {
   border: 2px solid rgba(255,255,255,.14);
   border-radius: 14px;
   padding: 16px 16px 30px;
-  display: flex; flex-direction: column; justify-content: center; gap: 6px;
+  display: flex; flex-direction: column;
   font-size: clamp(16px, 4.4vw, 23px); line-height: 1.32;
   position: relative;
   cursor: pointer;
-  overflow: hidden;   /* mai barre di scorrimento */
+  overflow: hidden;   /* la cornice non si sfonda: scorre il testo dentro */
 }
+/* IL TESTO SCORRE, LA BARRA NO.
+   Certi momenti dicono parecchie cose insieme — la cattura ne mette quattro
+   (preso, caramella, IV, abilità) — e non ci stavano tutte. Ora il blocco del
+   testo scorre col dito; la barra di scorrimento resta nascosta perché
+   ruberebbe spazio e sporcherebbe la cornice.
+   ⚠️ `safe center`: con `justify-content: center` un contenuto più alto del
+   contenitore viene tagliato IN CIMA e le prime righe diventano irraggiungibili.
+   ⚠️ Il triangolino ▸ sta FUORI da questo blocco, se no scorrerebbe via. */
+.msg-testo {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column; justify-content: safe center; gap: 6px;
+  overflow-y: auto; overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;              /* Firefox */
+}
+.msg-testo::-webkit-scrollbar { width: 0; height: 0; display: none; }
+/* quando c'è altro da leggere, una velatura in basso lo fa capire */
+.msgbox.scorre .msg-testo { -webkit-mask-image: linear-gradient(#000 82%, transparent);
+                            mask-image: linear-gradient(#000 82%, transparent); }
 .msgbox .log-line { transition: opacity .12s ease; }
 .msgbox .log-line { opacity: .95; }
 .msgbox .log-line.accent { font-weight: 700; }
