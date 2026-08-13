@@ -2468,16 +2468,32 @@
         p.moves.push({ id, pp: M[id].pp, maxPp: M[id].pp });
         messages.push(`${p.name} impara ${M[id].it}!`);
       } else {
-        game.pendingLearns.push({ mon: p, moveId: id });
-        messages.push(`${p.name} vorrebbe imparare ${M[id].it}…`);
+        /* ⚠️ Il messaggio NON va nella narrazione insieme agli altri: se ne
+           occupa `processLearns`, che lo mostra e SUBITO DOPO apre la
+           schermata di quella mossa. Prima uscivano tutti i messaggi di fila
+           e solo alla fine, tutte insieme, le schermate: non si capiva piu'
+           quale scelta riguardasse chi. Uno alla volta. */
+        game.pendingLearns.push({
+          mon: p, moveId: id,
+          testo: `${p.name} è salito al Lv.${p.level} e vorrebbe imparare ${M[id].it}!`,
+        });
       }
     }
   }
 
-  // Coda "vuole imparare X ma ha 4 mosse": una schermata per volta, poi `done`.
+  /* Coda "vuole imparare X ma ha 4 mosse". UNA alla volta e in ordine:
+     prima il messaggio di quel Pokemon, poi subito la sua schermata, poi
+     il prossimo. Non tutti i messaggi e poi tutte le schermate. */
   function processLearns(done) {
     const item = game.pendingLearns.shift();
     if (!item) { done(); return; }
+    if (item.testo) {
+      const t = item.testo;
+      item.testo = null;                       // gia' detto: non ripeterlo
+      game.pendingLearns.unshift(item);        // rimettilo in testa
+      queueMessages([t], () => processLearns(done));
+      return;
+    }
     const { mon, moveId } = item;
     const nv = M[moveId];
     const btns = mon.moves.map((mi, i) => {
