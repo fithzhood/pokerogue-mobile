@@ -3772,6 +3772,14 @@
     const actions = [];
     if (game.queued) actions.push(game.queued);          // l'azione del primo
     actions.push({ actor: chi, foe: target || pickFoeFor(chi), move: mossa });
+    risolviTurno(actions);
+  }
+
+  /* Risolve il turno a partire dalle azioni del GIOCATORE (una o due, o anche
+     nessuna: chi cambia Pokemon non attacca). Aggiunge gli avversari, ordina e
+     riproduce. Estratta da `playerChooseMove` perche' serve anche al cambio
+     dal secondo slot in doppio. */
+  function risolviTurno(actions, logIniziale) {
     game.queued = null; game.chooser = 0;
     // avversari
     for (const e of [game.enemy, game.enemy2]) {
@@ -3793,7 +3801,7 @@
       return Math.random() - 0.5;
     });
 
-    const log = makeLog();
+    const log = logIniziale || makeLog();
     for (const act of actions) if (act.quick) log.push(`I Rapidartigli di ${act.actor.name} scattano!`);
     for (const act of actions) {
       if (act.actor.fainted) continue;                  // niente colpi post-KO
@@ -3816,20 +3824,54 @@
     playEvents(log.events, afterTurn);
   }
 
-  // Turno in cui il giocatore CAMBIA Pokemon: il nuovo entra, poi il nemico attacca.
+  /* Turno in cui il giocatore CAMBIA Pokemon.
+     ⚠️ In DOPPIO cambia lo slot di CHI STA SCEGLIENDO: prima si agiva sempre
+     sul primo alleato e il secondo non si poteva cambiare affatto (i pulsanti
+     Ball/Squadra/Fuggi erano perfino disabilitati sul secondo comando).
+     Chi cambia non attacca: il turno si risolve con l'azione dell'altro
+     alleato, se gia' scelta, piu' quelle avversarie. */
   function playerSwitch(index) {
     if (game.phase !== "CHOICE") return;
-    const target = game.party[index];
-    if (!target || target.fainted || index === game.active) return;
+    const entrante = game.party[index];
+    const uscente = currentChooser() || game.player;
+    if (!entrante || entrante.fainted || entrante === game.player || entrante === game.player2) return;
     // chi e' intrappolato o radicato non puo' uscire dal campo
-    if (game.player.volatile.trap) {
-      notAvailable(`${game.player.name} è intrappolato e non può ritirarsi!`); return;
+    if (uscente.volatile.trap) {
+      notAvailable(`${uscente.name} è intrappolato e non può ritirarsi!`); return;
     }
-    if (game.player.volatile.ingrain) {
-      notAvailable(`${game.player.name} ha messo radici e non può ritirarsi!`); return;
+    if (uscente.volatile.ingrain) {
+      notAvailable(`${uscente.name} ha messo radici e non può ritirarsi!`); return;
     }
     const log = makeLog();
+
+    if (game.double && uscente === game.player2) {
+      // ---- SECONDO slot: si sostituisce `player2`, il primo ha gia' scelto --
+      log.push(`Ritirati, ${game.player2.name}!`);
+      game.player2 = entrante;
+      resetForBattle(entrante);
+      entrante.spr = null;
+      loadFighterSprite(entrante, "back").then(s => { entrante.spr = s; redrawScene(); });
+      log.push(`Vai, ${entrante.name}!`);
+      applyOnSummon(entrante, game.enemy, log);
+      renderScene();
+      // il secondo non attacca: resta l'azione del primo (se c'e') + i nemici
+      risolviTurno(game.queued ? [game.queued] : [], log);
+      return;
+    }
+
     doSwitch(index, log);
+
+    /* PRIMO slot in doppio: il cambio e' la sua azione, ma il SECONDO deve
+       ancora scegliere. Si narra il cambio e poi si passa a lui. */
+    if (serveSecondoComando()) {
+      game.queued = null;
+      game.chooser = 1;
+      renderScene();
+      playEvents(log.events, () => { game.phase = "CHOICE"; showMainMenu(); });
+      return;
+    }
+    if (game.double) { risolviTurno([], log); return; }
+
     const enemyMove = enemyChooseMove();
     if (!game.enemy.fainted && !game.player.fainted) resolveAction(game.enemy, game.player, enemyMove, log);
     endOfTurnResidual(game.enemy, log);
@@ -4920,9 +4962,9 @@
       <div class="prompt-line">Cosa deve fare ${(chi || game.player).name}?${game.double ? ` <b>(${game.chooser === 1 ? "2°" : "1°"})</b>` : ""} <span class="hud">· ${alive}/${game.party.length} · 🔴${totalBalls()}${game.theftballs ? " 🕶" + game.theftballs : ""} · ₽${game.money}${runLuck() ? " · 🍀" + runLuck() : ""}</span></div>
       <div class="grid2">
         <button class="btn main-fight" data-act="fight">Lotta</button>
-        <button class="btn main-bag"   data-act="ball" ${game.chooser === 1 ? "disabled" : ""}>Ball</button>
-        <button class="btn main-team"  data-act="team" ${game.chooser === 1 ? "disabled" : ""}>Squadra</button>
-        <button class="btn main-run"   data-act="run" ${game.chooser === 1 ? "disabled" : ""}>Fuggi</button>
+        <button class="btn main-bag"   data-act="ball">Ball</button>
+        <button class="btn main-team"  data-act="team">Squadra</button>
+        <button class="btn main-run"   data-act="run">Fuggi</button>
       </div>${game.chooser === 1 ? `<div class="back-row"><button class="btn back" data-act="rifai">↩ Rifai la prima scelta</button></div>` : ""}${tfRow}`;
     if (game.chooser === 1) cmd().querySelector('[data-act="rifai"]').onclick = () => {
       game.chooser = 0; game.queued = null; showMainMenu();
@@ -4956,8 +4998,12 @@
     const cards = game.party.map((p, i) => {
       const ratio = Math.max(0, p.hp / p.maxHp);
       const col = ratio > 0.5 ? "var(--hp-green)" : ratio > 0.2 ? "var(--hp-yellow)" : "var(--hp-red)";
-      const selectable = !p.fainted && i !== game.active;
-      const tag = i === game.active ? '<span class="party-active">in campo</span>'
+      /* ⚠️ In doppio sono in campo DUE Pokemon: nessuno dei due può essere
+         scelto come sostituto (prima si poteva toccare il secondo alleato e
+         non succedeva nulla). */
+      const inCampo = p === game.player || (game.double && p === game.player2);
+      const selectable = !p.fainted && !inCampo;
+      const tag = inCampo ? '<span class="party-active">in campo</span>'
         : p.fainted ? '<span class="party-ko">KO</span>' : "";
       const st = p.status ? `<span class="status-badge st-${p.status}">${STATUS_IT[p.status]}</span>` : "";
       const types = p.types.map(t => `<span class="ticon t-${t}"></span>`).join("");
@@ -5070,6 +5116,10 @@
     if (!ball || (game[ballKey] || 0) <= 0) return;
     const blocked = ballBlockReason(ball);
     if (blocked) { notAvailable(blocked); return; }
+    /* La ball è un comando che chiude il turno per tutta la squadra: se in
+       doppio il primo alleato aveva già scelto una mossa, quella salta. Si
+       azzera la coda, o resterebbe appesa al turno dopo. */
+    game.queued = null; game.chooser = 0;
 
     game[ballKey]--;
     const enemy = game.enemy;

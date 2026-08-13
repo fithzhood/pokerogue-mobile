@@ -305,6 +305,16 @@ html, body {
    è riferita all'altezza del riquadro stesso, quindi si incolonnano da soli */
 .hp-panel.side-enemy.second { transform: translateY(calc(100% + 6px)); }
 .hp-panel.side-ally.second  { transform: translateY(calc(-100% - 6px)); }
+/* ⚠️ ORDINE DEI RIQUADRI IN DOPPIO: quello del Pokémon di SINISTRA sta SOPRA
+   quello di destra, su ENTRAMBE le squadre. Gli spostamenti non sono simmetrici
+   perché gli slot primari stanno da parti opposte: fra i nemici `enemy` è
+   quello di DESTRA, fra gli alleati `ally` è quello di SINISTRA (vedi il CSS
+   dei battler-slot). Qui si muovono solo i riquadri: il contenuto resta legato
+   al suo Pokémon, così la narrazione continua ad aggiornare quello giusto. */
+#game.double .hp-panel.side-enemy        { transform: translateY(calc(100% + 6px)); }  /* destra → sotto */
+#game.double .hp-panel.side-enemy.second { transform: none; }                          /* sinistra → sopra */
+#game.double .hp-panel.side-ally         { transform: translateY(calc(-100% - 6px)); } /* sinistra → sopra */
+#game.double .hp-panel.side-ally.second  { transform: none; }                          /* destra → sotto */
 .hp-panel .row1 { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 .hp-panel .name { font-weight: 700; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .status-badge {
