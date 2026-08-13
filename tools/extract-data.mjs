@@ -140,7 +140,10 @@ function extractMoves() {
   const body = src.slice(start);
 
   // posizioni di ogni costruttore, per ricavare i "blocchi" (params + .attr chain)
-  const ctorRe = /new (AttackMove|StatusMove|SelfStatusMove|ChargingAttackMove)\(/g;
+  // ⚠️ `ChargingSelfStatusMove` la usa UNA sola mossa (Geomanzia) e senza di lei
+  // mancava dalle 952: se ne accorge chi guarda le mosse da uovo di Amaura,
+  // Diancie e Milcery, che ce l'hanno.
+  const ctorRe = /new (AttackMove|StatusMove|SelfStatusMove|ChargingAttackMove|ChargingSelfStatusMove)\(/g;
   const hits = [];
   let m;
   while ((m = ctorRe.exec(body)) !== null) hits.push({ pos: m.index, cls: m[1] });
@@ -183,7 +186,7 @@ function extractMoves() {
       power, accuracy, pp,
       effectChance: chance,        // -1 = nessuno
       priority: priority || 0,
-      charging: cls === "ChargingAttackMove",
+      charging: cls === "ChargingAttackMove" || cls === "ChargingSelfStatusMove",
       contact: category === "PHYSICAL",   // euristica: il fisico fa contatto
       gen,
       attrs,
@@ -398,6 +401,21 @@ function extractTmTiers() {
   const src = read(resolve(PR, "src/data/balance/tm-pool-tiers.ts"));
   const out = {};
   for (const m of src.matchAll(/\[MoveId\.(\w+)\]:\s*ModifierTier\.(\w+)/g)) out[m[1]] = m[2];
+  return out;
+}
+
+/* MOSSE DA UOVO — da `balance/moves/egg-moves.ts`.
+   Ogni specie base ha ESATTAMENTE 4 mosse da uovo; la quarta (indice 3) e' la
+   "rara". Nell'originale non si scelgono: si sbloccano una alla volta facendo
+   schiudere le uova di quella specie. Sono la ragione per cui all'inizio le
+   mosse disponibili sono pochissime e crescono giocando. */
+function extractEggMoves() {
+  const src = read(resolve(PR, "src/data/balance/moves/egg-moves.ts"));
+  const out = {};
+  for (const m of src.matchAll(/\[SpeciesId\.(\w+)\]:\s*\[([^\]]+)\]/g)) {
+    const mosse = [...m[2].matchAll(/MoveId\.(\w+)/g)].map(x => x[1]);
+    if (mosse.length === 4) out[m[1]] = mosse;
+  }
   return out;
 }
 
@@ -784,6 +802,17 @@ const icons = extractIcons();
 write("icons.json", icons);
 const variants = extractVariants(species);
 write("variants.json", variants);
+const eggMoves = extractEggMoves();
+write("eggmoves.json", eggMoves);
+{
+  // controllo: le 4 mosse di ogni specie devono esistere fra le nostre
+  let mancanti = 0, fuoriDex = 0;
+  for (const k in eggMoves) {
+    if (!species[k]) fuoriDex++;
+    for (const id of eggMoves[k]) if (!moves[id]) mancanti++;
+  }
+  console.log(`Mosse da uovo: ${Object.keys(eggMoves).length} specie × 4 · ${mancanti} mosse sconosciute · ${fuoriDex} specie fuori dex`);
+}
 {
   let tot = 0, conIt = 0;
   for (const k in variants) for (const f of variants[k]) { tot++; if (f.it) conIt++; }

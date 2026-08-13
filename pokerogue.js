@@ -45,6 +45,7 @@
   let ICONS = {};              // mini icone: { dex: {a,x,y,w,h,sw,sh} }
   let VARIANTS = {};           // forme estetiche: { dex: [formKey,...] } (Vivillon, Unown…)
   let TMS = { perSpecie: {}, tier: {} };  // MT: chi impara cosa + rarita' per mossa
+  let EGGM = {};               // mosse da uovo: { BULBASAUR: [m0,m1,m2,m3] } (la 4a e' la RARA)
   let SPECIES_KEYS = [];       // elenco specie per scelte casuali
 
   /* ====================================================================== */
@@ -75,7 +76,48 @@
       ivs: {},           // migliori IV visti per specie: { SPECIE: {hp,atk,...} }
       formsSeen: {},     // forme estetiche già catturate: { dex: {formKey: true} }
       seen: {},          // specie INCONTRATE (anche senza catturarle): { SPECIE: true }
+      eggMoves: {},      // mosse da uovo sbloccate: { SPECIE: maschera di bit 0-15 }
     };
+  }
+
+  /* ====================================================================== */
+  /*  MOSSE DA UOVO                                                         */
+  /*  Ogni specie base ha 4 mosse da uovo; la quarta (indice 3) e' la RARA. */
+  /*  NON si scelgono: si sbloccano UNA alla volta facendo schiudere le     */
+  /*  uova. E' il motivo per cui in PokeRogue le mosse iniziali disponibili */
+  /*  sono pochissime all'inizio e crescono giocando.                       */
+  /* ====================================================================== */
+
+  /* Quale slot sblocca una schiusa. Copia di `rollEggMoveIndex`: 1 su X e' la
+     rara, altrimenti una delle 3 comuni a caso. X dipende dal tier dell'uovo. */
+  const RARE_EGGMOVE_RATES = { COMMON: 48, RARE: 24, EPIC: 12, LEGENDARY: 6 };
+  function rollEggMoveIndex(tier) {
+    const base = RARE_EGGMOVE_RATES[tier] || 48;
+    return Math.floor(Math.random() * base) ? Math.floor(Math.random() * 3) : 3;
+  }
+
+  const eggMaskOf = k => (meta.eggMoves && meta.eggMoves[k]) || 0;
+  /* Le mosse da uovo GIA' sbloccate per quella specie, in ordine di slot. */
+  function unlockedEggMoves(k) {
+    const list = EGGM[k];
+    if (!list) return [];
+    const mask = eggMaskOf(k);
+    return list.filter((id, i) => (mask & (1 << i)) && M[id]);
+  }
+  const isRareEggMove = (k, id) => !!(EGGM[k] && EGGM[k][3] === id);
+
+  /* Sblocca uno slot. Ritorna il nome della mossa se era davvero nuova
+     (come `setEggMoveUnlocked`, che torna false se ce l'avevi gia'). */
+  function unlockEggMove(k, tier) {
+    if (!EGGM[k]) return null;
+    const i = rollEggMoveIndex(tier);
+    const id = EGGM[k][i];
+    if (!id || !M[id]) return null;
+    meta.eggMoves = meta.eggMoves || {};
+    const mask = meta.eggMoves[k] || 0;
+    if (mask & (1 << i)) return null;         // gia' sbloccata: niente di nuovo
+    meta.eggMoves[k] = mask | (1 << i);
+    return { id, it: M[id].it, rara: i === 3 };
   }
 
   /* Registro dei Pokémon VISTI. Nell'originale il dex ha due livelli — `seenAttr`
@@ -866,6 +908,24 @@
     pickEnc: () => pickEncounter(),
     // cambio zona: per provare il salto in END delle ultime ondate
     zona: () => showBiomeChoice(),
+    /* MOSSE DA UOVO — a click servirebbero decine di schiuse per vederne una.
+       `.mosseUovo(specie)` dice a che punto sei, `.schiudi(specie,tier)`
+       simula una schiusa, `.tiriUovo(n,tier)` misura quanto e' rara la RARA. */
+    mosseUovo: (k) => {
+      const list = EGGM[k] || [];
+      const mask = eggMaskOf(k);
+      return {
+        specie: k, sbloccate: unlockedEggMoves(k).map(id => M[id].it),
+        tutte: list.map((id, i) => `${i === 3 ? "RARA " : ""}${(M[id] || {}).it || id}${(mask & (1 << i)) ? " ✅" : " 🔒"}`),
+        maschera: mask,
+      };
+    },
+    schiudi: (k, tier) => { const r = unlockEggMove(k, tier || "COMMON"); saveMeta(); return r || "niente di nuovo"; },
+    tiriUovo: (n, tier) => {
+      const c = [0, 0, 0, 0];
+      for (let i = 0; i < (n || 1000); i++) c[rollEggMoveIndex(tier || "COMMON")]++;
+      return { comuni: c.slice(0, 3), rara: c[3], attesoRara: ((n || 1000) / (RARE_EGGMOVE_RATES[tier || "COMMON"])).toFixed(1) };
+    },
     /* Chi puo' uscire davvero da un bioma. Serve per accorgersi delle specie
        SENZA SPRITE finite nei pool: giocando si vedrebbero solo per caso.
          __items.pesca("ISLAND", 300)  -> { specie: {...}, senzaSprite: [...] } */
@@ -1019,7 +1079,10 @@
   };
 
   // Ritmo della narrazione (ms per messaggio). ?fast = iper-veloce per il beta test.
-  const TURN_DELAY = new URLSearchParams(location.search).has("fast") ? 40 : 780;
+  /* `?fast` = narrazione automatica a raffica. Fuori da li' i messaggi NON
+     scorrono da soli: si avanza toccando (vedi playEvents). */
+  const NARRAZIONE_AUTO = new URLSearchParams(location.search).has("fast");
+  const TURN_DELAY = NARRAZIONE_AUTO ? 40 : 780;
 
   // Cattura un evento: testo + istantanea di HP/stato/KO/colpo dei due combattenti,
   // cosi' la riproduzione mostra le barre "a quel momento" (non lo stato finale).
@@ -2735,8 +2798,11 @@
     playEvents(list.map(snapEvent), after);
   }
 
-  // Riproduce gli eventi UNO ALLA VOLTA con una pausa, animando le barre HP in
-  // sincrono. Un tap salta subito al prossimo (per chi ha fretta).
+  /* Riproduce gli eventi UNO ALLA VOLTA, animando le barre HP in sincrono.
+     ⚠️ Il ritmo lo detta CHI GIOCA: ogni messaggio resta finche' non si tocca,
+     come nei giochi ufficiali. Prima scorrevano da soli ogni 780 ms e le mosse
+     "si alternavano senza sosta", senza capire chi stesse facendo cosa.
+     L'unica eccezione e' `?fast`, che serve ai test automatici. */
   function playEvents(events, after) {
     clearTimeout(game.timer);
     game.events = events;
@@ -2785,12 +2851,30 @@
       animMs = playMoveAnim(e.anim.key, e.anim.side, e.anim.side, null);
     }
 
-    const isLast = game.eventIndex >= game.events.length - 1;
-    let wait = isLast ? Math.max(TURN_DELAY, 300) : TURN_DELAY;
-    // il messaggio resta finche' l'animazione ha finito (ma non oltre 1,5 s).
-    // In modalita' ?fast il ritmo resta serrato: serve ai test automatici.
-    if (animMs && TURN_DELAY > 100) wait = Math.max(wait, Math.min(animMs, 2400));
-    game.timer = setTimeout(nextEvent, wait);
+    /* Il triangolino "tocca per continuare" compare quando l'animazione della
+       mossa ha finito: cosi' si vede a colpo d'occhio se il gioco sta ancora
+       mostrando qualcosa o sta aspettando te. Toccare prima va bene lo stesso:
+       taglia l'animazione e passa avanti. */
+    mostraContinua(Math.min(animMs || 0, 2400));
+
+    // ?fast: narrazione automatica, serve SOLO ai test (una run a mano sarebbe
+    // impossibile da guidare a 40 ms per messaggio).
+    if (NARRAZIONE_AUTO) {
+      const isLast = game.eventIndex >= game.events.length - 1;
+      let wait = isLast ? Math.max(TURN_DELAY, 300) : TURN_DELAY;
+      game.timer = setTimeout(nextEvent, wait);
+    }
+  }
+
+  /* Fa comparire il segnalino di continuazione dopo `ritardo` ms. */
+  function mostraContinua(ritardo) {
+    clearTimeout(game.contTimer);
+    const mostra = () => {
+      const c = cmd().querySelector(".msgbox .cont");
+      if (c) c.classList.add("pronto");
+    };
+    if (!ritardo) { mostra(); return; }
+    game.contTimer = setTimeout(mostra, ritardo);
   }
 
   /* ---------------------------------------------------------------------- */
@@ -4134,7 +4218,29 @@
 
   /* Scelta del bersaglio: appare solo in doppio, quando i nemici in piedi
      sono due. Mostra nome, livello e PS di ciascuno. */
+  /* ⚠️ ORDINE DEI PULSANTI: `enemiesOnField()` torna [enemy, enemy2], ma sullo
+     schermo `enemy` sta a DESTRA ed `enemy2` a SINISTRA (vedi il CSS dei
+     battler-slot). Messi in quell'ordine dentro `.grid2`, il Pokemon di destra
+     si prendeva il pulsante di sinistra e viceversa. Qui si riordinano da
+     SINISTRA a DESTRA, come si vedono in campo. */
+  const ordineSchermo = (lista) => lista.slice().sort(
+    (a, b) => (a === game.enemy2 ? 0 : 1) - (b === game.enemy2 ? 0 : 1));
+
+  /* Rende toccabili gli sprite dei bersagli (oltre ai pulsanti) e li segnala
+     con un anello pulsante. Con `lista` nulla si spegne tutto. */
+  function evidenziaBersagli(lista, onPick) {
+    [["#enemy-battler", game.enemy], ["#enemy2-battler", game.enemy2],
+     ["#player-battler", game.player], ["#player2-battler", game.player2]].forEach(([sel, f]) => {
+      const el = $(sel);
+      if (!el) return;
+      const attivo = !!(lista && f && lista.includes(f));
+      el.classList.toggle("bersagliabile", attivo);
+      el.onclick = attivo ? () => onPick(f) : null;
+    });
+  }
+
   function showTargetMenu(moveIndex, bersagli) {
+    bersagli = ordineSchermo(bersagli);
     const btns = bersagli.map((f, i) => {
       const ratio = Math.max(0, f.hp / f.maxHp);
       const col = ratio > 0.5 ? "var(--hp-green)" : ratio > 0.2 ? "var(--hp-yellow)" : "var(--hp-red)";
@@ -4145,12 +4251,15 @@
         </button>`;
     }).join("");
     cmd().innerHTML = `
-      <div class="prompt-line">Chi vuoi colpire?</div>
+      <div class="prompt-line">Chi vuoi colpire? <span class="hud">· o toccalo in campo</span></div>
       <div class="grid2">${btns}</div>
       <div class="back-row"><button class="btn back" data-act="back">Indietro</button></div>`;
+    const scegli = (f) => { evidenziaBersagli(null); playerChooseMove(moveIndex, f); };
     cmd().querySelectorAll(".tgt-btn").forEach(b => b.onclick = () =>
-      playerChooseMove(moveIndex, bersagli[parseInt(b.dataset.i, 10)]));
-    cmd().querySelector('[data-act="back"]').onclick = showMoves;
+      scegli(bersagli[parseInt(b.dataset.i, 10)]));
+    cmd().querySelector('[data-act="back"]').onclick = () => { evidenziaBersagli(null); showMoves(); };
+    // …e si può colpire anche toccando direttamente il Pokémon nella scena
+    evidenziaBersagli(bersagli, scegli);
   }
 
   /* ---------------------------------------------------------------------- */
@@ -4172,6 +4281,7 @@
   function showMainMenu() {
     ensureSprites();          // garantisce che gli sprite caricati siano dipinti
     hideTrainerPortrait();    // il ritratto si vede solo durante l'intro
+    evidenziaBersagli(null);  // rete di sicurezza: nessun anello resta acceso
     const alive = aliveParty().length;
     const chi = currentChooser();
     if (!chi) { game.chooser = 0; game.queued = null; }
@@ -4209,30 +4319,51 @@
 
   // Lista squadra. mode "switch" (dal menu, con Indietro) o "force" (dopo un KO,
   // obbligatorio). Ogni voce mostra nome, Lv, barra HP, stato.
+  /* Scelta del Pokemon da mandare in campo — A SCHERMO INTERO (overlay #meta).
+     Prima stava nella sola fascia comandi (un quarto dello schermo) e le righe
+     erano minuscole: per un menu che si apre a ogni cambio, e in cui bisogna
+     confrontare PS, stato e mosse, era troppo poco. Ora e' una carta per
+     Pokemon con tipi, abilita', oggetti tenuti e mosse coi PP. */
   function renderParty(mode) {
-    const rows = game.party.map((p, i) => {
+    const cards = game.party.map((p, i) => {
       const ratio = Math.max(0, p.hp / p.maxHp);
       const col = ratio > 0.5 ? "var(--hp-green)" : ratio > 0.2 ? "var(--hp-yellow)" : "var(--hp-red)";
       const selectable = !p.fainted && i !== game.active;
       const tag = i === game.active ? '<span class="party-active">in campo</span>'
         : p.fainted ? '<span class="party-ko">KO</span>' : "";
       const st = p.status ? `<span class="status-badge st-${p.status}">${STATUS_IT[p.status]}</span>` : "";
-      return `<button class="party-row${selectable ? "" : " disabled"}" data-i="${i}" ${selectable ? "" : "disabled"}>
-          <div class="party-top"><span class="party-name">${miniIcon(p.dex, 1.0)}${p.name}${st}</span><span class="party-lv">Lv.${p.level} ${tag}</span></div>
+      const types = p.types.map(t => `<span class="ticon t-${t}"></span>`).join("");
+      const held = Object.keys(p.held || {}).length ? `<span class="pd-held">🎒 ${heldSummary(p)}</span>` : "";
+      // mosse coi PP residui: e' l'informazione che serve davvero per decidere
+      const moves = p.moves.map(m => {
+        const mv = M[m.id];
+        return `<span class="pd-move${m.pp === 0 ? " vuota" : ""}"><span class="ticon t-${mv.type}"></span>${mv.it} <b>${m.pp}/${m.maxPp}</b></span>`;
+      }).join("");
+      return `<button class="pd-card sceglibile ${p.fainted ? "ko" : ""}" data-i="${i}" ${selectable ? "" : "disabled"}>
+          <div class="pd-top"><span class="pd-name">${miniIcon(p.dex, 1.1)}${p.shiny ? "✨" : ""}${p.name.replace("✨", "")}<span class="gen g-${p.gender}">${genderSymbol(p)}</span>${st}</span><span class="pd-lv">Lv.${p.level} ${tag}</span></div>
+          <div class="pd-types">${types} ${p.ability ? `<span class="pd-ab">${p.ability.it}</span>` : ""}${p.passiveAbility ? `<span class="pd-ab pd-pass">+${p.passiveAbility.it}</span>` : ""} ${held}</div>
           <div class="party-hp-track"><div class="party-hp-fill" style="width:${ratio * 100}%;background:${col};"></div></div>
-          <div class="party-hp-text">${Math.max(0, p.hp)}/${p.maxHp}</div>
+          <div class="pd-hp">${Math.max(0, p.hp)}/${p.maxHp} PS</div>
+          <div class="pd-moves-row">${moves}</div>
         </button>`;
     }).join("");
-    const boxLine = game.box.length ? `<div class="box-line">Box: ${game.box.length} Pokémon</div>` : "";
+    const boxLine = game.box.length ? `<div class="meta-sub">Box: ${game.box.length} Pokémon in deposito</div>` : "";
+    // nel cambio FORZATO non si torna indietro: qualcuno deve scendere in campo
     const backRow = mode === "switch"
-      ? `<div class="back-row"><button class="btn back" data-act="back">Indietro</button></div>` : "";
-    const title = mode === "force" ? "Il tuo Pokémon è esausto! Chi mandi in campo?" : "Cambia Pokémon";
-    cmd().innerHTML = `<div class="prompt-line">${title}</div><div class="party-list">${rows}</div>${boxLine}${backRow}`;
-    cmd().querySelectorAll(".party-row").forEach(b => b.onclick = () => {
+      ? `<div class="meta-actions"><button class="meta-btn ghost" data-act="back">↩ Indietro</button></div>` : "";
+    const title = mode === "force" ? "Chi mandi in campo?" : "Cambia Pokémon";
+    const sub = mode === "force" ? "il tuo Pokémon è esausto" : "tocca chi deve scendere in campo";
+    showMetaScreen(`
+      <div class="meta-title" style="font-size:clamp(19px,5.6vw,30px)">${title}</div>
+      <div class="meta-sub">${sub}</div>
+      <div class="pd-list">${cards}</div>${boxLine}${backRow}`);
+    metaEl().querySelectorAll(".pd-card[data-i]").forEach(b => b.onclick = () => {
+      if (b.disabled) return;
       const i = parseInt(b.dataset.i, 10);
+      hideMeta();
       if (mode === "force") forceSwitchTo(i); else playerSwitch(i);
     });
-    if (mode === "switch") cmd().querySelector('[data-act="back"]').onclick = showMainMenu;
+    if (mode === "switch") metaEl().querySelector('[data-act="back"]').onclick = () => { hideMeta(); showMainMenu(); };
   }
 
   // Offerta di cattura dopo aver sconfitto un selvatico: scegli quale ball usare.
@@ -4403,8 +4534,9 @@
   // Righe da evidenziare nel log (effetti notevoli).
   const ACCENT = /superefficace|critico|esausto|Non ha effetto|molto efficace|mancato|scottat|paralizz|addorment|avvelenat|congelat|BOSS/;
 
-  // Casella con UN messaggio; tap = avanza subito. Un puntino pulsante segnala
-  // che la narrazione prosegue da sola.
+  /* Casella con UN messaggio. Il tocco AVANZA: la narrazione non scorre da
+     sola, quindi ogni riga si legge con calma. Il triangolino compare quando
+     l'animazione ha finito (`mostraContinua`) e dice "tocca per continuare". */
   function renderMessageBox(text) {
     const accent = ACCENT.test(text) ? " accent" : "";
     cmd().innerHTML = `<div class="msgbox"><div class="log-line${accent}">${text}</div><span class="cont">▸</span></div>`;
@@ -4821,6 +4953,15 @@
         meta.candy = meta.candy || {};
         meta.candy[sp] = (meta.candy[sp] || 0) + 3;   // le uova danno più caramelle
         if (messages) messages.push(`🥚 Un uovo si è schiuso! È nato ${S[sp].it}${shiny ? " ✨SHINY" : ""} — sbloccato come starter!`);
+        /* Ogni schiusa sblocca UNA mossa da uovo della specie nata: e' l'unico
+           modo di ottenerle, ed e' cio' che fa crescere le mosse iniziali
+           selezionabili nel menu di partenza. */
+        const em = unlockEggMove(sp, egg.tier);
+        if (em && messages) {
+          messages.push(em.rara
+            ? `🥚✨ ${S[sp].it} ha imparato la mossa da uovo RARA ${em.it}!`
+            : `🥚 ${S[sp].it} ha imparato la mossa da uovo ${em.it}!`);
+        }
       }
     }
     saveMeta();
@@ -5984,14 +6125,21 @@
     const sp = S[k];
     const shiny = meta.unlocked[k] === 2;
     const pkrs = pokerusToday().includes(k);
-    // pool mosse selezionabili: level-up fino a Lv20, uniche
-    const learnPool = [...new Set((LEARN[k] || []).filter(([lv]) => lv <= 20).map(x => x[1]).filter(id => M[id]))];
+    /* Pool mosse selezionabili — la regola dell'originale (`setSpeciesDetails`):
+       SOLO le mosse imparate entro il livello 5, piu' le mosse da uovo che hai
+       gia' sbloccato facendo schiudere le uova. Prima arrivavamo al livello 20
+       e le mosse disponibili erano il doppio del dovuto (media 8 invece di 3,7),
+       il che rendeva la partenza molto piu' forte del normale. */
+    const learnPool = [...new Set((LEARN[k] || []).filter(([lv]) => lv > 0 && lv <= 5).map(x => x[1]).filter(id => M[id]))];
+    const eggPool = unlockedEggMoves(k).filter(id => !learnPool.includes(id));
     const abilPool = [...(sp.abilities.normal || []), ...(sp.abilities.hidden ? [sp.abilities.hidden] : [])];
     starterCfg = {
       k, shiny, pkrs,
       ability: abilPool[0],
-      moves: buildMovepool(k, 5).slice(0, 4),
-      learnPool, abilPool,
+      /* selezione di partenza: come nell'originale, le prime 4 dell'elenco
+         "mosse di livello, poi mosse da uovo" (`speciesStarterMoves`) */
+      moves: [...learnPool, ...eggPool].slice(0, 4),
+      learnPool, eggPool, abilPool,
     };
     renderStarterDetail();
   }
@@ -6001,11 +6149,22 @@
     const bs = sp.baseStats;
     const statBar = (lab, v) => `<div class="stat-row"><span class="stat-lab">${lab}</span><div class="stat-track"><div class="stat-fill" style="width:${Math.min(100, v / STAT_MAX * 100)}%"></div></div><span class="stat-val">${v}</span></div>`;
     const abils = c.abilPool.map((a, i) => `<button class="chip ${c.ability === a ? "on" : ""}" data-ab="${a}">${(ABIL[a] || {}).it || a}${i === c.abilPool.length - 1 && sp.abilities.hidden === a ? " (H)" : ""}</button>`).join("");
-    const moves = c.learnPool.map(id => {
+    /* Le mosse da uovo si mostrano in fondo e marcate: sono la ricompensa delle
+       schiuse, non qualcosa che hai per diritto. La 4a e' la RARA. */
+    const chip = (id, uovo) => {
       const mv = M[id], on = c.moves.includes(id);
-      return `<button class="chip move-chip ${on ? "on" : ""}" data-mv="${id}" style="${on ? "background:" + T[mv.type].color : ""}">
-        <span class="ticon t-${mv.type}"></span>${mv.it}</button>`;
-    }).join("");
+      const raro = uovo && isRareEggMove(c.k, id);
+      return `<button class="chip move-chip ${on ? "on" : ""} ${uovo ? "egg" : ""} ${raro ? "rara" : ""}" data-mv="${id}" style="${on ? "background:" + T[mv.type].color : ""}">
+        <span class="ticon t-${mv.type}"></span>${uovo ? (raro ? "🥚✨ " : "🥚 ") : ""}${mv.it}</button>`;
+    };
+    const moves = c.learnPool.map(id => chip(id, false)).join("")
+                + c.eggPool.map(id => chip(id, true)).join("");
+    /* Quante mosse da uovo restano da scoprire: dice a colpo d'occhio che il
+       gacha serve a questo. */
+    const eggTot = (EGGM[c.k] || []).length;
+    const eggNote = eggTot
+      ? `<div class="sd-eggnote">🥚 Mosse da uovo: <b>${c.eggPool.length}/${eggTot}</b> sbloccate${c.eggPool.length < eggTot ? " · si sbloccano facendo schiudere le uova" : ""}</div>`
+      : "";
     showMetaScreen(`
       <div class="sd-head">
         <span class="sd-sprite" id="sdSprite"></span>
@@ -6026,6 +6185,7 @@
       </div>
       <div class="meta-sub">Mosse iniziali (max 4 · scelte ${c.moves.length}/4)</div>
       <div class="move-chips">${moves}</div>
+      ${eggNote}
       <div class="meta-actions two-col">
         <button class="meta-btn ghost" data-act="back">Indietro</button>
         <button class="meta-btn primary" data-act="go" ${c.moves.length ? "" : "disabled"}>➕ Aggiungi ${sp.it}</button>
@@ -7195,7 +7355,7 @@
   /* ---------------------------------------------------------------------- */
   /*  AVVIO — carica i dati reali, poi comincia                             */
   /* ---------------------------------------------------------------------- */
-  const DATA_V = 19;   // versione dei dati: alzala a ogni rigenerazione
+  const DATA_V = 20;   // versione dei dati: alzala a ogni rigenerazione
   /* I dati arrivano dallo strato aggiornato se c'e' (vedi pokerogue-boot.js,
      §28), altrimenti dai file locali. `window.PR` esiste solo quando la pagina
      e' stata avviata dal guscio: aprendo i file a mano si ricade sul fetch. */
@@ -7211,12 +7371,12 @@
     Promise.all([
       loadJson("types"), loadJson("moves"), loadJson("species"),
       loadJson("learnsets"), loadJson("typechart"), loadJson("abilities"), loadJson("biomes"), loadJson("forms"), loadJson("icons"), loadJson("variants"),
-      loadJson("tms"),
+      loadJson("tms"), loadJson("eggmoves"),
       // indice delle animazioni: solo l'elenco, i frame arrivano su richiesta
       loadJson("anims-index").catch(() => null),
-    ]).then(([types, moves, species, learnsets, chart, abilities, biomes, forms, icons, variants, tmdata, anims]) => {
+    ]).then(([types, moves, species, learnsets, chart, abilities, biomes, forms, icons, variants, tmdata, eggmoves, anims]) => {
       T = types; M = moves; S = species; LEARN = learnsets; CHART = chart; ABIL = abilities; BIOMES = biomes; FORMS = forms; ICONS = icons; VARIANTS = variants;
-      TMS = tmdata; ANIMS = anims;
+      TMS = tmdata; EGGM = eggmoves; ANIMS = anims;
       /* Il tipo ASTRALE non esiste in types.json (i tipi veri sono 18):
          lo si aggiunge a mano perche' Terapagos Stellare e l'Arceus Perfetto
          ce l'hanno, e ogni schermata che stampa un tipo fa `T[tipo].it`. */

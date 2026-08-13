@@ -68,22 +68,41 @@ html, body {
    sovrapponevano di una decina di pixel) e il 40% in alto restava cielo vuoto.
    Ora che i riquadri PS sono sovrapposti alla scena (vedi `.hp-panel` più sotto)
    queste percentuali delimitano davvero lo spazio dei soli sprite. */
-.battler-slot.enemy { top: 5%;   right: 7%; }
+/* ⚠️ Il nemico si ancora al BASSO come l'alleato, non all'alto.
+   Con `top` la pedana finiva dove capitava (la colonna e' alta quanto lo
+   sprite: un Onix la spingeva giu', un Diglett la lasciava per aria) e nella
+   maggior parte dei biomi restava DENTRO IL CIELO — il nemico sembrava
+   levitare. Misurata l'arte dei biomi: il terreno comincia intorno al 27%
+   dell'altezza della scena, quindi la pedana va tenuta piu' in basso di quello.
+   Ancorando al basso, la pedana sta ferma qualunque sia la taglia dello sprite.
+   ⚠️ Con `bottom` il verso si inverte: "piu' in basso" = `bottom` PIU' PICCOLO. */
+.battler-slot.enemy { bottom: 50%; top: auto; right: 7%; }
 .battler-slot.ally  { bottom: 5%; left: 5%; }   /* 5%: la pedana resta dentro lo schermo */
 
 /* LOTTE IN DOPPIO — disposizione dei giochi veri: su ENTRAMBI i lati il
    Pokémon di DESTRA sta più in BASSO di quello di sinistra, così la coppia
    si legge in diagonale e si capisce chi è davanti e chi dietro.
    ⚠️ Il lato alleato era invertito (il destro stava più in alto).
-     nemici   → `top` più grande = più in basso   (enemy2 a sinistra, enemy a destra)
-     alleati  → `bottom` più piccolo = più in basso (ally a sinistra, ally2 a destra) */
-.battler-slot.enemy2 { top: 12%;  right: 44%; }   /* sinistra, più in alto  */
-#game.double .battler-slot.enemy { top: 28%; right: 6%; }   /* destra, più in basso */
+   ⚠️ Ora anche i nemici sono ancorati al BASSO (vedi sopra), quindi il verso
+   è lo stesso per tutti: `bottom` più piccolo = più in basso.
+     nemici   → enemy2 a sinistra e più in alto, enemy a destra e più in basso
+     alleati  → ally a sinistra e più in alto, ally2 a destra e più in basso */
+.battler-slot.enemy2 { bottom: 60%; top: auto; right: 44%; }   /* sinistra, più in alto  */
+#game.double .battler-slot.enemy { bottom: 53%; top: auto; right: 6%; }   /* destra, più in basso */
 #game.double .battler-slot.ally  { bottom: 19%; left: 4%; } /* sinistra, più in alto  */
 /* 34% e non di più: la coppia di alleati deve restare nella metà sinistra,
    come nei giochi veri, o finisce sotto i riquadri PS in basso a destra */
 .battler-slot.ally2  { bottom: 3%; left: 34%; }   /* destra, più in basso */
 #game.double .battler-slot .sprite { transform-origin: bottom center; }
+/* Bersaglio scegliibile toccando direttamente il Pokemon in campo (lotte in
+   doppio). L'anello pulsante dice quali sprite rispondono al tocco.
+   ⚠️ Sta sul `.battler` (dentro lo slot), non sullo slot: cosi' l'area
+   toccabile e' quella del Pokemon e non tutta la colonna. */
+.battler.bersagliabile { cursor: pointer; border-radius: 12px; animation: bersaglioPulsa 1s ease-in-out infinite; }
+@keyframes bersaglioPulsa {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(255,214,74,.55), 0 0 10px rgba(255,214,74,.35); }
+  50%      { box-shadow: 0 0 0 4px rgba(255,214,74,.95), 0 0 18px rgba(255,214,74,.6); }
+}
 #game.double .hp-panel { font-size: 10px; padding: 3px 6px; }
 /* Le pedane hanno larghezza/altezza INLINE (le imposta setPlatform ritagliando
    l'arte del bioma), quindi qui non servirebbe a niente ridichiararle: si
@@ -261,10 +280,15 @@ html, body {
 .msgbox .log-line { transition: opacity .12s ease; }
 .msgbox .log-line { opacity: .95; }
 .msgbox .log-line.accent { font-weight: 700; }
+/* "Tocca per continuare": resta INVISIBILE finche' l'animazione della mossa sta
+   ancora girando, poi compare e lampeggia. Cosi' si distingue a colpo d'occhio
+   "il gioco sta mostrando qualcosa" da "il gioco aspetta te". */
 .msgbox .cont {
   position: absolute; right: 16px; bottom: 10px;
-  font-size: clamp(14px, 3vw, 20px); animation: blink 1s steps(1) infinite;
+  font-size: clamp(14px, 3vw, 20px);
+  opacity: 0; transition: opacity .15s ease;
 }
+.msgbox .cont.pronto { animation: blink 1s steps(1) infinite; opacity: 1; }
 @keyframes blink { 50% { opacity: 0; } }
 
 /* Indicatore ondata (in alto a sinistra nella scena) */
@@ -509,6 +533,11 @@ html, body {
 .stat-val { width: 30px; text-align: right; font-variant-numeric: tabular-nums; opacity: .9; }
 .move-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 1vh 0 2vh; overflow-y: auto; }
 .move-chip { font-size: clamp(10px, 2.8vw, 13px); }
+/* mosse da UOVO: si sbloccano solo con le schiuse, quindi si vedono diverse
+   dalle mosse di livello. La rara (4o slot) ha il bordo dorato. */
+.move-chip.egg { border-color: #7fd4c7; }
+.move-chip.egg.rara { border-color: #f2c94c; box-shadow: 0 0 6px rgba(242,201,76,.35); }
+.sd-eggnote { font-size: clamp(10px, 2.7vw, 12px); opacity: .8; margin: -1vh 0 1.5vh; }
 .meta-actions.two-col { display: grid; grid-template-columns: 1fr 1.4fr; gap: 10px; }
 
 /* vista squadra a schermo intero (dal negozio) */
@@ -523,6 +552,20 @@ html, body {
 .pd-held { font-size: clamp(10px, 2.6vw, 12px); opacity: .8; }
 .pd-hp { font-size: clamp(11px, 3vw, 13px); margin-top: 3px; opacity: .9; }
 .pd-moves { opacity: .8; }
+/* Carte della SQUADRA quando sono da scegliere (cambio Pokemon a schermo
+   intero): stessa carta della vista in sola lettura, ma tappabile. */
+.pd-card.sceglibile {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  font-family: inherit; color: inherit; border: 2px solid rgba(255,255,255,.14);
+}
+.pd-card.sceglibile:disabled { opacity: .45; cursor: default; }
+.pd-card.sceglibile:not(:disabled):active { background: rgba(255,255,255,.14); }
+.pd-moves-row { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 5px; }
+.pd-move {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: clamp(10px, 2.7vw, 12px); opacity: .88;
+}
+.pd-move.vuota { opacity: .4; text-decoration: line-through; }
 
 /* header negozio con tasto squadra */
 .shop-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
