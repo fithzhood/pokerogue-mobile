@@ -1131,6 +1131,31 @@ button.pd-card:not(:disabled):active { background: rgba(255,255,255,.14); }
 }
 
 /* ============================================================================
+   CROMATICO — stelline che scintillano addosso allo sprite.
+   Il ✨ nel nome non basta: per molte specie la livrea shiny somiglia a quella
+   normale, e davanti al Pokémon non si capisce. Palette FREDDA, per non
+   confonderlo con l'aura dorata delle fasi dei boss finali (`.stelle`).
+   ========================================================================== */
+.sprite.cromatico { position: relative; filter: drop-shadow(0 0 6px rgba(150, 220, 255, .75)); }
+.sprite.cromatico::before, .sprite.cromatico::after {
+  content: ""; position: absolute; inset: -18%;
+  pointer-events: none; border-radius: 50%;
+  background:
+    radial-gradient(circle at 16% 18%, #fff 0 1.6px, transparent 2.2px),
+    radial-gradient(circle at 78% 24%, #bfe9ff 0 2px, transparent 2.6px),
+    radial-gradient(circle at 30% 80%, #fff 0 1.4px, transparent 2px),
+    radial-gradient(circle at 88% 66%, #d9f3ff 0 1.8px, transparent 2.4px),
+    radial-gradient(circle at 52% 6%, #fff 0 1.6px, transparent 2.2px);
+  animation: cromaScintilla 2.6s ease-in-out infinite;
+}
+.sprite.cromatico::after { animation-duration: 3.7s; animation-direction: reverse; opacity: .7; }
+@keyframes cromaScintilla {
+  0%, 100% { transform: rotate(0deg) scale(1); opacity: .25; }
+  35%      { transform: rotate(120deg) scale(1.05); opacity: 1; }
+  70%      { transform: rotate(240deg) scale(1); opacity: .5; }
+}
+
+/* ============================================================================
    PREMIO GIF (easter egg) — §25
    Due soli pezzi di interfaccia: la barra di caricamento sul bordo basso della
    scena e l'overlay a schermo intero con la GIF di vittoria.

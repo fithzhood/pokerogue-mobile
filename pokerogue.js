@@ -1660,20 +1660,20 @@
      Con la dex completa ogni classe può pescare Pokémon coerenti dal proprio
      tema, invece che a caso: il Pescatore ha Acqua, il Fantasista Spettro, ecc. */
   const TRAINER_CLASSES = [
-    { name: "il Giovane", sprites: ["youngster_m", "youngster_f"], types: ["NORMAL", "BUG"] },
+    { name: "il Bullo", sprites: ["youngster_m", "youngster_f"], types: ["NORMAL", "BUG"] },
     { name: "il Pescatore", sprites: ["fisherman"], types: ["WATER"] },
     { name: "il Montanaro", sprites: ["hiker"], types: ["ROCK", "GROUND"] },
     { name: "lo Scienziato", sprites: ["scientist_m", "scientist_f"], types: ["ELECTRIC", "STEEL", "POISON"] },
     { name: "la Bellezza", sprites: ["beauty"], types: ["FAIRY", "NORMAL"] },
-    { name: "il Lottatore", sprites: ["black_belt_m"], types: ["FIGHTING"] },
+    { name: "il Cinturanera", sprites: ["black_belt_m"], types: ["FIGHTING"] },
     { name: "il Campeggiatore", sprites: ["camper_m", "camper_f"], types: ["GRASS", "BUG"] },
-    { name: "il Superquattro", sprites: ["ace_trainer_m", "ace_trainer_f"], types: null },   // qualsiasi
+    { name: "il Fantallenatore", sprites: ["ace_trainer_m", "ace_trainer_f"], types: null },   // qualsiasi
     { name: "il Nuotatore", sprites: ["swimmer_m", "swimmer_f"], types: ["WATER", "ICE"] },
     { name: "il Sensitivo", sprites: ["psychic_m", "psychic_f"], types: ["PSYCHIC"] },
-    { name: "la Maniaca", sprites: ["hex_maniac"], types: ["GHOST", "DARK"] },
+    { name: "la Streghetta", sprites: ["hex_maniac"], types: ["GHOST", "DARK"] },
     { name: "il Mangiafuoco", sprites: ["firebreather"], types: ["FIRE"] },
     { name: "il Ranger", sprites: ["ranger_m", "ranger_f"], types: ["GRASS", "FLYING"] },
-    { name: "il Tipo Rocket", sprites: ["rocket_grunt_m", "rocket_grunt_f"], types: ["POISON", "DARK"] },
+    { name: "la Recluta Team Rocket", sprites: ["rocket_grunt_m", "rocket_grunt_f"], types: ["POISON", "DARK"] },
   ];
 
   /* ---- Capipalestra: TUTTE le regioni, sprite reali, squadra MONOTIPO ----
@@ -2951,7 +2951,12 @@
     /* Se era un ALLENATORE, adesso parla: sono i testi italiani ufficiali, e
        il Rivale ne ha uno diverso per ognuno dei sei incontri. */
     if (game.enemy.trainer) {
-      for (const riga of dialogoSconfitta()) messages.push(riga);
+      const battute = dialogoSconfitta();
+      for (const riga of battute) messages.push(riga);
+      /* Mentre PARLA si rivede: il ritratto torna in campo al posto del suo
+         Pokémon (che è appena caduto) e resta finché ha finito. Senza, il
+         dialogo arrivava da uno schermo vuoto. */
+      if (battute.length && game.trainerSprite) showTrainerPortrait(game.trainerSprite);
     }
     // premio promesso da un incontro misterioso che finiva in lotta
     if (game.encReward) {
@@ -2996,13 +3001,13 @@
     }
     const wasTrainer = !!game.enemy.trainer;
     // prima le EVOLUZIONI (con la loro animazione), poi le mosse da imparare
-    queueMessages(messages, () => processEvos(() => processHatches(() => processLearns(() => {
+    queueMessages(messages, () => { hideTrainerPortrait(); processEvos(() => processHatches(() => processLearns(() => {
       // ULTIMA BALL (una sola) solo se il selvatico è stato SCONFITTO, non catturato
       if (!wasBoss && !wasTrainer && !game.capturedThisWave) { offerCapture(); return; }
       // allenatore (NON il Rivale): con una Theft Ball puoi rubargli un Pokémon
       if (wasTrainer && !game.trainerIsRival && (game.theftballs || 0) > 0 && game.trainerRoster.length) { offerSteal(); return; }
       openShop();
-    }))));
+    }))); });
   }
 
   function gameOver(reason) {
@@ -5031,6 +5036,12 @@
     const caricato = !!fighter.spr;
     el.classList.toggle("ombra", caricato && fighter.spriteFiltro === "ombra");
     el.classList.toggle("stelle", caricato && fighter.spriteFx === "stelle");
+    /* CROMATICO: il ✨ nel nome non basta — per molte specie la livrea shiny
+       somiglia a quella normale e davanti al Pokémon non si capisce. Qui le
+       stelline stanno addosso allo sprite, così si vede a colpo d'occhio.
+       ⚠️ Come per le Ombra: solo a sprite CARICATO, o il filtro disegnerebbe
+       un rettangolo attorno al segnaposto. */
+    el.classList.toggle("cromatico", caricato && !!fighter.shiny);
     const fainted = ov ? ov.fainted : fighter.fainted;
     const hit = ov ? ov.hit : fighter._justHit;
     el.classList.toggle("faint", fainted);
