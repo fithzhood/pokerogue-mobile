@@ -107,6 +107,59 @@ html, body {
 .battler-slot.ally2  { bottom: 3%; left: 34%; }   /* destra, più in basso */
 #game.double .battler-slot .sprite { transform-origin: bottom center; }
 /* ============================================================================
+   AMBIENTE — ora del giorno e meteo si vedono in scena
+
+   L'originale non ha un fondale diverso per ogni ora: cambia la LUCE (e con
+   essa quali Pokemon compaiono e che tempo puo' fare). Qui si fa lo stesso con
+   una velatura colorata sopra la scena, piu' un effetto per il meteo attivo.
+   ⚠️ Sta a z-index 7: sopra sfondo, pedane e Pokemon (4), ma SOTTO i riquadri
+   PS e gli indicatori, che sono stati alzati a 9 apposta — di notte il testo
+   deve restare leggibile.
+   ========================================================================== */
+#ambiente {
+  position: absolute; inset: 0; z-index: 7;
+  pointer-events: none; overflow: hidden;
+  transition: background .8s ease, box-shadow .8s ease;
+}
+/* la velatura dell'ora: di giorno non c'è proprio */
+#scene[data-ora="DAY"]   #ambiente { background: transparent; }
+#scene[data-ora="DAWN"]  #ambiente { background: linear-gradient(180deg, rgba(255,183,120,.30), rgba(255,140,90,.12) 55%, rgba(120,90,140,.10)); }
+#scene[data-ora="DUSK"]  #ambiente { background: linear-gradient(180deg, rgba(255,120,60,.30), rgba(180,80,90,.20) 55%, rgba(60,50,110,.22)); }
+#scene[data-ora="NIGHT"] #ambiente { background: linear-gradient(180deg, rgba(18,26,70,.50), rgba(10,14,40,.42) 60%, rgba(8,10,28,.46)); }
+
+/* --- meteo --------------------------------------------------------------- */
+.amb-meteo { position: absolute; inset: -20%; display: block; opacity: 0; transition: opacity .6s ease; }
+#scene[data-meteo] .amb-meteo { opacity: 1; }
+
+/* SOLE: bagliore caldo dall'alto */
+#scene[data-meteo="SUNNY"] .amb-meteo {
+  background: radial-gradient(circle at 72% -8%, rgba(255,236,150,.55), rgba(255,190,90,.18) 38%, transparent 62%);
+}
+/* PIOGGIA: righe diagonali che scorrono */
+#scene[data-meteo="RAIN"] .amb-meteo {
+  background: repeating-linear-gradient(72deg,
+    rgba(180,214,255,.42) 0 1px, transparent 1px 9px);
+  animation: pioggia .55s linear infinite;
+}
+@keyframes pioggia { to { transform: translate3d(-9px, 30px, 0); } }
+/* GRANDINE/NEVE: fiocchi che scendono piano */
+#scene[data-meteo="HAIL"] .amb-meteo {
+  background:
+    radial-gradient(circle, rgba(255,255,255,.85) 1.4px, transparent 1.6px) 0 0 / 46px 46px,
+    radial-gradient(circle, rgba(255,255,255,.6) 1.1px, transparent 1.3px) 22px 18px / 62px 62px;
+  animation: neve 4.5s linear infinite;
+}
+@keyframes neve { to { transform: translate3d(-14px, 62px, 0); } }
+/* TEMPESTA DI SABBIA: foschia ocra che scorre di lato */
+#scene[data-meteo="SANDSTORM"] .amb-meteo {
+  background:
+    linear-gradient(rgba(196,158,92,.26), rgba(196,158,92,.26)),
+    repeating-linear-gradient(96deg, rgba(232,205,150,.26) 0 3px, transparent 3px 14px);
+  animation: sabbia 1.6s linear infinite;
+}
+@keyframes sabbia { to { transform: translate3d(-14px, 3px, 0); } }
+
+/* ============================================================================
    EVOLUZIONE — buio in scena, sagome bianche che si alternano, lampo.
    Sta sopra i Pokemon ma sotto gli overlay meta.
    ========================================================================== */
@@ -230,8 +283,12 @@ html, body {
   box-shadow: 0 3px 8px rgba(0,0,0,.35);
   /* Sovrapposti alla scena, agli angoli: ognuno dalla parte opposta al proprio
      Pokémon, come i riquadri informativi dell'originale. Stando fuori dal flusso
-     non rubano più altezza agli sprite. */
-  position: absolute; z-index: 5;
+     non rubano più altezza agli sprite.
+     ⚠️ z-index 9 e non 5: deve stare SOPRA la velatura di `#ambiente` (7), o di
+     notte e sotto la pioggia il testo dei PS diventa illeggibile.
+     ⚠️ E va dichiarato UNA volta sola: questa riga ne aveva un'altra in cima
+     alla regola e vinceva l'ultima — la trappola ricorrente di questo CSS. */
+  position: absolute; z-index: 9;
 }
 .hp-panel[hidden] { display: none; }          /* la classe batterebbe [hidden] */
 /* sotto l'indicatore d'ondata (in alto a sinistra) E sotto il vassoio di ball
@@ -382,7 +439,7 @@ html, body {
 
 /* Indicatore ondata (in alto a sinistra nella scena) */
 #wave-indicator {
-  position: absolute; top: calc(var(--safe-top) + 4px); left: calc(var(--safe-x) + 2px); z-index: 5;
+  position: absolute; top: calc(var(--safe-top) + 4px); left: calc(var(--safe-x) + 2px); z-index: 9;
   background: rgba(10,12,20,.6); color: #fff;
   padding: 2px 9px; border-radius: 999px;
   font-size: clamp(11px, 3vw, 14px); font-weight: 700;
@@ -709,7 +766,7 @@ html, body {
    piene = ancora da battere, spente = sconfitte, cerchio = in campo */
 #trainer-balls[hidden] { display: none; }
 #trainer-balls {
-  position: absolute; left: calc(var(--safe-x) + 2px); top: calc(var(--safe-top) + 30px); z-index: 5;
+  position: absolute; left: calc(var(--safe-x) + 2px); top: calc(var(--safe-top) + 30px); z-index: 9;
   display: flex; gap: 4px; background: rgba(10,12,20,.5);
   padding: 4px 7px; border-radius: 999px; border: 1px solid rgba(255,255,255,.15);
 }
@@ -758,7 +815,7 @@ html, body {
    alleato in basso a sinistra, avversario in alto a destra. */
 .held-bar {
   position: absolute; display: flex; flex-wrap: wrap; gap: 2px;
-  max-width: 42%; pointer-events: none; z-index: 6;
+  max-width: 42%; pointer-events: none; z-index: 9;   /* sopra la velatura ambiente */
 }
 .held-bar { left: 4px; bottom: 4px; align-content: flex-end; }
 /* ⚠️ `bottom: auto` serve davvero: la regola base qui sopra mette `bottom: 4px`

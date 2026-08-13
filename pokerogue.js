@@ -283,6 +283,17 @@
     if (messages) messages.push(`${WEATHER[kind].emoji} ${fonte || ""}${fonte ? ": " : ""}inizia ${WEATHER[kind].it.toLowerCase()}!`);
   }
   const weatherKind = () => (game.weather && game.weather.turns > 0) ? game.weather.kind : null;
+
+  /* Porta ORA DEL GIORNO e METEO sulla scena: il resto lo fa il CSS
+     (`#ambiente`). Nell'originale il fondale non cambia, cambia la LUCE — e
+     con essa quali Pokemon compaiono e che tempo puo' fare. */
+  function applyAmbiente() {
+    const s = document.getElementById("scene");
+    if (!s) return;
+    s.dataset.ora = timeOfDay();
+    const w = weatherKind();
+    if (w) s.dataset.meteo = w; else delete s.dataset.meteo;
+  }
   // Mosse che chiamano il meteo, e abilita' che lo chiamano entrando in campo
   const WEATHER_MOVES = { SUNNY_DAY: "SUNNY", RAIN_DANCE: "RAIN", SANDSTORM: "SANDSTORM",
                           HAIL: "HAIL", SNOWSCAPE: "HAIL", CHILLY_RECEPTION: "HAIL" };
@@ -4716,6 +4727,7 @@
   }
 
   function renderScene(frame) {
+    applyAmbiente();          // luce dell'ora + effetto del meteo in corso
     const eOv = frame ? { hp: frame.ehp, maxHp: frame.emax, status: frame.est } : null;
     const pOv = frame ? { hp: frame.php, maxHp: frame.pmax, status: frame.pst } : null;
     const eSprOv = frame ? { fainted: frame.efaint, hit: frame.ehit } : null;
