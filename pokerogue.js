@@ -15,10 +15,82 @@
   "use strict";
 
   const START_LEVEL = 5;                 // livello dello starter a inizio run
-  const PLAYER_LEVELUP = 2;              // livelli guadagnati per ondata vinta
   const BOSS_EVERY = 10;                 // ogni quante ondate arriva un boss
-  // livello del nemico all'ondata w (cresce, +extra sui boss)
-  function enemyLevelFor(w) { return START_LEVEL + Math.floor((w - 1) * 1.8) + (w % BOSS_EVERY === 0 ? 4 : 0); }
+
+  /* ======================================================================
+     LIVELLO DEL NEMICO — la curva VERA di PokeRogue (`Battle.getLevelForWave`)
+
+        livello = 1 + ondata/2 + (ondata/25)²          · boss ×1,2
+
+     Quasi piatta all'inizio e ripida solo dopo, non lineare. La nostra
+     vecchia formula (`5 + (ondata-1)·1,8`) partiva molto piu' alta e saliva
+     al doppio della velocita': all'ondata 8 dava livello 17 invece di 5, e
+     all'ondata 100 dava 183 invece di 67. Era il motivo per cui la
+     progressione "sembrava troppo veloce": lo era davvero, di quasi tre volte.
+     ⚠️ Il livello adesso NON dipende piu' da START_LEVEL.
+     ====================================================================== */
+  function enemyLevelFor(w) {
+    const base = 1 + w / 2 + Math.pow(w / 25, 2);
+    if (w % BOSS_EVERY === 0) return Math.max(1, Math.floor(base * 1.2));
+    // piccola variazione verso l'alto, come il `randSeedGauss` dell'originale
+    return Math.max(1, Math.round(base + Math.random() * Math.min(2, 10 / Math.max(1, w))));
+  }
+
+  /* ======================================================================
+     ESPERIENZA — come nell'originale, non piu' livelli regalati
+
+     · quanta ne frutta un nemico:  baseExp × livello / 5 + 1   (×1,5 allenatori)
+     · quanta ne prende ciascuno:   chi ha combattuto la divide fra sé;
+       chi era in panchina prende il 20% (l'Esperienza Condivisa che in
+       PokeRogue si ottiene presto). Pokerus ×1,5, Espamuleto +%.
+     · da esperienza a livello: PokeRogue MESCOLA la curva della specie con
+       quella "media veloce" — `0,325 × propria + 0,675 × livello³` — quindi
+       le differenze fra curve sono molto smorzate.
+     ====================================================================== */
+  const EXP_QUOTA_PANCHINA = 0.2;        // 1 Esperienza Condivisa (0,2 per pezzo)
+  // Costanti delle sei curve, per livelli >= 100 e per la formula chiusa
+  function expCurvaPropria(l, gr) {
+    switch (gr) {
+      case "ERRATIC":     return (Math.pow(l, 4) + Math.pow(l, 3) * 2000) / 3500;
+      case "FAST":        return Math.pow(l, 3) * 4 / 5;
+      case "MEDIUM_SLOW": return Math.pow(l, 3) * 6 / 5 - 15 * Math.pow(l, 2) + 100 * l - 140;
+      case "SLOW":        return Math.pow(l, 3) * 5 / 4;
+      case "FLUCTUATING": return Math.pow(l, 3) * (l / 2 + 8) * 4 / (100 + l);
+      default:            return Math.pow(l, 3);     // MEDIUM_FAST
+    }
+  }
+  /* Esperienza TOTALE per arrivare al livello `l`. */
+  function expTotalePerLivello(l, gr) {
+    if (l <= 1) return 0;
+    const media = Math.pow(l, 3);
+    if (!gr || gr === "MEDIUM_FAST") return Math.floor(media);
+    return Math.floor(expCurvaPropria(l, gr) * 0.325 + media * 0.675);
+  }
+  const LIVELLO_MAX = 250;               // oltre l'ondata 200 non si va
+  /* Livello corrispondente a una certa esperienza totale. */
+  function livelloPerExp(exp, gr) {
+    let l = 1;
+    while (l < LIVELLO_MAX && exp >= expTotalePerLivello(l + 1, gr)) l++;
+    return l;
+  }
+
+  /* ⚠️ IL TETTO DI LIVELLO — è QUESTO il freno vero di PokeRogue, non la
+     quantità di esperienza (`getMaxExpLevel`). Chi lo ha raggiunto smette di
+     prendere esperienza finché non sale il tetto, che cresce a scaglioni di
+     10 ondate seguendo la stessa curva dei nemici:
+
+        tetto = arrotonda_pari((1 + O/2 + (O/25)²) × 1,2) + 2   con O = ondata
+                                                                 arrotondata
+                                                                 ai 10 sopra
+
+     Ondata 10 → 10 · ondata 50 → 38 · ondata 100 → 84 · ondata 200 → 200.
+     Senza il tetto la squadra scappa in avanti (era il nostro caso: +2 livelli
+     regalati a ogni ondata, livello 19 all'ondata 8) oppure resta indietro. */
+  function livelloMassimo(w) {
+    const o = Math.ceil((w || 1) / 10) * 10;
+    const base = (1 + o / 2 + Math.pow(o / 25, 2)) * 1.2;
+    return Math.ceil(base / 2) * 2 + 2;
+  }
   // Ingrandimento sprite. base = fattore desiderato (i frame Gen1 sono ~40-117px);
   // maxW/maxH = tetto come frazione della scena, cosi' i piccoli si ingrandiscono
   // del pieno ma i giganti (Moltres/Onix) vengono limitati e non si accavallano.
@@ -603,6 +675,11 @@
       name: (boss ? "👑 " : "") + (shiny ? "✨" : "") + sp.it + formSuffix,
       shiny,
       level: level,
+      // ESPERIENZA: si parte con quella minima del proprio livello, come i
+      // Pokemon che incontri gia' cresciuti. Da qui in poi sale davvero.
+      exp: expTotalePerLivello(level, sp.growthRate),
+      growthRate: sp.growthRate,
+      baseExp: sp.baseExp || 60,
       movesCheckedTo: level,   // fino a che livello abbiamo gia' valutato il learnset
       held: {},                // oggetti tenuti impilabili { leftovers:n, shellbell:n, typeboost:{FIRE:n} }
       berries: {},             // bacche tenute { SITRUS:n, LUM:n, ... }, si consumano
@@ -825,6 +902,7 @@
     afterEvents: null, // callback a fine narrazione
     timer: null,       // timer dell'auto-avanzamento
     pendingLearns: [], // mosse in attesa di sostituzione (4 slot pieni)
+    expPending: 0,     // esperienza dei nemici caduti in questa ondata
     biome: null,       // id del bioma corrente (chiave di BIOMES)
     enemyQueue: [],    // Pokemon rimanenti dell'allenatore (combattuti in sequenza)
   };
@@ -2545,7 +2623,6 @@
     const wasEvilBoss = !!game.enemy.evil && !!game.enemy.boss;
     const wasGym = !!game.enemy.gym;
     const wasBoss = game.enemy.boss || wasGym;
-    const gain = wasBoss ? PLAYER_LEVELUP + 2 : PLAYER_LEVELUP;
     const messages = [wasGym
       ? `Hai sconfitto ${game.gymLeader.name}! ⭐ Medaglia ottenuta!`
       : `Hai sconfitto ${game.enemy.name}!`];
@@ -2573,12 +2650,9 @@
         saveMeta();
       }
     }
-    // XP condivisa: tutta la squadra viva sale di livello (Pokérus = +1 bonus).
-    // Gli Espamuleti aggiungono livelli in proporzione alla percentuale accumulata.
-    const bonusExp = Math.floor(gain * (game.charms.exp || 0) / 100);
-    const before = game.player.level;
-    for (const p of game.party) if (!p.fainted) { p.level += gain + bonusExp + (p.pokerus ? 1 : 0); recomputeStats(p); }
-    messages.push(`La squadra sale al livello ${before + gain + bonusExp}!`);
+    // ESPERIENZA VERA (non piu' livelli regalati): la si guadagna dai nemici
+    // battuti in questa ondata, con le quote dell'originale.
+    assegnaEsperienza(messages);
     // apprendimento mosse + evoluzioni ai nuovi livelli
     for (const p of game.party) if (!p.fainted) checkLevelUps(p, messages);
     // le uova avanzano di 1 ondata (persistente tra le run)
@@ -2723,12 +2797,22 @@
     renderCaptureScreen();
   }
 
+  /* PS da usare per l'ULTIMA BALL di fine lotta.
+     ⚠️ Prima si passava 1, cioe' il minimo assoluto: e' il valore che da' il
+     BONUS MASSIMO della formula, quindi una Poke Ball su una specie comune
+     arrivava vicino al 100% e si comportava da Master Ball. Rendeva inutile
+     tutto il resto (indebolire, addormentare, lanciare durante la lotta).
+     Ora l'ultima occasione si calcola come se il Pokemon fosse INTEGRO: e' un
+     ripiego, non una scorciatoia. Chi vuole le probabilita' alte deve
+     catturarlo durante la lotta, indebolito e addormentato. */
+  const psUltimaBall = (enemy) => enemy.maxHp;
+
   function attemptCapture(ballKey) {
     const ball = BALL_TYPES.find(b => b.key === ballKey);
     if (!ball || (game[ballKey] || 0) <= 0) return;
     game[ballKey]--;
     const enemy = game.enemy;
-    const caught = ball.mult >= 255 ? true : rollCapture(enemy, ball.mult, 1);
+    const caught = ball.mult >= 255 ? true : rollCapture(enemy, ball.mult, psUltimaBall(enemy));
     const messages = [`Lanci una ${ball.it} su ${enemy.name}…`];
     if (caught) {
       const mon = makeFighter(enemy.speciesId, enemy.level, { shiny: enemy.shiny, ivs: enemy.ivs, variant: enemy.variant }); // fresco, HP/PP pieni
@@ -3341,8 +3425,57 @@
     applyOnSummon(game.player, game.enemy, log);  // Prepotenza ecc. all'ingresso
   }
 
+  /* Segna l'esperienza dei nemici appena caduti. Va chiamata PRIMA che
+     `afterTurn` tolga dal campo i caduti, o si perde il riferimento (e con
+     lui l'esperienza del secondo avversario in doppio). */
+  function registraExpNemici() {
+    for (const f of [game.enemy, game.enemy2]) {
+      if (!f || !f.fainted || f._expDato) continue;
+      f._expDato = true;
+      // `getExpValue` dell'originale: baseExp × livello / 5 + 1
+      let v = Math.floor((f.baseExp || 60) * f.level / 5) + 1;
+      if (f.trainer || f.trainerMon) v = Math.floor(v * 1.5);   // gli allenatori ne danno di più
+      game.expPending = (game.expPending || 0) + v;
+    }
+  }
+
+  /* Distribuisce l'esperienza dell'ondata e fa salire chi arriva a livello.
+     Quote dell'originale: chi era in campo se la divide, chi è in panchina
+     prende il 20% (Esperienza Condivisa). Pokérus ×1,5, Espamuleto +%. */
+  function assegnaEsperienza(messages) {
+    registraExpNemici();                       // rete di sicurezza per l'ultimo caduto
+    const tot = game.expPending || 0;
+    game.expPending = 0;
+    if (tot <= 0) return;
+    const inCampo = [game.player, game.player2].filter(p => p && !p.fainted);
+    const quota = inCampo.length || 1;
+    const boost = 1 + (game.charms.exp || 0) / 100;
+    const tetto = livelloMassimo(game.wave);
+    for (const p of game.party) {
+      // chi ha raggiunto il tetto dell'ondata non prende esperienza: è il
+      // freno che tiene la squadra al passo con gli avversari, non davanti
+      if (p.fainted || p.level >= tetto || p.level >= LIVELLO_MAX) continue;
+      let m = inCampo.includes(p) ? 1 / quota : EXP_QUOTA_PANCHINA / quota;
+      if (p.pokerus) m *= 1.5;
+      const guadagno = Math.floor(tot * m * boost);
+      if (guadagno <= 0) continue;
+      // le partite salvate prima dell'esperienza vera non hanno questi campi
+      if (!p.growthRate) p.growthRate = (S[p.speciesId] || {}).growthRate;
+      if (!p.baseExp) p.baseExp = (S[p.speciesId] || {}).baseExp || 60;
+      if (p.exp == null) p.exp = expTotalePerLivello(p.level, p.growthRate);
+      p.exp += guadagno;
+      const prima = p.level;
+      p.level = livelloPerExp(p.exp, p.growthRate);
+      if (p.level > prima) {
+        recomputeStats(p);
+        messages.push(`${p.name} è salito al Lv.${p.level}!`);
+      }
+    }
+  }
+
   // Dopo un turno: KO? vittoria? cambio forzato?
   function afterTurn() {
+    registraExpNemici();       // prima di togliere i caduti dal campo
     renderScene();
     /* BOSS FINALE: la fase finisce quando cade l'ULTIMO SCUDO — è la
        condizione di `initFinalBossPhaseTwo` (`bossSegmentIndex < 1`), non il
@@ -4161,7 +4294,35 @@
         ${(fighter.segBounds || []).map(b => `<div class="seg-mark" style="left:${b / maxHp * 100}%"></div>`).join("")}
       </div>
       <div class="hp-text">${Math.max(0, hp)} / ${maxHp}</div>
+      ${barraExp(fighter)}
       ${fighter.ability ? `<div class="ability-line">${fighter.ability.it}</div>` : ""}`;
+  }
+
+  /* Barra dell'ESPERIENZA — solo per i TUOI Pokemon, come nei giochi veri.
+     Ogni Pokemon ha la sua: l'esperienza e' condivisa, ma la curva di crescita
+     e' la sua, quindi due membri della squadra non salgono insieme. */
+  function progressoExp(f) {
+    if (!f || f.exp == null) return null;
+    const gr = f.growthRate || (S[f.speciesId] || {}).growthRate;
+    const qui = expTotalePerLivello(f.level, gr);
+    const poi = expTotalePerLivello(f.level + 1, gr);
+    if (poi <= qui) return null;
+    const fatto = Math.max(0, Math.min(poi - qui, f.exp - qui));
+    return { frazione: fatto / (poi - qui), manca: Math.max(0, poi - f.exp) };
+  }
+  /* "manca X exp al livello" — o il perche' non sale piu' (tetto dell'ondata) */
+  function expEtichetta(f) {
+    if (f.level >= livelloMassimo(game.wave)) return " · tetto dell'ondata";
+    const p = progressoExp(f);
+    return p ? ` · mancano ${p.manca} exp` : "";
+  }
+  function barraExp(f) {
+    if (isEnemySide(f)) return "";                   // gli avversari non ce l'hanno
+    const p = progressoExp(f);
+    if (!p) return "";
+    const tetto = livelloMassimo(game.wave);
+    if (f.level >= tetto) return `<div class="exp-track alcap"><div class="exp-fill" style="width:100%"></div><span class="exp-cap">MAX ondata</span></div>`;
+    return `<div class="exp-track"><div class="exp-fill" style="width:${(p.frazione * 100).toFixed(1)}%"></div></div>`;
   }
 
   function clearSlot(spriteSel, panelSel) {
@@ -4375,7 +4536,8 @@
           <div class="pd-top"><span class="pd-name">${miniIcon(p.dex, 1.1)}${p.shiny ? "✨" : ""}${p.name.replace("✨", "")}<span class="gen g-${p.gender}">${genderSymbol(p)}</span>${st}</span><span class="pd-lv">Lv.${p.level} ${tag}</span></div>
           <div class="pd-types">${types} ${p.ability ? `<span class="pd-ab">${p.ability.it}</span>` : ""}${p.passiveAbility ? `<span class="pd-ab pd-pass">+${p.passiveAbility.it}</span>` : ""} ${held}</div>
           <div class="party-hp-track"><div class="party-hp-fill" style="width:${ratio * 100}%;background:${col};"></div></div>
-          <div class="pd-hp">${Math.max(0, p.hp)}/${p.maxHp} PS</div>
+          <div class="pd-hp">${Math.max(0, p.hp)}/${p.maxHp} PS · <span class="pd-exp">Lv.${p.level}${expEtichetta(p)}</span></div>
+          ${barraExp(p)}
           <div class="pd-moves-row">${moves}</div>
         </button>`;
     }).join("");
@@ -4403,7 +4565,7 @@
     const BALL_IMG = { balls: "pb", greatballs: "gb", ultraballs: "ub", rogueballs: "rb", theftballs: "tb", masterballs: "mb" };
     const owned = BALL_TYPES.filter(b => (game[b.key] || 0) > 0);
     const btns = owned.map(b => {
-      const pct = b.mult >= 255 ? 100 : captureChancePct(game.enemy, b.mult, 1);
+      const pct = b.mult >= 255 ? 100 : captureChancePct(game.enemy, b.mult, psUltimaBall(game.enemy));
       return `<button class="btn capture-yes" data-b="${b.key}">
         <img class="ball-icon" src="${ballIcon(BALL_IMG[b.key])}" alt="">${b.it}<span class="cap-sub">~${pct}% · ×${game[b.key]}</span></button>`;
     }).join("");
@@ -4450,12 +4612,19 @@
     const hint = game.enemy && game.enemy.trainer
       ? `Solo la Theft Ball funziona sugli allenatori`
       : `Indebolisci e addormenta per alzare le probabilità`;
-    cmd().innerHTML = `
-      <div class="prompt-line">Quale ball lanci? <span class="hud">${hint}</span></div>
-      <div class="grid2">${btns}</div>
-      <div class="back-row"><button class="btn back" data-act="back">Indietro</button></div>`;
-    cmd().querySelectorAll(".ball-btn").forEach(b => b.onclick = () => throwBall(b.dataset.b));
-    cmd().querySelector('[data-act="back"]').onclick = showMainMenu;
+    /* A SCHERMO INTERO. ⚠️ Nella fascia comandi non ci stava: con cinque tipi
+       di ball il contenuto era alto 410 px in uno spazio di 224, e il tasto
+       Indietro finiva 150 px sotto il bordo — invisibile e non toccabile. */
+    showMetaScreen(`
+      <div class="meta-title" style="font-size:clamp(19px,5.6vw,30px)">Quale ball lanci?</div>
+      <div class="meta-sub">${hint}</div>
+      <div class="ball-list">${btns}</div>
+      <div class="meta-actions"><button class="meta-btn ghost" data-act="back">↩ Indietro</button></div>`);
+    metaEl().querySelectorAll(".ball-btn").forEach(b => b.onclick = () => {
+      if (b.disabled) return;
+      hideMeta(); throwBall(b.dataset.b);
+    });
+    metaEl().querySelector('[data-act="back"]').onclick = () => { hideMeta(); showMainMenu(); };
   }
 
   // Lancia la ball: consuma il turno. Se cattura, la lotta si chiude (selvatico)
@@ -4730,7 +4899,7 @@
     clearTimeout(game.timer);
     game.enemy = null; game.enemy2 = null; game.player2 = null; game.double = false;
     game.enemyQueue = []; game.events = []; game.eventIndex = 0; game.afterEvents = null;
-    game.pendingLearns = []; game.encReward = null;
+    game.pendingLearns = []; game.encReward = null; game.expPending = 0;
     game.weather = null; game.terrain = null;
     setActive(Math.min(game.active | 0, game.party.length - 1));
     if (game.player.fainted) {

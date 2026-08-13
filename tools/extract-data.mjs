@@ -381,6 +381,10 @@ function extractGenParts(parts, genNum, dexMap, species, learnsets, abilityIds, 
       height: numOrNull(field("height")),
       weight: numOrNull(field("weight")),
       catchRate: numOrNull(field("catchRate")),
+      // ESPERIENZA: quanta ne frutta abbatterlo e con che curva sale di livello.
+      // Senza questi due il gioco non puo' avere l'EXP vera (§ progressione).
+      baseExp: numOrNull(field("baseExp")),
+      growthRate: enumVal("growthRate", "GrowthRate."),
       // SESSO: percentuale di maschi (null = senza sesso, come Magnemite).
       // `genderDiffs` marca le specie con lo sprite femminile diverso.
       malePercent: numOrNull(field("malePercent")),
