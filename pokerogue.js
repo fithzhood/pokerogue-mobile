@@ -596,6 +596,43 @@
     const ab = abilityByIndex(sp, indice);
     return ab ? { it: ab.it, nascosta: indice === 2 } : null;
   }
+  /* ======================================================================
+     NATURE SBLOCCATE (dex) — `dexEntry.natureAttr` dell'originale
+
+     Stessa idea delle abilità qui sopra, e per lo stesso motivo: nella scheda
+     starter si sceglie la natura, ma solo fra quelle che hai già incontrato.
+     Nell'originale è una maschera di bit (`natureAttr |= 1 << (nature + 1)`) e
+     si riempie catturando o facendo schiudere esemplari con quella natura.
+
+     ⚠️ Con la natura a piacere lo starter diventa più forte: è proprio per
+     questo che vanno CONQUISTATE una alla volta. Non regalarle tutte.
+     Le 5 nature NEUTRE (Ardita, Docile, Seria, Sciolta, Fermezza) sono sempre
+     disponibili: non danno alcun vantaggio, e senza almeno una la schermata
+     resterebbe vuota per una specie mai catturata.
+     ====================================================================== */
+  const natureNeutra = (k) => !NATURES[k].su && !NATURES[k].giu;
+  function registraNatura(speciesId, nature) {
+    if (!nature || !NATURES[nature]) return null;
+    meta.nature = meta.nature || {};
+    const bit = 1 << NATURE_KEYS.indexOf(nature);
+    const prima = meta.nature[speciesId] || 0;
+    if (prima & bit) return null;              // già registrata: niente da dire
+    meta.nature[speciesId] = prima | bit;
+    return NATURES[nature].it;
+  }
+  /* Le nature che puoi SCEGLIERE per quella specie nella schermata starter. */
+  function natureSbloccate(k) {
+    const mask = (meta.nature && meta.nature[k]) || 0;
+    return NATURE_KEYS.filter((n, i) => natureNeutra(n) || (mask & (1 << i)));
+  }
+  /* Etichetta breve dell'effetto: «+Att −A.Sp», o «nessun effetto». */
+  const NAT_STAT_IT = { atk: "Att", def: "Dif", spatk: "A.Sp", spdef: "D.Sp", spd: "Vel" };
+  function naturaEffetto(k) {
+    const n = NATURES[k];
+    if (!n.su || !n.giu) return "neutra";
+    return `+${NAT_STAT_IT[n.su]} −${NAT_STAT_IT[n.giu]}`;
+  }
+
   /* Le abilità che puoi SCEGLIERE per quella specie nella schermata starter. */
   function abilitaSbloccate(k) {
     const sp = S[k], mask = abilMaskOf(k), out = [];
@@ -1218,6 +1255,63 @@
     },
     // quale sprite verrebbe caricato per questo combattente (per provare il sesso)
     sprite: (f, side) => loadFighterSprite(f || game.player, side || "front").then(s => s && s.sheet),
+    /* Apre la schermata «quale mossa dimentica» a comando. Aspettare che un
+       Pokemon con 4 mosse ne impari una quinta al livello giusto e' l'ennesima
+       coincidenza da rincorrere a click. */
+    impara: (moveId, quale) => {
+      const p = game.party[quale || 0];
+      if (!p) return "nessun Pokemon in squadra";
+      const id = moveId || "SOLAR_BEAM";
+      if (!M[id]) return "mossa sconosciuta: " + id;
+      while (p.moves.length < 4) {                 // serve che ne abbia gia' quattro
+        const tappo = (LEARN[p.speciesId] || []).map(x => x[1]).find(x => M[x] && !p.moves.some(m => m.id === x));
+        if (!tappo) break;
+        p.moves.push({ id: tappo, pp: M[tappo].pp, maxPp: M[tappo].pp });
+      }
+      game.pendingLearns = game.pendingLearns || [];
+      game.pendingLearns.push({ mon: p, moveId: id });
+      processLearns(() => { game.phase = "CHOICE"; showMainMenu(); });
+      return `${p.name} (${p.moves.length} mosse) deve decidere su ${M[id].it}`;
+    },
+    /* Le NOVE mosse che prima usavano `POTENZA_RIPIEGO` (§31). Prepara le
+       condizioni che a ciascuna servono e le esegue sul vero motore, poi
+       rimette tutto a posto: il numero che stampa e' il danno DAVVERO
+       inflitto, non una formula ricalcolata a parte. */
+    mosse9: () => {
+      const a = game.player, d = game.enemy;
+      if (!a || !d) return "serve una lotta in corso";
+      const hp0 = d.hp, max0 = d.maxHp, vol0 = JSON.parse(JSON.stringify(a.volatile)),
+            bacche0 = { ...a.berries }, held0 = { ...a.held }, dst0 = a.dannoSubitoTurno;
+      // bersaglio di paglia ma ROBUSTO: se cade al primo colpo tutti i danni
+      // si leggono uguali (= i suoi PS massimi) e il numero non dice niente
+      d.maxHp = 100000;
+      const out = [];
+      const prova = (id, prepara) => {
+        d.hp = d.maxHp; d.fainted = false;
+        a.dannoSubitoTurno = { fisico: 40, speciale: 30, da: d };
+        if (prepara) prepara();
+        const msg = [];
+        try { dannoSenzaPotenza(a, d, M[id], msg); }
+        catch (e) { out.push({ mossa: M[id].it, errore: e.message }); return; }
+        out.push({ mossa: M[id].it, danno: d.maxHp - d.hp, detto: msg.join(" / ").slice(0, 70) });
+      };
+      prova("COUNTER");        // atteso 80 = 2 x 40 fisici
+      prova("MIRROR_COAT");    // atteso 60 = 2 x 30 speciali
+      prova("METAL_BURST");    // atteso 105 = 1,5 x 70
+      prova("COMEUPPANCE");
+      prova("BEAT_UP");
+      prova("SPIT_UP", () => { a.volatile.accumulo = 3; });
+      prova("SPIT_UP", () => { a.volatile.accumulo = 0; });   // deve FALLIRE
+      prova("NATURAL_GIFT", () => { a.berries = { LIECHI: 1 }; });
+      prova("NATURAL_GIFT", () => { a.berries = {}; });       // deve FALLIRE
+      prova("FLING", () => { a.held = { gripclaw: 1 }; });
+      prova("FLING", () => { a.held = {}; });                 // deve FALLIRE
+      d.maxHp = max0; d.hp = hp0; d.fainted = hp0 <= 0;
+      a.volatile = vol0; a.berries = bacche0; a.held = held0;
+      a.dannoSubitoTurno = dst0;
+      recomputeStats(a);
+      return out;
+    },
     /* Mostra SUBITO l'animazione di evoluzione del Pokemon attivo (o di
        `quale`, indice in squadra). Senza specie di arrivo prende la prima
        evoluzione possibile. Arrivarci giocando vorrebbe dire portare un
@@ -1626,7 +1720,8 @@
                    trap: null, seed: false, seedBy: null, perish: 0, recharge: false,
                    charging: null, infatuated: false, encore: null, taunt: 0,
                    torment: false, drowsy: 0, nightmare: false, ingrain: false,
-                   aquaring: false, saltcure: false, curse: false, lastMove: null };
+                   aquaring: false, saltcure: false, curse: false, lastMove: null,
+                   accumulo: 0, bide: null };
     f._lansat = false;
     f.fainted = false;
     // Poteslot: finche' dura, la squadra entra in campo con almeno +1 stadio
@@ -1708,7 +1803,10 @@
   function beginRunWithTeam() {
     hideMeta();
     game.party = starterTeam.map(e => {
-      const mon = makeFighter(e.k, START_LEVEL, { shiny: e.shiny, ivs: bestIVsFor(e.k) || rollIVs(), ignoreArena: true });
+      // la natura scelta nella scheda vale da subito: `makeFighter` la usa nel
+      // calcolo delle statistiche, non basta assegnarla dopo
+      const mon = makeFighter(e.k, START_LEVEL, { shiny: e.shiny, nature: e.nature,
+                                                 ivs: bestIVsFor(e.k) || rollIVs(), ignoreArena: true });
       if (e.ability && ABIL[e.ability]) {
         mon.ability = ABIL[e.ability];
         // tiene allineato l'indice: 2 = nascosta (serve se poi lo si registra)
@@ -3067,25 +3165,104 @@
       queueMessages([t], () => processLearns(done));
       return;
     }
+    learnInfo = null;                 // ogni Pokemon riparte coi riquadri chiusi
+    renderLearnScreen(item, done);
+  }
+
+  /* ======================================================================
+     «QUALE MOSSA DIMENTICA» — a schermo intero e CONSULTABILE
+
+     Prima mostrava solo i nomi delle quattro mosse, nella fascia comandi: per
+     decidere bisognava ricordarsi a memoria cosa facessero, e soprattutto se
+     la mossa nuova fosse fisica o speciale rispetto all'Attacco del Pokemon.
+     Ora c'è tutto: la ⓘ apre la scheda della mossa nuova e di ognuna delle
+     quattro, e sopra ci sono le statistiche VERE di questo esemplare con
+     Attacco e Att. Speciale in evidenza — è il confronto che serve davvero.
+
+     ⚠️ Sta in `showMetaScreen` e non in `cmd()`: nella fascia comandi non ci
+     stava (è già successo per Squadra, Ball e scheda Mosse).
+     ⚠️ Lo stato del riquadro aperto è SUO (`learnInfo`), non `starterCfg`:
+     quello appartiene alla scheda starter, un'altra schermata.
+     ====================================================================== */
+  let learnInfo = null;               // { tipo: "nuova" | "vecchia", id }
+  const learnAperto = (tipo, id) => !!(learnInfo && learnInfo.tipo === tipo && learnInfo.id === id);
+  function learnInfoTocca(tipo, id, item, done) {
+    learnInfo = learnAperto(tipo, id) ? null : { tipo, id };
+    renderLearnScreen(item, done);
+  }
+
+  function renderLearnScreen(item, done) {
     const { mon, moveId } = item;
     const nv = M[moveId];
+    game.phase = "MESSAGE";           // nessun altro comando è valido adesso
+    /* Statistiche VERE dell'esemplare (livello, IV, natura, vitamine), non
+       quelle base della specie: è su queste che si decide. Le barre sono in
+       scala sulla più alta delle sue, così il confronto si legge a colpo
+       d'occhio anche su un Pokemon di primo livello. */
+    const st = mon.stats || {};
+    const maxSt = Math.max(1, ...["hp", "atk", "def", "spatk", "spdef", "spd"].map(k => st[k] || 0));
+    const bar = (lab, k, spicca) => `<div class="stat-row${spicca ? " spicca" : ""}">
+        <span class="stat-lab">${lab}</span>
+        <div class="stat-track"><div class="stat-fill" style="width:${Math.round((st[k] || 0) / maxSt * 100)}%"></div></div>
+        <span class="stat-val">${st[k] || 0}</span></div>`;
+    // la categoria della mossa nuova decide quale statistica mettere in risalto
+    const fisica = nv.category === "PHYSICAL", speciale = nv.category === "SPECIAL";
+
     const btns = mon.moves.map((mi, i) => {
       const mv = M[mi.id], ty = T[mv.type];
-      return `<button class="btn move-btn" data-i="${i}" style="background:${ty.color};">
-        <span class="move-name">${mv.it}</span>
-        <span class="move-meta"><span class="ticon t-${mv.type}"></span><span class="cicon c-${mv.category}"></span><span>${mv.power ? "pot " + mv.power : ""}</span></span></button>`;
+      return `<div class="learn-riga">
+        <button class="btn move-btn" data-i="${i}" style="background:${ty.color};">
+          <span class="move-name">${mv.it}</span>
+          <span class="move-meta"><span class="ticon t-${mv.type}"></span><span class="cicon c-${mv.category}"></span><span>${mv.power > 0 ? "pot " + mv.power : ""}</span></span>
+        </button>
+        <button class="chip-i ${learnAperto("vecchia", mi.id) ? "on" : ""}" data-i-old="${mi.id}" title="cosa fa">ⓘ</button>
+      </div>${learnAperto("vecchia", mi.id) ? snippetMossa(mi.id) : ""}`;
     }).join("");
-    cmd().innerHTML = `
-      <div class="prompt-line">${mon.name} vuole imparare <b>${nv.it}</b> (${(T[nv.type] || {}).it || nv.type}${nv.power ? ", pot " + nv.power : ""}). Quale mossa dimentica?</div>
-      <div class="grid2">${btns}</div>
-      <div class="back-row"><button class="btn back" data-act="skip">Rinuncia a ${nv.it}</button></div>`;
-    cmd().querySelectorAll(".move-btn").forEach(b => b.onclick = () => {
+
+    showMetaScreen(`
+      <div class="learn-head">
+        <span class="learn-sprite" id="learnSprite"></span>
+        <div class="learn-nome">${mon.name} <span class="learn-lv">Lv.${mon.level}</span></div>
+      </div>
+      <div class="sd-stats learn-stats">
+        ${bar("PS", "hp")}${bar("Att", "atk", fisica)}${bar("Dif", "def")}
+        ${bar("A.Sp", "spatk", speciale)}${bar("D.Sp", "spdef")}${bar("Vel", "spd")}
+      </div>
+      <div class="learn-nuova">
+        Vuole imparare <b>${nv.it}</b>
+        <button class="chip-i ${learnAperto("nuova", moveId) ? "on" : ""}" data-i-new="1" title="cosa fa">ⓘ</button>
+      </div>
+      ${learnAperto("nuova", moveId) ? snippetMossa(moveId) : ""}
+      <div class="meta-sub">Quale mossa dimentica?</div>
+      <div class="learn-lista">${btns}</div>
+      <div class="meta-actions">
+        <button class="meta-btn ghost" data-act="skip">Rinuncia a ${nv.it}</button>
+      </div>`);
+
+    // mini sprite, per sapere di CHI si sta parlando senza leggere il nome
+    loadFighterSprite(mon, "front").then(s => {
+      const el = document.getElementById("learnSprite"); if (!el || !s) return;
+      const k = Math.min(1.1, 56 / s.frame.h, 56 / s.frame.w);
+      el.style.width = s.frame.w * k + "px"; el.style.height = s.frame.h * k + "px";
+      el.style.background = `url("${s.sheet}") -${s.frame.x * k}px -${s.frame.y * k}px / ${s.sheet_w * k}px ${s.sheet_h * k}px no-repeat`;
+      el.style.imageRendering = "pixelated";
+    });
+
+    const m = metaEl();
+    m.querySelector("[data-i-new]").onclick = () => learnInfoTocca("nuova", moveId, item, done);
+    m.querySelectorAll("[data-i-old]").forEach(b =>
+      b.onclick = () => learnInfoTocca("vecchia", b.dataset.iOld, item, done));
+    m.querySelectorAll(".move-btn").forEach(b => b.onclick = () => {
       const i = parseInt(b.dataset.i, 10);
       const old = M[mon.moves[i].id].it;
       mon.moves[i] = { id: moveId, pp: nv.pp, maxPp: nv.pp };
+      hideMeta();
       queueMessages([`${mon.name} dimentica ${old} e impara ${nv.it}!`], () => processLearns(done));
     });
-    cmd().querySelector('[data-act="skip"]').onclick = () => processLearns(done);
+    m.querySelector('[data-act="skip"]').onclick = () => {
+      hideMeta();
+      queueMessages([`${mon.name} rinuncia a imparare ${nv.it}.`], () => processLearns(done));
+    };
   }
 
   /* ---------------- Fine ondata ---------------- */
@@ -3486,7 +3663,7 @@
       if (caught) {
         const mon = makeFighter(m.speciesId, m.level, { shiny: m.shiny, ivs: m.ivs, variant: m.variant, abilIndex: m.abilIndex });
         accogliPokemon(mon, msgs, "🕶 Rubato!");
-        registerCaught(m.speciesId, m.shiny, m.ivs, msgs, m.variant, m.abilIndex);
+        registerCaught(m.speciesId, m.shiny, m.ivs, msgs, m.variant, m.abilIndex, m.nature);
       } else msgs.push(`${m.name} è sfuggito alla Theft Ball!`);
       renderScene();
       queueMessages(msgs, () => chiediPostoInSquadra(() => openShop()));
@@ -3554,7 +3731,7 @@
   }
 
   // Registra una specie catturata nel meta: starter sbloccato, caramella, IV migliori.
-  function registerCaught(speciesId, shiny, ivs, messages, variant, abilIndex) {
+  function registerCaught(speciesId, shiny, ivs, messages, variant, abilIndex, nature) {
     if (variant && registerForm(S[speciesId].dex, variant) && messages) {
       const tot = collectableForms(speciesId);
       const got = Object.keys(meta.formsSeen[S[speciesId].dex]).length;
@@ -3590,6 +3767,13 @@
           ? `🔓✨ Abilità NASCOSTA sbloccata per ${S[rootOf(speciesId)].it}: ${nuova.it}!`
           : `🔓 Nuova abilità sbloccata per ${S[rootOf(speciesId)].it}: ${nuova.it}`);
       }
+    }
+    /* Anche la NATURA di questo esemplare entra nel dex: da qui in poi la puoi
+       scegliere quando schieri quella specie. Come per l'abilità si registra
+       sul CAPOSTIPITE, che è quello che si schiera. */
+    const natNuova = registraNatura(rootOf(speciesId), nature);
+    if (natNuova && messages) {
+      stessoMomento(messages, `🌱 Nuova natura sbloccata per ${S[rootOf(speciesId)].it}: ${natNuova}`);
     }
     saveMeta();
   }
@@ -3630,7 +3814,7 @@
       const mon = makeFighter(enemy.speciesId, enemy.level, { shiny: enemy.shiny, ivs: enemy.ivs, variant: enemy.variant, abilIndex: enemy.abilIndex }); // fresco, HP/PP pieni
       accogliPokemon(mon, messages, "Preso!");
       // meta-progressione: starter sbloccato + caramella + IV migliori
-      registerCaught(enemy.speciesId, enemy.shiny, enemy.ivs, messages, enemy.variant, enemy.abilIndex);
+      registerCaught(enemy.speciesId, enemy.shiny, enemy.ivs, messages, enemy.variant, enemy.abilIndex, enemy.nature);
     } else {
       messages.push(`Oh no! ${enemy.name} si è liberato!`);
     }
@@ -4201,8 +4385,39 @@
      nessuna: chi cambia Pokemon non attacca). Aggiunge gli avversari, ordina e
      riproduce. Estratta da `playerChooseMove` perche' serve anche al cambio
      dal secondo slot in doppio. */
+  /* ======================================================================
+     DANNO SUBITO NEL TURNO — la memoria che mancava alle mosse "di rimando"
+
+     Contrattacco, Specchiovelo, Metalscoppio e Ritorsione restituiscono un
+     multiplo del danno appena incassato: senza tenerne conto restavano ferme
+     a `POTENZA_RIPIEGO`. Si azzera all'INIZIO di ogni turno e si riempie in
+     `doDamage` e nel ramo a danno fisso di `dannoSenzaPotenza`.
+     ⚠️ Le prime due hanno priorità −5: agiscono per ultime, quindi quando
+     tocca a loro il colpo avversario è già stato incassato. È esattamente il
+     motivo per cui nei giochi funzionano.
+     ====================================================================== */
+  const dannoSubitoVuoto = () => ({ fisico: 0, speciale: 0, da: null });
+  function azzeraDannoSubito() {
+    for (const f of onField()) f.dannoSubitoTurno = dannoSubitoVuoto();
+  }
+  function segnaDannoSubito(vittima, attaccante, move, quanto) {
+    if (!quanto || !vittima) return;
+    if (!vittima.dannoSubitoTurno) vittima.dannoSubitoTurno = dannoSubitoVuoto();
+    const d = vittima.dannoSubitoTurno;
+    d[move.category === "SPECIAL" ? "speciale" : "fisico"] += quanto;
+    d.da = attaccante;
+    // PAZIENZA: mentre accumula, tutto quello che incassa fa massa
+    if (vittima.volatile && vittima.volatile.bide) vittima.volatile.bide.danno += quanto;
+  }
+  function dannoSubito(f, quale) {
+    const d = f.dannoSubitoTurno;
+    if (!d) return 0;
+    return quale === "tutto" ? d.fisico + d.speciale : d[quale];
+  }
+
   function risolviTurno(actions, logIniziale) {
     game.queued = null; game.chooser = 0;
+    azzeraDannoSubito();
     // avversari
     for (const e of [game.enemy, game.enemy2]) {
       if (!e || e.fainted) continue;
@@ -4295,6 +4510,7 @@
     }
     if (game.double) { risolviTurno([], log); return; }
 
+    azzeraDannoSubito();       // anche il cambio consuma un turno
     const enemyMove = enemyChooseMove();
     if (!game.enemy.fainted && !game.player.fainted) resolveAction(game.enemy, game.player, enemyMove, log);
     endOfTurnResidual(game.enemy, log);
@@ -4478,6 +4694,34 @@
     if (veto) { messages.push(veto); return; }
     actor.volatile.lastMove = moveInst.id;   // serve a Ripeti e Attaccalite
 
+    /* 1-pre. PAZIENZA: due turni a incassare, poi restituisce il DOPPIO di
+       tutto quello che ha preso. Non è una mossa a caricamento come Volo (che
+       sceglie un bersaglio e poi colpisce): qui il Pokemon incassa e basta, e
+       il contatore va avanti anche se in quei turni non lo tocca nessuno.
+       Il totale lo riempie `segnaDannoSubito`, che vede la `volatile.bide`. */
+    if (actor.volatile.bide) {
+      const b = actor.volatile.bide;
+      if (--b.turni > 0) { messages.push(`${actor.name} sta sopportando!`); return; }
+      actor.volatile.bide = null;
+      messages.push(`${actor.name} sfoga tutto in una volta!`);
+      const reso = b.danno * 2;
+      if (reso <= 0) { stessoMomento(messages, "Ma non ha funzionato!"); return; }
+      const dato = bossClamp(foe, reso, messages);
+      foe.hp = Math.max(0, foe.hp - dato); foe._justHit = true;
+      segnaDannoSubito(foe, actor, move, dato);
+      if (messages.snap) messages.snap();
+      stessoMomento(messages, `${foe.name} perde ${dato} PS!`);
+      if (foe.hp <= 0) { foe.fainted = true; messages.push(`${foe.name} è esausto!`); }
+      segnaFx(messages, messages.length - 1, move.type, sideOf(foe), move.id);
+      return;
+    }
+    if (move.id === "BIDE") {
+      moveInst.pp = Math.max(0, moveInst.pp - 1);
+      actor.volatile.bide = { turni: 2, danno: 0 };
+      messages.push(`${actor.name} si prepara a sopportare!`);
+      return;
+    }
+
     // 1-ter. MOSSE A DUE TURNI (Volo, Sub, Fossa, Rimbalzo…): il primo turno il
     // Pokemon sparisce dal campo e non e' colpibile, il secondo colpisce.
     if (move.charging && !actor.volatile.charging) {
@@ -4566,6 +4810,24 @@
       if (messages.anim) messages.anim("COMMON_" + WEATHER_ANIM[WEATHER_MOVES[move.id]], sideOf(actor));
     }
 
+    /* 4-ter. ACCUMULO e INTROENERGIA. Nei dati sono mosse di stato senza
+       mattoncini riconosciuti, quindi non facevano nulla — e senza Accumulo
+       Sfoghenergia non poteva funzionare: le tre vanno tenute insieme. */
+    if (move.id === "STOCKPILE") accumula(actor, messages);
+    if (move.id === "SWALLOW") {
+      const n = actor.volatile.accumulo || 0;
+      if (!n) messages.push(`${actor.name} non ha accumulato energia!`);
+      else if (actor.hp >= actor.maxHp) { scaricaAccumulo(actor, messages); stessoMomento(messages, "Ma i PS erano già pieni!"); }
+      else {
+        // 1 carica = 1/4 dei PS, 2 = metà, 3 = tutti
+        const quota = n === 1 ? 0.25 : n === 2 ? 0.5 : 1;
+        actor.hp = Math.min(actor.maxHp, actor.hp + Math.ceil(actor.maxHp * quota));
+        scaricaAccumulo(actor, messages);
+        stessoMomento(messages, `${actor.name} recupera energie!`);
+        if (messages.anim) messages.anim("COMMON_HEALTH_UP", sideOf(actor));
+      }
+    }
+
     // 5. effetti (mattoncini). Se la mossa da danno non e' andata a segno, niente effetti.
     if (landed) applyMoveAttrs(actor, foe, move, messages);
   }
@@ -4609,11 +4871,19 @@
                         (`FixedDamageAttr` e derivate dell'originale)
        POTENZA VARIABILE la potenza si calcola e poi il danno è quello normale
 
-     ⚠️ Restano fuori quelle che richiedono memoria del turno che non teniamo
-     (Contrattacco, Specchiovelo, Metalscoppio, Ritorsione, Pazienza): a loro
-     si dà una potenza ragionevole, meglio di un colpo a vuoto.
+     ✅ **Le ultime 9 sono state chiuse il 2026-08-14** (§31): ora il motore
+     tiene il danno subito nel turno (`dannoSubitoTurno`), l'energia accumulata
+     con Accumulo (`volatile.accumulo`) e i due turni di Pazienza
+     (`volatile.bide`). `POTENZA_RIPIEGO` resta solo come rete di sicurezza per
+     una mossa che un domani arrivasse senza formula.
      ====================================================================== */
   const DANNO_FISSO = {
+    /* MOSSE DI RIMANDO: restituiscono un multiplo del danno appena incassato.
+       Se non hai preso niente falliscono (`d <= 0` più sotto), come nei giochi. */
+    COUNTER:      (a) => 2 * dannoSubito(a, "fisico"),
+    MIRROR_COAT:  (a) => 2 * dannoSubito(a, "speciale"),
+    METAL_BURST:  (a) => Math.floor(1.5 * dannoSubito(a, "tutto")),
+    COMEUPPANCE:  (a) => Math.floor(1.5 * dannoSubito(a, "tutto")),
     SONIC_BOOM:   () => 20,
     DRAGON_RAGE:  () => 40,
     SEISMIC_TOSS: (a) => a.level,
@@ -4658,9 +4928,49 @@
     // amicizia: non la teniamo, si usa il valore di una squadra affiatata
     RETURN: () => 102, PIKA_PAPOW: () => 102, VEEVEE_VOLLEY: () => 102,
     FRUSTRATION: () => 60,
+    /* PICCHIADURO: colpisce una volta per ogni membro sano della squadra
+       (`rollMultiHit` con mode BEAT_UP) e ogni colpo vale `Attacco base / 10 + 5`
+       di QUEL membro. Il motore usa una potenza sola per tutti i colpi, quindi
+       si passa la MEDIA: il totale è lo stesso, cambia solo che i colpi sono
+       tutti uguali invece che uno per compagno.
+       ⚠️ Qui NON si somma: il numero di colpi ce lo mette già il mattoncino
+       multi-colpo, e sommare avrebbe contato la squadra due volte. */
+    BEAT_UP: (a) => { const s = squadraDi(a);
+      return s.reduce((t, p) => t + Math.floor((((S[p.speciesId] || {}).baseStats || {}).atk || 50) / 10) + 5, 0)
+             / Math.max(1, s.length); },
   };
-  /* Ripiego per le mosse che avrebbero bisogno di stato che non teniamo. */
+  /* Rete di sicurezza: nessuna mossa in gioco ci finisce più (§31), ma se un
+     domani ne arrivasse una senza formula meglio un colpo che un buco. */
   const POTENZA_RIPIEGO = 60;
+
+  /* La squadra di un combattente: la tua, o il roster dell'allenatore.
+     Un selvatico è solo. Serve a Picchiaduro. */
+  function squadraDi(f) {
+    if (game.party.includes(f)) return game.party.filter(p => !p.fainted);
+    const roster = (game.trainerRoster || []).filter(m => !m.fainted);
+    return roster.includes(f) ? roster : [f];
+  }
+
+  /* DONONATURALE: la bacca tenuta diventa il colpo, e ne detta TIPO e potenza.
+     Valori dei giochi per le 11 bacche che abbiamo. */
+  const BACCA_DONO = {
+    SITRUS: { tipo: "PSYCHIC",  pot: 80 },  LUM:    { tipo: "FLYING",   pot: 80 },
+    LEPPA:  { tipo: "FIGHTING", pot: 80 },  ENIGMA: { tipo: "BUG",      pot: 100 },
+    LIECHI: { tipo: "GRASS",    pot: 100 }, GANLON: { tipo: "ICE",      pot: 100 },
+    PETAYA: { tipo: "POISON",   pot: 100 }, APICOT: { tipo: "GROUND",   pot: 100 },
+    SALAC:  { tipo: "FIGHTING", pot: 100 }, LANSAT: { tipo: "FLYING",   pot: 100 },
+    STARF:  { tipo: "PSYCHIC",  pot: 100 },
+  };
+  /* LANCIO: la potenza è quella dell'oggetto tirato, come nei giochi.
+     Gli oggetti che non stanno in tabella valgono 30, il valore più comune. */
+  const FLING_POT = {
+    gripclaw: 90, quickclaw: 80, leek: 60, eviolite: 40, mysticalrock: 60,
+    kingsrock: 30, toxicorb: 30, flameorb: 30, shellbell: 30, scopelens: 30,
+    souldew: 30, blackhole: 30, reviverseed: 30,
+    leftovers: 10, focusband: 10, widelens: 10, multilens: 10,
+  };
+  const primaBacca   = (f) => Object.keys(f.berries || {}).find(k => f.berries[k] > 0 && BACCA_DONO[k]);
+  const primoOggetto = (f) => Object.keys(f.held || {}).find(k => k !== "typeboost" && f.held[k] > 0);
 
   const pesoPotenza = (kg) => !kg ? 40
     : kg >= 200 ? 120 : kg >= 100 ? 100 : kg >= 50 ? 80 : kg >= 25 ? 60 : kg >= 10 ? 40 : 20;
@@ -4740,9 +5050,13 @@
   }
 
   // Numero di colpi per le mosse multi-colpo.
-  function rollMultiHit(mode) {
+  function rollMultiHit(mode, actor) {
     if (mode === "TWO") return 2;
     if (mode === "THREE") return 3;
+    /* PICCHIADURO: un colpo per ogni membro sano della squadra. Il dato lo
+       marcava gia' come multi-colpo, ma `mode: "BEAT_UP"` non era gestito e
+       finiva nella distribuzione casuale 2-5. */
+    if (mode === "BEAT_UP") return actor ? Math.max(1, squadraDi(actor).length) : 1;
     const r = Math.random(); // distribuzione classica 2-5
     return r < 0.35 ? 2 : r < 0.70 ? 3 : r < 0.85 ? 4 : 5;
   }
@@ -4761,6 +5075,7 @@
       if (d <= 0) { stessoMomento(messages, "Ma non ha funzionato!"); return false; }
       const dato = bossClamp(foe, d, messages);      // gli scudi del boss valgono comunque
       foe.hp = Math.max(0, foe.hp - dato); foe._justHit = true;
+      segnaDannoSubito(foe, actor, move, dato);
       if (messages.snap) messages.snap();
       stessoMomento(messages, `${foe.name} perde ${dato} PS!`);
       if (foe.hp <= 0) foe.fainted = true;
@@ -4771,10 +5086,68 @@
       }
       return true;
     }
+    /* MOSSE CHE POSSONO NON PARTIRE: senza bacca, senza oggetto o senza
+       energia accumulata nei giochi falliscono — non fanno 1 danno. */
+    if (move.id === "NATURAL_GIFT" && !primaBacca(actor)) {
+      stessoMomento(messages, `${actor.name} non ha bacche da usare!`); return false;
+    }
+    if (move.id === "FLING" && !primoOggetto(actor)) {
+      stessoMomento(messages, `${actor.name} non ha niente da lanciare!`); return false;
+    }
+    if (move.id === "SPIT_UP" && !(actor.volatile.accumulo || 0)) {
+      stessoMomento(messages, `${actor.name} non ha accumulato energia!`); return false;
+    }
+
     // potenza calcolata: da qui in poi è un colpo normale
-    const f = POTENZA_VARIABILE[move.id];
-    const potenza = f ? Math.max(1, Math.floor(f(actor, foe, move))) : POTENZA_RIPIEGO;
-    return doDamage(actor, foe, move, messages, potenza);
+    let mossa = move, potenza;
+    if (move.id === "NATURAL_GIFT") {
+      const k = primaBacca(actor), b = BACCA_DONO[k];
+      actor.berries[k]--; if (!actor.berries[k]) delete actor.berries[k];
+      potenza = b.pot;
+      /* ⚠️ Il Dononaturale PRENDE il tipo della bacca. `computeDamage` legge il
+         tipo dall'oggetto mossa che gli si passa, quindi basta una copia: non
+         si tocca `M[...]`, che è condiviso da tutti (§8). */
+      mossa = { ...move, type: b.tipo };
+      stessoMomento(messages, `La ${BERRY_DATA[k].it} si trasforma in un colpo di tipo ${T[b.tipo].it}!`);
+    } else if (move.id === "FLING") {
+      const k = primoOggetto(actor);
+      potenza = FLING_POT[k] || 30;
+      actor.held[k]--; if (!actor.held[k]) delete actor.held[k];
+      recomputeStats(actor);                 // l'oggetto se n'è andato
+      stessoMomento(messages, `${actor.name} scaglia il suo oggetto!`);
+    } else if (move.id === "SPIT_UP") {
+      potenza = 100 * actor.volatile.accumulo;
+      scaricaAccumulo(actor, messages);
+    } else {
+      const f = POTENZA_VARIABILE[move.id];
+      potenza = f ? Math.max(1, Math.floor(f(actor, foe, move))) : POTENZA_RIPIEGO;
+    }
+    return doDamage(actor, foe, mossa, messages, potenza);
+  }
+
+  /* ----------------------------------------------------------------------
+     ACCUMULO / SFOGHENERGIA / INTROENERGIA — la tripletta va tenuta insieme.
+     Accumulo sale fino a 3 e dà +1 Difesa e +1 Difesa Speciale per carica;
+     scaricando (Sfoghenergia o Introenergia) si restituiscono gli stadi.
+     ---------------------------------------------------------------------- */
+  function accumula(f, messages) {
+    if ((f.volatile.accumulo || 0) >= 3) {
+      stessoMomento(messages, `${f.name} non può accumulare altro!`); return false;
+    }
+    f.volatile.accumulo = (f.volatile.accumulo || 0) + 1;
+    f.stages.def = Math.min(6, f.stages.def + 1);
+    f.stages.spdef = Math.min(6, f.stages.spdef + 1);
+    messages.push(`${f.name} accumula energia! (${f.volatile.accumulo})`);
+    return true;
+  }
+  function scaricaAccumulo(f, messages) {
+    const n = f.volatile.accumulo || 0;
+    if (!n) return 0;
+    f.volatile.accumulo = 0;
+    f.stages.def = Math.max(-6, f.stages.def - n);
+    f.stages.spdef = Math.max(-6, f.stages.spdef - n);
+    stessoMomento(messages, `${f.name} libera l'energia accumulata!`);
+    return n;
   }
 
   /* ABILITÀ CHE SCATTANO DOPO UN KO (`PostVictoryStatStageChangeAbAttr`).
@@ -4827,7 +5200,7 @@
 
     // Multilente: un colpo in piu' (a danno ridotto, come nell'originale)
     const lens = (actor.held && actor.held.multilens) || 0;
-    const hits = (multi ? rollMultiHit(multi.mode) : 1) + lens;
+    const hits = (multi ? rollMultiHit(multi.mode, actor) : 1) + lens;
     const lensPenalty = lens ? 1 / (1 + lens) : 1;
     // Mirino / Baccalansa / Supercolpo alzano la probabilita' di brutto colpo
     const critBonus = (actor.held && actor.held.scopelens ? 1 : 0)
@@ -4867,6 +5240,8 @@
     if (actor.held && actor.held.gripclaw && total > 0 && move.contact
         && Math.random() < 0.1 * actor.held.gripclaw) rubaOggetto(actor, foe, messages, "I Presartigli", "rubano");
     if (immune && total === 0) { stessoMomento(messages, `Non ha effetto su ${foe.name}...`); return false; }
+    // memoria per Contrattacco/Specchiovelo/Metalscoppio/Ritorsione e Pazienza
+    segnaDannoSubito(foe, actor, move, total);
 
     /* Il danno e' stato applicato: l'istantanea dell'evento della mossa va
        riallineata, cosi' la barra cala su QUELLA schermata (alla fine della
@@ -5745,7 +6120,7 @@
       const mon = makeFighter(enemy.speciesId, enemy.level, { shiny: enemy.shiny, ivs: enemy.ivs, variant: enemy.variant, abilIndex: enemy.abilIndex });
       const stolen = !!enemy.trainer;
       accogliPokemon(mon, log, stolen ? "🕶 Rubato!" : "Preso!");
-      registerCaught(enemy.speciesId, enemy.shiny, enemy.ivs, log, enemy.variant, enemy.abilIndex);
+      registerCaught(enemy.speciesId, enemy.shiny, enemy.ivs, log, enemy.variant, enemy.abilIndex, enemy.nature);
       enemy.fainted = true;                        // esce dal campo
       game.capturedThisWave = true;                // niente seconda offerta a fine lotta
       if (stolen) {
@@ -6464,6 +6839,10 @@
           const nuova = registraAbilita(rootOf(sp), 2);
           if (nuova) stessoMomento(extra, `🔓✨ È nato con l'abilità NASCOSTA: ${nuova.it} sbloccata per ${S[sp].it}!`);
         }
+        /* Anche il nato ha la sua NATURA, e nascendo la sblocca per la specie:
+           è l'altra via per riempire la scheda, oltre alle catture. */
+        const natNata = registraNatura(rootOf(sp), rollNature());
+        if (natNata) stessoMomento(extra, `🌱 È nato di natura ${natNata}: sbloccata per ${S[sp].it}!`);
         /* Ogni schiusa sblocca UNA mossa da uovo della specie nata: e' l'unico
            modo di ottenerle, ed e' cio' che fa crescere le mosse iniziali
            selezionabili nel menu di partenza. Il gacha MOSSE rende molto piu'
@@ -7431,7 +7810,7 @@
      aggiungono altre specie. Si compone una squadra iniziale finché il budget
      lo consente. */
   const STARTER_BUDGET = 10;
-  let starterTeam = [];     // [{k, ability, moves, shiny, pkrs}]
+  let starterTeam = [];     // [{k, ability, nature, moves, shiny, pkrs}]
 
   // Costo effettivo: base meno le riduzioni comprate con le caramelle (min 1).
   function starterCost(k) {
@@ -7650,9 +8029,12 @@
        scegliere, così si capisce che esistono e che vanno conquistate. */
     const abilPool = abilitaSbloccate(k);
     const abilTutte = [...(sp.abilities.normal || []), ...(sp.abilities.hidden ? [sp.abilities.hidden] : [])];
+    const natPool = natureSbloccate(k);
     starterCfg = {
       k, shiny, pkrs,
       ability: abilPool[0],
+      nature: natPool[0],
+      natPool,
       /* selezione di partenza: come nell'originale, le prime 4 dell'elenco
          "mosse di livello, poi mosse da uovo" (`speciesStarterMoves`) */
       moves: [...learnPool, ...eggPool].slice(0, 4),
@@ -7713,6 +8095,25 @@
         <button class="chip-i ${aperto("ab", a) ? "on" : ""}" data-i-ab="${a}" title="cosa fa">ⓘ</button>
       </span>`;
     }).join("");
+    /* NATURE: come le abilità, si vedono TUTTE e 25 ma quelle non ancora
+       incontrate sono chiuse col lucchetto — così si sa cosa c'è da
+       conquistare. Sotto il nome c'è l'effetto, che è l'unica cosa che serve
+       davvero per scegliere. */
+    /* ⚠️ Le nature sono VENTICINQUE: metterle tutte in elenco come le tre
+       abilità riempiva mezza schermata e spingeva le mosse fuori campo (visto
+       a schermo). Di base si vedono solo quelle che hai, più un chip che dice
+       quante ne restano; toccandolo si apre l'elenco completo col lucchetto,
+       che è il punto — sapere cosa c'è da conquistare. */
+    const natChiuse = NATURE_KEYS.filter(n => !c.natPool.includes(n));
+    const natVisibili = c.natTutte ? NATURE_KEYS : c.natPool;
+    const nature = natVisibili.map(n => {
+      const libera = c.natPool.includes(n);
+      return `<button class="chip nat-chip ${c.nature === n ? "on" : ""} ${libera ? "" : "chiusa"}"
+        data-nat="${n}" ${libera ? "" : "disabled"} title="${naturaEffetto(n)}">${libera ? "" : "🔒 "}${NATURES[n].it}
+        <span class="nat-eff">${naturaEffetto(n)}</span></button>`;
+    }).join("")
+    + (natChiuse.length ? `<button class="chip nat-chip nat-piu" data-nat-tutte="1">${c.natTutte ? "− nascondi" : "🔒 +" + natChiuse.length}
+        <span class="nat-eff">${c.natTutte ? "le bloccate" : "da scoprire"}</span></button>` : "");
     /* Le mosse da uovo si mostrano in fondo e marcate: sono la ricompensa delle
        schiuse, non qualcosa che hai per diritto. La 4a e' la RARA. */
     const chip = (id, uovo) => {
@@ -7740,6 +8141,7 @@
           <div class="sd-types">${sp.types.map(t => `<span class="ticon t-${t}"></span>`).join("")}</div>
           <div class="sd-abrow">Abilità: ${abils}</div>
           ${c.info && c.info.tipo === "ab" ? snippetAbilita(c.info.id) : ""}
+          <div class="sd-abrow">Natura: ${nature}</div>
           <div class="sd-passive">Passiva: <b>${(ABIL[sp.passive] || {}).it || "—"}</b>${meta.passiveOn && meta.passiveOn[c.k] ? " ✅" : " 🔒"} · Costo: <b>${starterCost(c.k)}</b> punti</div>
           <div class="sd-candy">🍬 ${candyOf(c.k)} caramelle
             <button class="chip candy-btn" data-cc="1" ${candyOf(c.k) >= costCutPrice(c.k) && starterCost(c.k) > 1 ? "" : "disabled"}>−1 costo (${costCutPrice(c.k)})</button>
@@ -7786,6 +8188,9 @@
       saveMeta(); renderStarterDetail();
     };
     metaEl().querySelectorAll("[data-ab]").forEach(b => b.onclick = () => { c.ability = b.dataset.ab; renderStarterDetail(); });
+    metaEl().querySelectorAll("[data-nat]").forEach(b => b.onclick = () => { c.nature = b.dataset.nat; renderStarterDetail(); });
+    const natPiu = metaEl().querySelector("[data-nat-tutte]");
+    if (natPiu) natPiu.onclick = () => { c.natTutte = !c.natTutte; renderStarterDetail(); };
     metaEl().querySelectorAll("[data-mv]").forEach(b => b.onclick = () => {
       const id = b.dataset.mv, i = c.moves.indexOf(id);
       if (i >= 0) c.moves.splice(i, 1);
@@ -7798,7 +8203,7 @@
     metaEl().querySelector('[data-act="back"]').onclick = renderStarterSelect;
     metaEl().querySelector('[data-act="go"]').onclick = () => {
       // aggiunge alla squadra iniziale (sistema a punti), poi torna alla scelta
-      starterTeam.push({ k: c.k, ability: c.ability, moves: c.moves.slice(), shiny: c.shiny, pkrs: c.pkrs });
+      starterTeam.push({ k: c.k, ability: c.ability, nature: c.nature, moves: c.moves.slice(), shiny: c.shiny, pkrs: c.pkrs });
       renderStarterSelect();
     };
   }

@@ -13,13 +13,16 @@ quella lista è arrivata davvero, una segnalazione alla volta mentre giocava sul
 👉 **Vai al §29**: racconta cosa è cambiato, **le 5 cose che restano** con l'indagine già
 fatta, e le trappole in cui si ricasca ogni volta.
 
-Le 5 aperte erano queste. ✅ **Le prime due sono FATTE (2026-08-14, §30)**, insieme come
-previsto, e con loro l'**evoluzione a pieno schermo** chiesta a voce in corsa:
-1. ~~stato e stadi che persistono fra le ondate~~ → ✅ §30
-2. ~~animazione di ritiro e uscita dalla ball~~ → ✅ §30
-3. **scelta della natura** nella scheda starter (serve prima registrarle nel dex);
-4. consultare mossa e Pokémon nella schermata «quale mossa dimentica»;
-5. le 9 mosse che usano ancora una potenza di ripiego.
+✅ **LE 5 SONO TUTTE CHIUSE (2026-08-14).** Più l'**evoluzione a pieno schermo**, chiesta a
+voce in corsa. Non resta niente della lista del §29:
+1. ~~stato e stadi che persistono fra le ondate~~ → ✅ §30.1
+2. ~~animazione di ritiro e uscita dalla ball~~ → ✅ §30.3
+3. ~~scelta della natura nella scheda starter~~ → ✅ §31.3
+4. ~~consultare mossa e Pokémon in «quale mossa dimentica»~~ → ✅ §31.2
+5. ~~le 9 mosse a potenza di ripiego~~ → ✅ §31.1
+
+Cosa resta aperto in tutto il progetto: **le fusioni (DNA Splicers)**, accantonate dal
+proprietario — non farle senza chiedere — e la Terastallizzazione, che ha escluso.
 
 🔴 **Prima di indagare una segnalazione, chiedi che revisione sta usando**: la Home mostra
 in fondo `rev N · da rete/da APK`. Due volte ha segnalato difetti **già corretti** perché il
@@ -2202,3 +2205,108 @@ window.setTimeout = window.__st;
 ha servito il vecchio: `#evo-overlay` risultava ancora `absolute; z-index 8` e sembrava che la
 regola nuova non si applicasse. **Fra una modifica e una prova, lancia
 `node tools/make-manifest.mjs`** (solo il passo 1 di `pubblica.mjs`, non pubblica niente).
+
+---
+
+## 31. Le ultime tre del §29 (2026-08-14) — la lista è finita
+
+### 31.1 Le 9 mosse che usavano una potenza di ripiego
+
+Al motore mancavano tre memorie. Aggiunte tutte e tre, e le nove mosse sono diventate vere.
+
+**`p.dannoSubitoTurno = { fisico, speciale, da }`** — azzerato in `azzeraDannoSubito()`, che
+gira all'inizio di ogni turno (`risolviTurno` **e** il ramo singolo di `playerSwitch`, che il
+turno lo consuma lo stesso), e riempito da `segnaDannoSubito()` in `doDamage` e nel ramo a
+danno fisso di `dannoSenzaPotenza`.
+
+| mossa | ora fa | verificato |
+|---|---|---|
+| Contrattacco | 2× il danno **fisico** subito nel turno | 80 con 40 incassati |
+| Specchiovelo | 2× il danno **speciale** | 60 con 30 incassati |
+| Metalscoppio · Ritorsione | 1,5× **qualsiasi** danno | 105 con 70 incassati |
+
+Sono `DANNO_FISSO`, non potenza: nei giochi restituiscono esattamente quel numero. Se non hai
+incassato niente **falliscono**, come devono.
+
+**`volatile.bide`** — Pazienza è una mossa a due turni vera: `{ turni: 2, danno: 0 }`, e
+`segnaDannoSubito` fa massa dentro. Al terzo turno restituisce il doppio.
+⚠️ Non passa da `move.charging` (quello sceglie un bersaglio e poi colpisce): qui il Pokémon
+incassa e basta, e il contatore va avanti anche nei turni in cui non lo tocca nessuno.
+Verificato in gioco: 16 → 31 accumulati → «sfoga tutto in una volta! perde 62 PS».
+
+**`volatile.accumulo`** — Accumulo/Sfoghenergia/Introenergia vanno tenute insieme: senza la
+prima la seconda non può funzionare. Accumulo sale fino a 3 e dà +1 Dif e +1 Dif.Sp per
+carica; scaricando si restituiscono gli stadi. Sfoghenergia = 100 × cariche, Introenergia cura
+1/4, 1/2 o tutto.
+
+**Le altre tre**:
+- **Picchiaduro**: `rollMultiHit` ora gestisce `mode: "BEAT_UP"` → un colpo per ogni membro
+  sano della squadra. ⚠️ Il dato lo marcava **già** come multi-colpo e quel modo non era
+  gestito: finiva nella distribuzione casuale 2-5. La potenza è la **media** di
+  `Attacco base / 10 + 5` dei membri — sommarla avrebbe contato la squadra due volte.
+- **Dononaturale**: la bacca tenuta ne detta **tipo e potenza** (tabella `BACCA_DONO` per le
+  nostre 11 bacche, valori dei giochi), e si consuma. Senza bacca fallisce.
+  ⚠️ Il tipo si cambia passando una **copia** della mossa a `doDamage`: `M[...]` è condiviso
+  da tutti e non si tocca (§8).
+- **Lancio**: potenza dall'oggetto tenuto (`FLING_POT`, 10-90), che si consuma e fa
+  ricalcolare le statistiche. Senza oggetto fallisce.
+
+`POTENZA_RIPIEGO` resta in codice ma **nessuna mossa in gioco ci finisce più**: è la rete di
+sicurezza se un domani ne arriva una senza formula.
+
+**Sonda**: `__items.mosse9()` prepara le condizioni di ciascuna, le esegue sul motore vero
+contro un bersaglio di paglia da 100.000 PS e stampa il danno **davvero inflitto**.
+⚠️ Il bersaglio robusto serve: col Patrat vero da 18 PS ogni mossa restituiva «18» e i numeri
+non dicevano niente.
+
+### 31.2 «Quale mossa dimentica», consultabile
+
+Prima erano quattro nomi nella fascia comandi: per decidere bisognava ricordarsi a memoria
+cosa facesse ognuna, e soprattutto se la mossa nuova fosse fisica o speciale.
+
+- Portata a schermo intero con `showMetaScreen` (nella fascia non ci stava — è la quarta volta:
+  Squadra, Ball, scheda Mosse, e ora questa).
+- Una **ⓘ** per la mossa nuova e una per ciascuna delle quattro: aprono `snippetMossa`, lo
+  stesso riquadro della scheda starter (potenza, precisione, PP, effetto in italiano).
+- Sopra, le **statistiche vere dell'esemplare** (livello, IV, natura, vitamine — non quelle
+  base della specie), con **Att o A.Sp evidenziata in oro** secondo la categoria della mossa
+  nuova. È il confronto che serve davvero.
+- Mini sprite frontale, per sapere di chi si sta parlando.
+- ⚠️ Lo stato del riquadro aperto è **suo** (`learnInfo`), non `starterCfg`: quello appartiene
+  alla scheda starter, che è un'altra schermata.
+- Rinunciare ora dice «X rinuncia a imparare Y» invece di uscire in silenzio.
+
+**Sonda**: `__items.impara("SOLAR_BEAM")` riempie le mosse fino a quattro e apre la schermata.
+
+### 31.3 Scelta della NATURA nella scheda starter
+
+Modello identico alle abilità (`meta.abils`), perché è lo stesso meccanismo dell'originale
+(`dexEntry.natureAttr`, maschera di bit):
+
+- `meta.nature[specie]` è una maschera su `NATURE_KEYS`. La scrivono `registraNatura()`
+  chiamata da **`registerCaught`** (che ora prende la natura come 7° parametro) e dalla
+  **schiusa**. Come per le abilità si registra sul **capostipite**, che è quello che si
+  schiera. Messaggio: «🌱 Nuova natura sbloccata per X: Decisa».
+- `natureSbloccate(k)` torna quelle scegliibili. **Le 5 neutre sono sempre disponibili**: non
+  danno alcun vantaggio, e senza almeno una la scheda di una specie mai catturata resterebbe
+  vuota.
+- `beginRunWithTeam` passa la natura a `makeFighter` — non basta assegnarla dopo, serve nel
+  calcolo delle statistiche.
+- ⚠️ **Le nature sono VENTICINQUE.** Metterle tutte in elenco come le tre abilità riempiva
+  mezza schermata e spingeva le mosse fuori campo (visto a schermo, non dedotto). Ora si
+  vedono solo quelle che hai più un chip **«🔒 +20 da scoprire»** che apre l'elenco completo
+  col lucchetto e l'effetto scritto (`+Att −A.Sp`).
+
+**Verificato**: la scheda sta tutta in una schermata; scegliendo Seria lo starter parte
+davvero Seria; catturare un Patrat Timida scrive `PATRAT: 1024` (= `1 << 10`, l'indice di
+TIMID) nel dex.
+
+⚠️ **Equilibrio**: con la natura a piacere lo starter è più forte. È proprio per questo che
+vanno conquistate una alla volta — non regalarle tutte.
+
+### Nota di metodo
+
+Anche stavolta le sonde hanno fatto tutto il lavoro (`mosse9`, `impara`, più `allenatore` ed
+`evoluzione` del §30). Le uniche cose trovate a occhio sono state le due di layout: i 25 chip
+che sfondavano la scheda starter e il fondo velato dell'evoluzione. **Le sonde dicono se
+funziona, lo screenshot dice se si può usare.**

@@ -800,6 +800,35 @@ html, body {
 .stat-track { flex: 1; height: 9px; background: #10131a; border-radius: 5px; overflow: hidden; }
 .stat-fill { height: 100%; background: linear-gradient(90deg, #6fd36f, #f2c94c, #eb5757); border-radius: 5px; }
 .stat-val { width: 30px; text-align: right; font-variant-numeric: tabular-nums; opacity: .9; }
+/* ============================================================================
+   «QUALE MOSSA DIMENTICA» — a schermo intero, con le schede consultabili.
+   ⚠️ Le righe hanno `flex: 0 0 auto`: dentro una colonna flex si schiacciano,
+   e l'`overflow: hidden` taglia l'ultimo pulsante (successo tre volte).
+   ========================================================================== */
+.learn-head { display: flex; align-items: center; gap: 10px; margin-bottom: 1vh; flex: 0 0 auto; }
+.learn-sprite { flex: 0 0 auto; image-rendering: pixelated; }
+.learn-nome { font-size: clamp(15px, 4.4vw, 20px); font-weight: 700; }
+.learn-lv { opacity: .7; font-weight: 400; font-size: .85em; }
+.learn-stats { margin: 0 0 1.2vh; flex: 0 0 auto; }
+/* la statistica che conta per la mossa nuova (Att se fisica, A.Sp se speciale) */
+.stat-row.spicca .stat-lab, .stat-row.spicca .stat-val { color: #ffd64a; font-weight: 700; opacity: 1; }
+.stat-row.spicca .stat-track { box-shadow: 0 0 0 1px rgba(255,214,74,.55); }
+.learn-nuova {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  font-size: clamp(13px, 3.6vw, 16px); flex: 0 0 auto;
+  background: rgba(255,255,255,.06); border-radius: 10px; padding: 8px 10px;
+}
+.learn-lista { display: flex; flex-direction: column; gap: 7px; margin: 1vh 0; overflow-y: auto; }
+.learn-riga { display: flex; align-items: stretch; gap: 6px; flex: 0 0 auto; }
+.learn-riga .move-btn { flex: 1; min-width: 0; }
+.learn-riga .chip-i { flex: 0 0 auto; align-self: center; }
+/* NATURE nella scheda starter: 25 chip, quelle non ancora incontrate chiuse.
+   Sotto il nome c'è l'effetto (+Att −A.Sp), che è ciò su cui si sceglie. */
+.nat-chip { display: inline-flex; flex-direction: column; align-items: center; line-height: 1.15;
+            font-size: clamp(9px, 2.6vw, 12px); padding: 3px 7px; }
+.nat-eff { font-size: .82em; opacity: .75; font-variant-numeric: tabular-nums; }
+.nat-chip.on .nat-eff { opacity: .95; }
+.nat-chip.nat-piu { border-style: dashed; opacity: .8; }
 .move-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 1vh 0 2vh; overflow-y: auto; }
 .move-chip { font-size: clamp(10px, 2.8vw, 13px); }
 /* mosse da UOVO: si sbloccano solo con le schiuse, quindi si vedono diverse
