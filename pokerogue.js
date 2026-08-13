@@ -118,6 +118,7 @@
   let VARIANTS = {};           // forme estetiche: { dex: [formKey,...] } (Vivillon, Unown…)
   let TMS = { perSpecie: {}, tier: {} };  // MT: chi impara cosa + rarita' per mossa
   let EGGM = {};               // mosse da uovo: { BULBASAUR: [m0,m1,m2,m3] } (la 4a e' la RARA)
+  let DIAL = {};               // dialoghi allenatori: { youngster: {encounter:[[…]], victory:[[…]]} }
   let SPECIES_KEYS = [];       // elenco specie per scelte casuali
 
   /* ====================================================================== */
@@ -1311,12 +1312,31 @@
     };
   }
 
-  // Una specie Gen 1 casuale (diversa da `exclude`).
+  // Una specie qualsiasi (diversa da `exclude`).
   function randomSpecies(exclude) {
     let k;
     do { k = SPECIES_KEYS[Math.floor(Math.random() * SPECIES_KEYS.length)]; }
     while (k === exclude);
     return k;
+  }
+
+  /* Specie per gli INCONTRI (il venditore, la Zona Safari, l'allevatrice…).
+     ⚠️ Qui non va bene pescare fra TUTTE le 1084: così un incontro all'ondata 5
+     poteva regalare un Guzzlord o un leggendario. Si escludono le specie della
+     fascia leggendaria — quelle restano roba da uovo leggendario o da boss. */
+  function specieDaIncontro(exclude) {
+    for (let i = 0; i < 60; i++) {
+      const k = randomSpecies(exclude);
+      const sp = S[k];
+      if (!sp) continue;
+      // gli stessi filtri dell'originale: niente leggendari, semi-leggendari
+      // (ci stanno le Ultracreature come Guzzlord) né misteriosi
+      if (sp.leggendario || sp.semiLeggendario || sp.misterioso) continue;
+      if (sp.eggTier === "LEGENDARY") continue;
+      if ((sp.starterCost || 0) >= 8) continue;
+      return k;
+    }
+    return randomSpecies(exclude);
   }
 
   // Override opzionale via URL: ?p=CHARIZARD forza lo starter; ?e=... il 1° nemico.
@@ -2309,12 +2329,56 @@
 
   // Avvio lotta contro allenatore/rivale: prima il RITRATTO (in alto a dx, al
   // posto del nemico), poi manda in campo il primo Pokémon.
+  /* ======================================================================
+     DIALOGHI DEGLI ALLENATORI (testi italiani ufficiali, data/dialoghi.json)
+
+     La chiave si ricava dallo SPRITE, che nell'originale ha lo stesso nome
+     della voce di dialogo a meno del suffisso di sesso e del maiuscolo:
+       youngster_m → youngster · black_belt_m → blackBelt
+       hex_maniac  → hexManiac · rocket_grunt_f → rocketGrunt · brock → brock
+     Il RIVALE ha un dialogo diverso a ogni incontro (rival, rival2 … rival6),
+     e una versione femminile.
+     ⚠️ Nel file `victory` è la vittoria del GIOCATORE, cioè cosa dice
+     l'allenatore quando lo batti: è il dialogo che serve a noi.
+     ====================================================================== */
+  function chiaveDialogo() {
+    if (game.trainerIsRival) {
+      const tappa = RIVAL_WAVES.indexOf(game.wave);
+      const base = "rival" + (tappa > 0 ? (tappa + 1) : "");
+      const f = base + "Female";
+      if (game.rivalFemale && DIAL[f]) return f;
+      return DIAL[base] ? base : null;
+    }
+    const spr = game.trainerSprite || "";
+    if (!spr) return null;
+    const senzaSesso = spr.replace(/_(m|f)$/, "");
+    const camel = senzaSesso.split("_")
+      .map((w, i) => i === 0 ? w : w.charAt(0).toUpperCase() + w.slice(1)).join("");
+    // se esiste la variante femminile e l'allenatore è donna, si preferisce
+    if (/_f$/.test(spr) && DIAL[camel + "Female"]) return camel + "Female";
+    return DIAL[camel] ? camel : null;
+  }
+
+  /* Le frasi che l'allenatore appena battuto dice, già pronte da accodare.
+     Ogni schermata è un messaggio: si leggono una alla volta, col tocco. */
+  function dialogoSconfitta() {
+    const k = chiaveDialogo();
+    const v = k && DIAL[k] && DIAL[k].victory;
+    if (!v || !v.length) return [];
+    const scelta = v[Math.floor(Math.random() * v.length)] || [];
+    const chi = game.trainerName || "L'allenatore";
+    return scelta.map(t => `${chi}: «${t}»`);
+  }
+
   function startTrainerBattle(mons, portraitSprite, name, challengeMsgs) {
     // i Pokemon degli allenatori pescano dal pool oggetti dedicato
     for (const m of mons) m.trainerMon = true;
     game.trainerName = name;
     game.trainerRoster = mons.slice();      // serve alla Theft Ball
     game.trainerIsRival = mons.some(m => m.rival);
+    // chiave dei dialoghi ufficiali (vedi `chiaveDialogo`): serve a fargli dire
+    // qualcosa quando lo batti
+    game.trainerSprite = portraitSprite;
     game.trainerTotal = mons.length;
     game.trainerDefeated = 0;
     game.enemyQueue = mons.slice(1);
@@ -2844,6 +2908,11 @@
     const messages = [wasGym
       ? `Hai sconfitto ${game.gymLeader.name}! ⭐ Medaglia ottenuta!`
       : `Hai sconfitto ${game.enemy.name}!`];
+    /* Se era un ALLENATORE, adesso parla: sono i testi italiani ufficiali, e
+       il Rivale ne ha uno diverso per ognuno dei sei incontri. */
+    if (game.enemy.trainer) {
+      for (const riga of dialogoSconfitta()) messages.push(riga);
+    }
     // premio promesso da un incontro misterioso che finiva in lotta
     if (game.encReward) {
       const t = game.encReward();
@@ -5811,7 +5880,7 @@
   // Un Pokemon avversario per l'incontro: livello dell'ondata, con moltiplicatore
   function encFoe(speciesId, mult, opts) {
     const lvl = Math.max(START_LEVEL, Math.round(enemyLevelFor(game.wave) * (mult || 1)));
-    return makeFighter(speciesId || randomSpecies(null), lvl, opts || {});
+    return makeFighter(speciesId || specieDaIncontro(null), lvl, opts || {});
   }
 
   /* Avvia una LOTTA nata da un incontro. `reward` viene eseguita quando la
@@ -6045,7 +6114,7 @@
         { label: "Controlla le offerte di scambio", sub: "scambia un tuo Pokémon con uno migliore", run() {
             const i = Math.floor(Math.random() * game.party.length);
             const vecchio = game.party[i];
-            const nuovo = makeFighter(randomSpecies(vecchio.speciesId), vecchio.level, { shiny: rollShiny() });
+            const nuovo = makeFighter(specieDaIncontro(vecchio.speciesId), vecchio.level, { shiny: rollShiny() });
             game.party[i] = nuovo;
             if (game.active >= game.party.length) game.active = 0;
             game.player = game.party[game.active];
@@ -6054,7 +6123,7 @@
         { label: "Scambio Prodigioso", sub: "un Pokémon a caso, in cambio di uno a caso", run() {
             const i = Math.floor(Math.random() * game.party.length);
             const vecchio = game.party[i];
-            const nuovo = makeFighter(randomSpecies(null), vecchio.level + 3, { shiny: Math.random() < 0.05 || rollShiny() });
+            const nuovo = makeFighter(specieDaIncontro(null), vecchio.level + 3, { shiny: Math.random() < 0.05 || rollShiny() });
             game.party[i] = nuovo;
             game.player = game.party[game.active] || game.party[0];
             if (!meta.unlocked[nuovo.speciesId]) { meta.unlocked[nuovo.speciesId] = nuovo.shiny ? 2 : 1; saveMeta(); }
@@ -6378,7 +6447,7 @@
             run() {
               game.money -= e._costo;
               game.balls += 10;
-              const preso = makeFighter(randomSpecies(null), Math.max(START_LEVEL, enemyLevelFor(game.wave)), { shiny: rollShiny() });
+              const preso = makeFighter(specieDaIncontro(null), Math.max(START_LEVEL, enemyLevelFor(game.wave)), { shiny: rollShiny() });
               if (!meta.unlocked[preso.speciesId]) { meta.unlocked[preso.speciesId] = preso.shiny ? 2 : 1; saveMeta(); }
               if (game.party.length < PARTY_MAX) game.party.push(preso); else game.box.push(preso);
               return `Giornata proficua: 10 Poké Ball e ${preso.name} catturato nella Zona Safari!`; } },
@@ -6419,7 +6488,7 @@
       cond: () => game.money >= waveMoney(2),
       setup(e) {
         e._karp = Math.floor(Math.random() * 100) === 0 && !!S.MAGIKARP;
-        e._mon = e._karp ? "MAGIKARP" : randomSpecies(null);
+        e._mon = e._karp ? "MAGIKARP" : specieDaIncontro(null);
         const costo = S[e._mon].starterCost || 3;
         e._price = waveMoney(e._karp ? 4 : 4 * (Math.max(costo, 2.5) / 5));
       },
@@ -6524,7 +6593,7 @@
       id: "breeder", tier: "ULTRA", emoji: "🥚", npc: "breeder_f", title: "L'Allevatrice di Pokémon Esperta",
       text: "Un'allevatrice ti propone di prenderti cura di uno dei suoi cuccioli.",
       waves: [25, 180],
-      setup(e) { e._scelte = [randomSpecies(null), randomSpecies(null), randomSpecies(null)]; },
+      setup(e) { e._scelte = [specieDaIncontro(null), specieDaIncontro(null), specieDaIncontro(null)]; },
       optionsFor(e) {
         return e._scelte.map(k => ({
           label: S[k].it, sub: "allevalo e ricevi un uovo",
@@ -6568,7 +6637,7 @@
             game.rogueballs = (game.rogueballs || 0) + 5;
             const i = Math.floor(Math.random() * game.party.length);
             const vecchio = game.party[i];
-            const nuovo = makeFighter(randomSpecies(vecchio.speciesId), vecchio.level + 5, { shiny: rollShiny() });
+            const nuovo = makeFighter(specieDaIncontro(vecchio.speciesId), vecchio.level + 5, { shiny: rollShiny() });
             game.party[i] = nuovo;
             if (game.active >= game.party.length) game.active = 0;
             game.player = game.party[game.active];
@@ -8260,12 +8329,12 @@
     Promise.all([
       loadJson("types"), loadJson("moves"), loadJson("species"),
       loadJson("learnsets"), loadJson("typechart"), loadJson("abilities"), loadJson("biomes"), loadJson("forms"), loadJson("icons"), loadJson("variants"),
-      loadJson("tms"), loadJson("eggmoves"),
+      loadJson("tms"), loadJson("eggmoves"), loadJson("dialoghi"),
       // indice delle animazioni: solo l'elenco, i frame arrivano su richiesta
       loadJson("anims-index").catch(() => null),
-    ]).then(([types, moves, species, learnsets, chart, abilities, biomes, forms, icons, variants, tmdata, eggmoves, anims]) => {
+    ]).then(([types, moves, species, learnsets, chart, abilities, biomes, forms, icons, variants, tmdata, eggmoves, dialoghi, anims]) => {
       T = types; M = moves; S = species; LEARN = learnsets; CHART = chart; ABIL = abilities; BIOMES = biomes; FORMS = forms; ICONS = icons; VARIANTS = variants;
-      TMS = tmdata; EGGM = eggmoves; ANIMS = anims;
+      TMS = tmdata; EGGM = eggmoves; DIAL = dialoghi || {}; ANIMS = anims;
       /* Il tipo ASTRALE non esiste in types.json (i tipi veri sono 18):
          lo si aggiunge a mano perche' Terapagos Stellare e l'Arceus Perfetto
          ce l'hanno, e ogni schermata che stampa un tipo fa `T[tipo].it`. */

@@ -385,6 +385,13 @@ function extractGenParts(parts, genNum, dexMap, species, learnsets, abilityIds, 
       // Senza questi due il gioco non puo' avere l'EXP vera (§ progressione).
       baseExp: numOrNull(field("baseExp")),
       growthRate: enumVal("growthRate", "GrowthRate."),
+      /* RANGO: leggendario / semi-leggendario (le Ultracreature stanno qui) /
+         misterioso. L'originale li usa per tenerli fuori dagli incontri e dai
+         pool normali. Senza questi campi un venditore all'ondata 5 poteva
+         offrire un Guzzlord. */
+      leggendario: /\blegendary:\s*true/.test(part) || undefined,
+      semiLeggendario: /subLegendary:\s*true/.test(part) || undefined,
+      misterioso: /mythical:\s*true/.test(part) || undefined,
       // SESSO: percentuale di maschi (null = senza sesso, come Magnemite).
       // `genderDiffs` marca le specie con lo sprite femminile diverso.
       malePercent: numOrNull(field("malePercent")),
@@ -767,6 +774,54 @@ const TYPECHART = {
   STEEL:{FIRE:.5,WATER:.5,ELECTRIC:.5,ICE:2,ROCK:2,STEEL:.5,FAIRY:2}, FAIRY:{FIRE:.5,FIGHTING:2,POISON:.5,DRAGON:2,DARK:2,STEEL:.5},
 };
 
+
+/* ==========================================================================
+   DIALOGHI DEGLI ALLENATORI — testi italiani UFFICIALI
+
+   In `locales/it/dialogue.json` ogni tipo di allenatore ha:
+     encounter  cosa dice quando ti sfida
+     victory    cosa dice quando TU lo batti   ← il dialogo di sconfitta
+     defeat     cosa dice quando batte te
+
+   ⚠️ Il nome del campo e' dal punto di vista del GIOCATORE: `victory` e' la
+   tua vittoria, cioe' la sconfitta di chi parla.
+
+   Formato dei testi: `@c{espressione}` marca la faccia (da togliere, noi non
+   abbiamo i ritratti espressivi), `$` separa una schermata dall'altra, `
+`
+   e' un a capo dentro la stessa schermata.
+   ========================================================================== */
+function pulisciDialogo(t) {
+  return String(t)
+    .replace(/@c\{[^}]*\}/g, "")   // espressioni del ritratto
+    .replace(/@d\{[^}]*\}/g, "")   // pause
+    .replace(/@f\{[^}]*\}/g, "")
+    .trim();
+}
+/* Una voce -> array di SCHERMATE (una per `$`), ognuna gia' ripulita. */
+function schermate(t) {
+  if (t == null) return [];
+  return String(t).split("$").map(pulisciDialogo).filter(Boolean);
+}
+function extractDialoghi() {
+  const src = readJson(resolve(PR, "locales/it/dialogue.json"));
+  const out = {};
+  for (const k in src) {
+    const v = src[k];
+    if (!v || typeof v !== "object") continue;
+    const voce = {};
+    for (const campo of ["encounter", "victory", "defeat"]) {
+      const g = v[campo];
+      if (!g) continue;
+      // le varianti sono numerate "1","2",...: si tengono tutte, si pesca a caso
+      const varianti = Object.keys(g).sort().map(n => schermate(g[n])).filter(a => a.length);
+      if (varianti.length) voce[campo] = varianti;
+    }
+    if (Object.keys(voce).length) out[k] = voce;
+  }
+  return out;
+}
+
 /* ========================================================================== */
 /*  MAIN                                                                        */
 /* ========================================================================== */
@@ -808,6 +863,8 @@ const variants = extractVariants(species);
 write("variants.json", variants);
 const eggMoves = extractEggMoves();
 write("eggmoves.json", eggMoves);
+const dialoghi = extractDialoghi();
+write("dialoghi.json", dialoghi);
 {
   // controllo: le 4 mosse di ogni specie devono esistere fra le nostre
   let mancanti = 0, fuoriDex = 0;

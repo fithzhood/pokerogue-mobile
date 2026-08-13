@@ -674,7 +674,11 @@ html, body {
 /* SCHEDA DELLE MOSSE a schermo intero (il vecchio "modo descrizioni" stava
    dentro i pulsanti e il testo veniva tagliato dal bordo basso). */
 .ms-list { display: flex; flex-direction: column; gap: 1.2vh; margin: 1.5vh 0; overflow-y: auto; flex: 1; }
-.ms-card { background: rgba(255,255,255,.06); border: 2px solid; border-radius: 12px; overflow: hidden; }
+/* ⚠️ `flex: 0 0 auto`: dentro una colonna flex le carte venivano SCHIACCIATE
+   per far stare tutto, e siccome hanno `overflow: hidden` il pulsante rosso
+   «▶ Usa …» in fondo veniva tagliato a metà. Ora la lista scorre e le carte
+   restano alte quanto serve. */
+.ms-card { flex: 0 0 auto; background: rgba(255,255,255,.06); border: 2px solid; border-radius: 12px; overflow: hidden; }
 .ms-card.vuota { opacity: .5; }
 .ms-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; }
 .ms-nome { font-size: clamp(14px, 4vw, 19px); font-weight: 800; }
@@ -686,7 +690,7 @@ html, body {
 .ms-usa { width: calc(100% - 20px); margin: 0 10px 10px; padding: 8px; font-size: clamp(13px, 3.6vw, 16px); }
 /* Scelta della ball, a schermo intero come la scheda mosse */
 .ball-list { display: flex; flex-direction: column; gap: 1vh; margin: 1.5vh 0; overflow-y: auto; flex: 1; }
-.ball-list .ball-btn { width: 100%; }
+.ball-list .ball-btn { width: 100%; flex: 0 0 auto; }
 
 /* griglia dex starter */
 .starter-dex { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.4vh; margin: 2vh 0; overflow-y: auto; flex: 1; align-content: start; }
@@ -750,7 +754,18 @@ html, body {
 
 /* vista squadra a schermo intero (dal negozio) */
 .pd-list { display: flex; flex-direction: column; gap: 1.1vh; margin: 1.5vh 0; overflow-y: auto; flex: 1; }
-.pd-card { background: rgba(255,255,255,.06); border-radius: 12px; padding: 8px 12px; }
+.pd-card { flex: 0 0 auto; background: rgba(255,255,255,.06); border-radius: 12px; padding: 8px 12px; }
+/* ⚠️ Quando la carta è un <button> (scelta del destinatario di un oggetto,
+   cambio Pokémon) prende il colore di default del browser: NERO su fondo
+   scuro, illeggibile. Il colore va imposto qui, non solo su una delle due
+   varianti. */
+button.pd-card {
+  display: block; width: 100%; text-align: left;
+  color: var(--ink); font-family: inherit;
+  border: 2px solid rgba(255,255,255,.14); cursor: pointer;
+}
+button.pd-card:disabled { opacity: .45; cursor: default; }
+button.pd-card:not(:disabled):active { background: rgba(255,255,255,.14); }
 .pd-card.ko { opacity: .5; }
 .pd-top { display: flex; justify-content: space-between; align-items: baseline; }
 .pd-name { font-weight: 800; font-size: clamp(13px, 3.8vw, 18px); }
