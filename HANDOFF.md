@@ -1,24 +1,30 @@
 # HANDOFF — PokéRogue Mobile
 
 Documento per una **nuova sessione di Claude Code**. Leggilo tutto prima di toccare il codice.
-Aggiornato: 2026-07-31 · Stato: **giocabile end-to-end, 0 errori console**.
+Aggiornato: 2026-08-14 · Stato: **rev 47 pubblicata, 0 errori console**.
 
-## 🔴 Leggi questo prima di tutto: lo stato REALE
+## 🔴 Leggi questo prima di tutto
 
-Il documento qui sotto elenca molte cose "fatte e verificate". **Non farti l'idea che il
-gioco sia a posto.** Dopo averlo provato sul telefono per cinque minuti, il proprietario ha
-detto: *«ci sono un sacco di cose da sistemare, siamo lontani anni luce da avere
-un'esperienza gratificante come quella di PokéRogue originale, ci sono centinaia di piccole
-cose da sistemare»*.
+Il 31 luglio il proprietario aveva detto: *«ci sono un sacco di cose da sistemare, siamo
+lontani anni luce da PokéRogue originale, centinaia di piccole cose»*. Il **13-14 agosto**
+quella lista è arrivata davvero, una segnalazione alla volta mentre giocava sul telefono:
+**38 segnalazioni, 33 chiuse e pubblicate**.
 
-Non è in contraddizione con le verifiche: quelle dicono che **non ci sono errori** e che le
-meccaniche **girano**. Non dicono niente su come ci si *gioca* — ritmo, leggibilità,
-equilibrio, attriti dell'interfaccia. Quella parte non è mai stata affrontata.
+👉 **Vai al §29**: racconta cosa è cambiato, **le 5 cose che restano** con l'indagine già
+fatta, e le trappole in cui si ricasca ogni volta.
 
-**Quindi**: la prossima sessione NON deve aggiungere feature né rifare collaudi automatici.
-Deve **partire dalla lista di difetti del proprietario** e lavorare sulla sensazione di
-gioco. Se la lista non c'è ancora, chiedigliela: ha detto che ci torna «con più calma e
-dettaglio».
+Le 5 aperte, in breve — le prime due vanno fatte **insieme**:
+1. **stato e stadi che persistono fra le ondate** (scelta del proprietario, diversa
+   dall'originale), con richiamo+riemissione prima delle lotte con allenatore;
+2. **animazione di ritiro e uscita dalla ball**;
+3. **scelta della natura** nella scheda starter (serve prima registrarle nel dex);
+4. consultare mossa e Pokémon nella schermata «quale mossa dimentica»;
+5. le 9 mosse che usano ancora una potenza di ripiego.
+
+🔴 **Prima di indagare una segnalazione, chiedi che revisione sta usando**: la Home mostra
+in fondo `rev N · da rete/da APK`. Due volte ha segnalato difetti **già corretti** perché il
+telefono era indietro (l'aggiornamento si applica al riavvio *successivo* a quello che lo
+scarica).
 
 ⚠️ E vale la regola del §23, che qui conta il doppio: **guardare, non leggere il DOM**.
 Nessuna delle "centinaia di piccole cose" sarebbe uscita da un'asserzione su `window.__game`.
@@ -1880,3 +1886,191 @@ E per provare tutto il giro da PC, senza aspettare che Pages ripubblichi:
 
 - Repo: <https://github.com/fithzhood/pokerogue-mobile> (pubblico)
 - Sito: <https://fithzhood.github.io/pokerogue-mobile/pokerogue.html>
+
+---
+
+## 29. La lista del proprietario (2026-08-13/14) — rev 47, e le 5 cose che restano
+
+Il riquadro "stato REALE" in cima diceva: *parti dalla lista dei difetti del proprietario*.
+È successo. Luca ha giocato sul telefono e ha segnalato i difetti **uno alla volta** mentre
+lavoravo: **38 segnalazioni, 33 chiuse e pubblicate**. Questo capitolo serve a chi riprende:
+le 5 che restano, con l'indagine già fatta, e le lezioni del giro.
+
+### Come si è lavorato (rifallo così)
+
+Una segnalazione alla volta → si studia il sorgente originale PRIMA di decidere → si verifica
+**con uno screenshot**, non solo col DOM → si pubblica subito con `node tools/pubblica.mjs "…"`.
+Il ciclo corto ha funzionato: 15 pubblicazioni in una sessione, e Luca ha potuto provare
+mentre andavo avanti.
+
+🔴 **La cosa più importante imparata**: Luca ha segnalato **due volte difetti già corretti**,
+perché il telefono era su una revisione vecchia — l'aggiornamento a caldo si applica al
+riavvio **successivo** a quello che lo scarica, quindi con molte pubblicazioni di fila si
+resta indietro. Ora la Home mostra in fondo `rev N · da rete/da APK` (`etichettaRevisione()`).
+**Prima di indagare una segnalazione, chiedi che revisione legge.**
+
+### Cosa è cambiato di grosso (serve per capire il codice che trovi)
+
+- **Narrazione a TOCCO**, non più automatica (`NARRAZIONE_AUTO` solo con `?fast`).
+  Un evento può portare **più righe**: `makeLog.add(t)` e `stessoMomento(messages, t)`
+  attaccano la frase al momento precedente invece di aprire una schermata nuova. La regola
+  sta nel commento sopra `stessoMomento`, e va rispettata quando aggiungi messaggi:
+  **insieme** l'annuncio della mossa e com'è andata; **a parte** il KO, gli stati, i danni di
+  fine turno e tutto ciò che chiede una decisione.
+- ⚠️ Conseguenza: l'evento porta l'istantanea **dopo** il colpo, quindi `riallinea()` conserva
+  quella di prima in `e.pre` e `nextEvent` la mostra **durante l'animazione**, applicando il
+  danno alla fine (`applicaColpo`). Se tocchi la riproduzione non rompere questo: è ciò che fa
+  cadere la barra dei PS al momento dell'impatto.
+- **EXP vera** con le curve per specie e il **tetto di livello per ondata** (`livelloMassimo`).
+  Il livello nemico ora è `1 + O/2 + (O/25)²`, non più lineare.
+- Code nuove, tutte figlie dello stesso schema (metti in coda, anima dopo la narrazione):
+  `pendingEvos` → `processEvos`, `pendingHatches` → `processHatches`, oltre alla già esistente
+  `pendingLearns` → `processLearns`. Ordine in `vittoriaOndata`: evoluzioni → schiuse → mosse.
+- Dati nuovi: `data/eggmoves.json` (571×4), `data/dialoghi.json` (277 allenatori), e su
+  `species.json` i campi `baseExp`, `growthRate`, `leggendario`, `semiLeggendario`, `misterioso`.
+
+---
+
+### RESTA 1 — Consultare mossa e Pokémon nella schermata «quale mossa dimentica»
+
+**Chiesto**: quando un Pokémon con 4 mosse potrebbe impararne una nuova si vedono solo i nomi.
+Serve leggere la descrizione della mossa NUOVA e delle quattro già note, e anche le statistiche
+del Pokémon, per capire se la mossa gli è adatta (fisica o speciale rispetto ad Att e Att.Sp).
+
+**Dove**: `processLearns` (cerca `Quale mossa dimentica`). Oggi disegna quattro `.move-btn` più
+«Rinuncia a X».
+
+**Come, senza inventare niente**: c'è già tutto.
+- `snippetMossa(id)` produce il riquadro con potenza/precisione/PP/effetto, e
+  `effettiInParole(mv)` traduce i mattoncini in italiano. Sono usati nella scheda starter.
+- Il meccanismo della ⓘ che apre e chiude è `apriInfo(tipo, id)` + `aperto(tipo, id)`, ma è
+  legato a `starterCfg`: qui serve uno stato locale suo (es. `learnInfo`), non `starterCfg`.
+- Per le statistiche: `statBar` in `renderStarterDetail` disegna già le sei barre.
+  Basta una riga sopra i pulsanti, con Att e Att.Sp in evidenza.
+
+⚠️ La schermata sta nella fascia comandi e **non ci sta**: portala a schermo intero con
+`showMetaScreen`, come Squadra, Ball e scheda mosse. E metti `flex: 0 0 auto` sulle carte, o
+`overflow: hidden` taglia il pulsante in fondo (è già successo tre volte).
+
+---
+
+### RESTA 2 — Le 9 mosse che usano ancora una potenza di ripiego
+
+**Stato**: delle 75 mosse con `power: -1`, 36 sono mosse Z (mai in gioco) e 30 hanno la loro
+formula vera in `DANNO_FISSO` / `POTENZA_VARIABILE`. Ne restano **9** che usano
+`POTENZA_RIPIEGO = 60`, perché servirebbe uno stato che il motore non tiene:
+
+| mossa | cosa servirebbe |
+|---|---|
+| Contrattacco, Specchiovelo, Metalscoppio, Ritorsione | il danno SUBITO in questo turno, e da chi |
+| Pazienza | danno accumulato su due turni |
+| Picchiaduro | numero e Attacco base dei membri della squadra |
+| Sfoghenergia | quante volte si è usato Accumulo |
+| Dononaturale, Lancio | l'OGGETTO TENUTO (bacca o strumento) |
+
+**Come**: aggiungere al combattente `p.dannoSubitoTurno = { fisico, speciale, da }`, azzerato
+a inizio turno in `risolviTurno` e riempito in `doDamage`. Le prime quattro diventano allora
+banali (Contrattacco = 2× il danno fisico subito, Specchiovelo = 2× lo speciale,
+Metalscoppio/Ritorsione = 1,5× qualunque). Le altre cinque valgono molto meno la pena.
+
+---
+
+### RESTA 3 — Stato e stadi che PERSISTONO fra le ondate
+
+🔴 **Scelta esplicita del proprietario, DIVERSA dall'originale.** Chiesta il 2026-08-14:
+
+> «i problemi di stato, i boost e i debuff devono rimanere tra un'ondata e l'altra, con
+> l'eccezione delle lotte contro gli allenatori: in quel caso i Pokémon vengono prima rimessi
+> nelle pokeball e poi riestratti, guariti dai problemi di stato (ma non negli HP) e con le
+> stats iniziali.»
+
+Quindi:
+- **ondata normale → ondata normale**: `status` e `stages` **restano**; si azzerano solo i
+  volatili (confusione, protezione, presa, tentennamento), che sono della singola battaglia.
+- **prima di una lotta con ALLENATORE**: richiamo e riemissione → `status = null`, `stages` a
+  zero, **HP invariati**.
+
+**Dove**: `resetForBattle(p)` oggi azzera tutto, ed è chiamata sia a inizio ondata sia ai
+cambi. Servono **due** comportamenti distinti: "entra in campo" (solo volatili) e "richiamato
+nella ball" (stato + stadi). Le chiamate sono in `nextWave`, `doSwitch`, `forceSwitchTo`,
+`playerSwitch`, `__items.doppia` e nella trasformazione del boss finale.
+
+⚠️ Il richiamo+riemissione va messo in `startTrainerBattle`, PRIMA dei messaggi di sfida.
+⚠️ `monSalva` copia tutto: `status` e `stages` finiscono già nello slot, e con la persistenza
+diventano parte dello stato salvato. È giusto così.
+⚠️ **Equilibrio**: veleno e scottatura fanno danno a fine turno, quindi un Pokémon avvelenato
+ora attraversa le ondate perdendo PS. È voluto, ma le cure diventano molto più importanti:
+guarda come si comporta una run vera prima di dire che è a posto.
+
+---
+
+### RESTA 4 — Animazione di ritiro e uscita dalla ball
+
+**Chiesto** nello stesso messaggio della 3, e va fatto **insieme**: il richiamo prima di un
+allenatore è proprio il momento in cui si vede.
+
+**Serve**: il Pokémon che rientra (si rimpicciolisce verso la ball) e che esce (la ball si apre
+con un lampo e lui compare).
+
+**Dove**: `doSwitch`, `forceSwitchTo`, `deployEnemy`, il primo schieramento in
+`beginRunWithTeam`, e il richiamo/riemissione della RESTA 3.
+
+**Come, senza partire da zero**: `animaBall(ballKey, esito, onDone)` fa già volare la ball,
+**risucchiare** lo sprite (`transform: scale(.05)` + `opacity: 0`), farla cadere e dondolare.
+Per ritiro/uscita serve una versione ridotta: niente volo, niente dondolii, solo il risucchio
+e il lampo. In CSS il lampo è `.ball-lancio.aperta`.
+⚠️ `pulisciBallScena()` esiste già e rimette a posto `transform`/`opacity` dello sprite:
+**chiamala sempre in uscita**, o un Pokémon resta invisibile.
+
+---
+
+### RESTA 5 — Scelta della NATURA nella scheda starter
+
+**Chiesto**: nella scheda del singolo Pokémon si sceglie abilità e mosse; deve potersi
+scegliere anche la **natura, fra quelle sbloccate per quella specie**.
+
+**Nell'originale**: il dex tiene `dexEntry.natureAttr`, una maschera di bit
+(`natureAttr |= 1 << (nature + 1)` in `setPokemonCaught`), e lo starter select offre solo le
+nature registrate. Si sbloccano catturando o schiudendo esemplari con quella natura.
+
+**Da noi**: le 25 nature ci sono già (`NATURES`, nomi italiani ufficiali, +10%/−10% su una
+stat, mai i PS) e `makeFighter` ne estrae una a caso, ma **non si registrano** da nessuna
+parte. Serve:
+1. `meta.nature[specie]` come maschera, scritta in `registerCaught` e nella schiusa —
+   esattamente come è stato fatto per `meta.abils` con le abilità (usa quello come modello,
+   comprese le due funzioni `registraAbilita` / `abilitaSbloccate`).
+2. Nella scheda: chip come quelli delle abilità, con l'effetto scritto (`+Att, −Vel`) e il 🔒
+   su quelle non sbloccate. Modello: `abilitaSbloccate(k)` e i chip `.ab-chip`.
+3. `beginRunWithTeam` deve applicare la natura scelta: oggi passa solo `ability` e `moves`.
+
+⚠️ **Equilibrio**: con la natura a piacere lo starter diventa più forte. Nell'originale è così,
+ed è proprio per questo che le nature vanno **sbloccate** una per una.
+
+---
+
+### Trappole che mi hanno morso in questa sessione (tutte già note, tutte ricadute)
+
+1. ⚠️ **`z-index` dichiarato due volte nella stessa regola CSS.** `.hp-panel` aveva 9 in cima e
+   5 in fondo: vinceva l'ultimo, e la pioggia copriva i riquadri PS. Trovata **solo guardando
+   uno screenshot**. Controllo pronto da incollare:
+   `node -e "const c=require('fs').readFileSync('pokerogue.css','utf8');for(const r of c.split('}'))if((r.match(/z-index\s*:/g)||[]).length>1)console.log('DOPPIO:',r.split('{')[0].trim())"`
+2. ⚠️ **Le carte-pulsante prendono il NERO di default del browser**: un `<button>` senza
+   `color` esplicito è illeggibile su fondo scuro (successo nella scelta del destinatario di un
+   oggetto). E in una colonna flex le carte si **schiacciano**: senza `flex: 0 0 auto`
+   l'`overflow: hidden` taglia il pulsante in fondo.
+3. ⚠️ **Gli autopiloti mentono, ancora.** Un ciclo "clicca il msgbox" ha stampato sette volte
+   lo stesso messaggio: era il msgbox **stale sotto l'overlay**. E due test si sono impantanati
+   perché la mossa scelta era Azione contro uno Spettro, o Palla Ombra contro un immune.
+   **Quando un test non fa danno, guarda QUALE MOSSA sta usando.**
+4. ⚠️ **Verifica la causa prima di correggerla.** Il "Guzzlord da uovo comune" non veniva dalle
+   uova (nel dato è EPIC e il pool comune è pulito) ma dagli **incontri misteriosi**, che
+   pescavano fra tutte le 1084 specie. E le "tre doppie di fila" non erano un difetto: la
+   probabilità è 1/8, identica all'originale. Due segnalazioni su tre avevano una causa diversa
+   da quella che sembrava.
+
+### Una cosa NON verificata dal vivo
+
+Il **ritratto dell'allenatore durante il dialogo di sconfitta** (rev 46): il codice c'è e la
+logica è la stessa del ritratto d'ingresso, che funziona — ma due tentativi di raggiungere una
+lotta con allenatore con l'autopilota si sono impantanati e non l'ho visto a schermo.
+**Guardalo alla prima occasione.**
