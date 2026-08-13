@@ -1287,6 +1287,19 @@
   }
   // "log" del turno: gli attributi del motore fanno messages.push(testo);
   // qui lo intercettiamo per catturare anche lo snapshot.
+  /* Riallinea l'istantanea di un evento allo stato ATTUALE, conservando in
+     `pre` quella di partenza. Il "prima" serve alla riproduzione: durante
+     l'animazione della mossa si mostra lui, così le barre calano al momento
+     dell'impatto e non un istante prima. Vale anche per il PRIMO evento del
+     turno, che non avrebbe un evento precedente da cui pescare. */
+  const CAMPI_SNAP = ["php", "pmax", "pst", "pfaint", "ehp", "emax", "est", "efaint"];
+  function riallinea(e) {
+    if (!e.pre) { e.pre = {}; for (const k of CAMPI_SNAP) e.pre[k] = e[k]; }
+    const s = snapEvent("");
+    for (const k of CAMPI_SNAP) e[k] = s[k];
+    if (s.phit) e.phit = true;
+    if (s.ehit) e.ehit = true;
+  }
   function makeLog() {
     const events = [];
     return {
@@ -1300,6 +1313,22 @@
          successivo al danno (spesso «X e' esausto!»): si vedeva il nemico
          cadere e solo dopo partiva l'animazione che avrebbe dovuto colpirlo. */
       fxAt(i, type, side, move) { if (events[i]) events[i].fx = { type, side, move }; },
+      /* AGGIUNGE una riga all'ULTIMO evento invece di crearne uno nuovo.
+         Serve alle frasi che raccontano lo STESSO momento: «Zubat usa
+         Velenospina!» e «È superefficace!» sono una cosa sola, e chiedere due
+         tocchi per leggerle spezzava l'azione a metà. */
+      /* Riallinea l'istantanea dell'ultimo evento allo stato ATTUALE, senza
+         aggiungere testo. Serve dopo aver applicato il danno: così la barra
+         cala sull'evento della mossa (al termine della sua animazione) anche
+         quando non c'è nessuna frase in più da dire — se no il calo slittava
+         al messaggio successivo, che magari parla d'altro. */
+      snap() { if (events.length) riallinea(events[events.length - 1]); },
+      add(t) {
+        if (!events.length) { events.push(snapEvent(t)); return; }
+        const e = events[events.length - 1];
+        e.text += "\n" + t;
+        riallinea(e);   // la riga aggiunta racconta lo stato di ADESSO
+      },
       // marca l'ultimo evento con un'animazione COMUNE o di CARICA (stati, cure,
       // oggetti, mosse a due turni). Si ancora al Pokemon indicato da `side`,
       // che vale sia per il giocatore sia per l'avversario.
@@ -2923,7 +2952,7 @@
     const base = (wasGym || wasEvilBoss ? 500 : wasBoss ? 260 : 90) + game.wave * 12;
     const money = Math.floor(base * (1 + 0.2 * (game.charms.amulet || 0)));
     game.money += money;
-    messages.push(`Ricevi ₽${money}!`);
+    stessoMomento(messages, `Ricevi ₽${money}!`);
     // i potenziamenti a tempo (Poteslot/Supercolpo) durano 5 ondate
     for (const k in game.tempBoost) if (--game.tempBoost[k] <= 0) delete game.tempBoost[k];
     // contatore del tesoro di Gimmighoul: cresce a ogni ondata vinta
@@ -3249,15 +3278,15 @@
     }
     meta.candy = meta.candy || {};
     meta.candy[speciesId] = (meta.candy[speciesId] || 0) + 1;
-    messages.push(`🍬 +1 Caramella ${S[speciesId].it} (totale ${meta.candy[speciesId]})`);
-    if (recordIVs(speciesId, ivs)) messages.push(`📈 Nuovi IV migliori per ${S[speciesId].it}!`);
+    stessoMomento(messages, `🍬 +1 Caramella ${S[speciesId].it} (totale ${meta.candy[speciesId]})`);
+    if (recordIVs(speciesId, ivs)) stessoMomento(messages, `📈 Nuovi IV migliori per ${S[speciesId].it}!`);
     /* L'abilità che AVEVA questo esemplare si sblocca per la specie: da qui in
        poi la puoi scegliere quando lo schieri come starter. La nascosta capita
        1 volta su 256, quindi vale la pena dirlo forte. */
     if (abilIndex != null) {
       const nuova = registraAbilita(rootOf(speciesId), abilIndex);
       if (nuova && messages) {
-        messages.push(nuova.nascosta
+        stessoMomento(messages, nuova.nascosta
           ? `🔓✨ Abilità NASCOSTA sbloccata per ${S[rootOf(speciesId)].it}: ${nuova.it}!`
           : `🔓 Nuova abilità sbloccata per ${S[rootOf(speciesId)].it}: ${nuova.it}`);
       }
@@ -3412,10 +3441,28 @@
       return;
     }
     const e = game.events[game.eventIndex];
-    game.curFrame = e;       // ricordato: se uno sprite arriva dopo, si ridisegna coerente
     stopMoveAnim();          // l'animazione precedente non deve accavallarsi
-    renderScene(e);          // barre/sprite allo stato di QUESTO evento
+
+    /* ⚠️ QUANDO SI VEDE IL DANNO. Ora un evento può raccontare più righe
+       («X usa Y!» + «È superefficace!»), e la sua istantanea è quella DOPO il
+       colpo. Se la disegnassimo subito, la barra dei PS calerebbe mentre
+       l'animazione della mossa deve ancora partire — il difetto di prima, al
+       contrario. Quindi: durante l'animazione si tiene il fotogramma
+       PRECEDENTE, e quello di questo evento si applica quando l'animazione
+       finisce, cioè al momento dell'impatto. */
+    const prima = e.pre || (game.eventIndex > 0 ? game.events[game.eventIndex - 1] : null);
+    const conAnim = !!(e.fx || e.anim);
+    const differita = conAnim && !!prima;
+    game.curFrame = differita ? prima : e;
+    renderScene(game.curFrame);
     renderMessageBox(e.text);
+
+    /* Applica l'istantanea vera di questo evento (barre, KO, scossone). */
+    const applicaColpo = () => {
+      if (game.events[game.eventIndex] !== e) return;   // narrazione già avanti
+      game.curFrame = e;
+      renderScene(e);
+    };
 
     // Effetto visivo della mossa: l'animazione vera se c'e', altrimenti particelle.
     // e.fx.side e' il lato di CHI SUBISCE, quindi l'attaccante e' l'altro.
@@ -3423,20 +3470,20 @@
     // mossa a due turni e poi il colpo vero (Solarraggio). In quel caso si
     // riproducono in fila, non una sopra l'altra.
     let animMs = 0;
-    const playFx = () => animAvailable(e.fx.move)
-      ? playMoveAnim(e.fx.move, e.fx.side === "enemy" ? "player" : "enemy", e.fx.side, e.fx.type)
-      : (spawnMoveFx(e.fx.type, e.fx.side), 0);
+    const playFx = (poi) => animAvailable(e.fx.move)
+      ? playMoveAnim(e.fx.move, e.fx.side === "enemy" ? "player" : "enemy", e.fx.side, e.fx.type, poi)
+      : (spawnMoveFx(e.fx.type, e.fx.side), setTimeout(poi, 240), 0);
 
     if (e.anim && e.fx) {
       // animazione comune/carica -> poi quella della mossa
-      animMs = playMoveAnim(e.anim.key, e.anim.side, e.anim.side, null, playFx)
+      animMs = playMoveAnim(e.anim.key, e.anim.side, e.anim.side, null, () => playFx(applicaColpo))
              + animDuration(e.fx.move);
     } else if (e.fx) {
-      animMs = playFx();
+      animMs = playFx(applicaColpo);
     } else if (e.anim) {
       // animazione comune o di carica: si ancora a UN solo Pokemon, quindi
       // chi attacca e chi subisce sono lo stesso (come CommonBattleAnim).
-      animMs = playMoveAnim(e.anim.key, e.anim.side, e.anim.side, null);
+      animMs = playMoveAnim(e.anim.key, e.anim.side, e.anim.side, null, applicaColpo);
     }
 
     /* Il triangolino "tocca per continuare" compare quando l'animazione della
@@ -3988,6 +4035,7 @@
     const quota = inCampo.length || 1;
     const boost = 1 + (game.charms.exp || 0) / 100;
     const tetto = livelloMassimo(game.wave);
+    let saliti = 0;
     for (const p of game.party) {
       // chi ha raggiunto il tetto dell'ondata non prende esperienza: è il
       // freno che tiene la squadra al passo con gli avversari, non davanti
@@ -4005,7 +4053,10 @@
       p.level = livelloPerExp(p.exp, p.growthRate);
       if (p.level > prima) {
         recomputeStats(p);
-        messages.push(`${p.name} è salito al Lv.${p.level}!`);
+        /* Tutti i passaggi di livello dell'ondata stanno INSIEME: sono un
+           momento solo, e con sei membri in squadra sarebbero sei tocchi. */
+        if (saliti++) stessoMomento(messages, `${p.name} è salito al Lv.${p.level}!`);
+        else messages.push(`${p.name} è salito al Lv.${p.level}!`);
       }
     }
   }
@@ -4168,7 +4219,7 @@
       const lente = 1 + 0.05 * ((actor.held && actor.held.widelens) || 0);
       const chance = move.accuracy * accMult(actor.stages.acc - foe.stages.eva)
         * abStatMult(actor, "ACC") * lente / abStatMult(foe, "EVA");
-      if (Math.random() * 100 >= chance) { messages.push(`${actor.name} ha mancato il bersaglio!`); return; }
+      if (Math.random() * 100 >= chance) { stessoMomento(messages, `${actor.name} ha mancato il bersaglio!`); return; }
     }
 
     // 4. danno (se e' una mossa d'attacco)
@@ -4208,6 +4259,29 @@
 
     // 5. effetti (mattoncini). Se la mossa da danno non e' andata a segno, niente effetti.
     if (landed) applyMoveAttrs(actor, foe, move, messages);
+  }
+
+  /* ======================================================================
+     FRASI DELLO STESSO MOMENTO
+
+     `messages.push` apre una schermata nuova (= un tocco). `stessoMomento`
+     invece attacca la riga a quella appena detta, perché certe frasi non sono
+     un momento a sé: «Zubat usa Velenospina!» e «È superefficace!» sono la
+     stessa cosa vista da due lati, e leggerle in due tocchi spezza l'azione.
+
+     La regola che ho seguito, guardando cosa si legge davvero:
+       INSIEME  l'annuncio della mossa e com'è andata (efficacia, critico,
+                mancata, immunità, colpi multipli), contraccolpo e
+                assorbimento, la vittoria e i soldi, i passaggi di livello;
+       A PARTE  il KO (è un momento suo), gli stati applicati e i danni di
+                fine turno (hanno la loro animazione), evoluzioni e schiuse,
+                e tutto ciò che chiede una decisione.
+     ====================================================================== */
+  function stessoMomento(messages, t) {
+    if (!messages || !t) return;
+    if (messages.add) { messages.add(t); return; }        // log di battaglia
+    if (messages.length) messages[messages.length - 1] += "\n" + t;
+    else messages.push(t);
   }
 
   /* Appende l'animazione della mossa all'evento dell'annuncio. Se il log non
@@ -4297,7 +4371,7 @@
     // assorbimento (Assorbivolt/Assorbacqua: immune + recupera HP).
     const imm = abAttrs(foe).find(a => (a.kind === "typeImmunity" || a.kind === "typeAbsorb") && a.moveType === move.type);
     if (imm) {
-      messages.push(`${foe.name} è immune grazie a ${foe.ability.it}!`);
+      stessoMomento(messages, `${foe.name} è immune grazie a ${foe.ability.it}!`);
       if (imm.kind === "typeAbsorb" && foe.hp < foe.maxHp) {
         foe.hp = Math.min(foe.maxHp, foe.hp + Math.max(1, Math.floor(foe.maxHp / 4)));
         messages.push(`${foe.name} ha recuperato energie!`);
@@ -4354,28 +4428,33 @@
     // Presartigli: 10% per pezzo di RUBARE un oggetto tenuto, col contatto
     if (actor.held && actor.held.gripclaw && total > 0 && move.contact
         && Math.random() < 0.1 * actor.held.gripclaw) rubaOggetto(actor, foe, messages, "I Presartigli", "rubano");
-    if (immune && total === 0) { messages.push(`Non ha effetto su ${foe.name}...`); return false; }
+    if (immune && total === 0) { stessoMomento(messages, `Non ha effetto su ${foe.name}...`); return false; }
 
-    if (anyCrit) messages.push("Colpo critico!");
-    if (lastEff > 1) messages.push("È superefficace!");
-    else if (lastEff > 0 && lastEff < 1) messages.push("Non è molto efficace...");
-    if (done > 1) messages.push(`Colpito ${done} volte!`);
+    /* Il danno e' stato applicato: l'istantanea dell'evento della mossa va
+       riallineata, cosi' la barra cala su QUELLA schermata (alla fine della
+       sua animazione) e non su quella dopo. */
+    if (messages.snap) messages.snap();
+
+    if (anyCrit) stessoMomento(messages, "Colpo critico!");
+    if (lastEff > 1) stessoMomento(messages, "È superefficace!");
+    else if (lastEff > 0 && lastEff < 1) stessoMomento(messages, "Non è molto efficace...");
+    if (done > 1) stessoMomento(messages, `Colpito ${done} volte!`);
 
     const drain = attrs.find(a => a.kind === "drain");
     if (drain && total > 0 && actor.hp < actor.maxHp) {
       actor.hp = Math.min(actor.maxHp, actor.hp + Math.max(1, Math.floor(total * drain.ratio)));
-      messages.push(`${actor.name} ha assorbito energia!`);
+      stessoMomento(messages, `${actor.name} ha assorbito energia!`);
       if (messages.anim) messages.anim("COMMON_HEALTH_UP", sideOf(actor));
     }
     // held: Conchiglia — recuperi 1/8 del danno inflitto (impilabile)
     if (actor.held && actor.held.shellbell && total > 0 && actor.hp < actor.maxHp && !actor.fainted) {
       actor.hp = Math.min(actor.maxHp, actor.hp + Math.max(1, Math.floor(total * actor.held.shellbell / 8)));
-      messages.push(`La Conchiglia ristora ${actor.name}!`);
+      stessoMomento(messages, `La Conchiglia ristora ${actor.name}!`);
     }
     const recoil = attrs.find(a => a.kind === "recoil");
     if (recoil && total > 0 && !actor.fainted && !findAb(actor, "noRecoil")) {
       actor.hp = Math.max(0, actor.hp - Math.max(1, Math.floor(total * recoil.ratio))); actor._justHit = true;
-      messages.push(`${actor.name} è danneggiato dal contraccolpo!`);
+      stessoMomento(messages, `${actor.name} è danneggiato dal contraccolpo!`);
       if (actor.hp <= 0) { actor.fainted = true; messages.push(`${actor.name} è esausto!`); }
     }
 
@@ -4479,7 +4558,7 @@
     if (target.fainted) return;
     // abilita' che bloccano i cali di statistiche causati dall'avversario (Corpochiaro)
     if (!isSelf && delta < 0 && findAb(target, "protectStats")) {
-      messages.push(`${target.ability.it} impedisce il calo a ${target.name}!`);
+      stessoMomento(messages, `${target.ability.it} impedisce il calo a ${target.name}!`);
       return;
     }
     for (const st of stats) {
@@ -4488,9 +4567,9 @@
       const before = target.stages[k];
       target.stages[k] = Math.max(-6, Math.min(6, before + delta));
       const name = STAT_IT[k] || k;
-      if (target.stages[k] === before) { messages.push(`${name} di ${target.name} non può ${delta > 0 ? "salire" : "scendere"} oltre!`); continue; }
+      if (target.stages[k] === before) { stessoMomento(messages, `${name} di ${target.name} non può ${delta > 0 ? "salire" : "scendere"} oltre!`); continue; }
       const word = delta >= 2 ? "è aumentato molto" : delta === 1 ? "è aumentato" : delta === -1 ? "è diminuito" : "è diminuito molto";
-      messages.push(`${name} di ${target.name} ${word}!`);
+      stessoMomento(messages, `${name} di ${target.name} ${word}!`);
     }
   }
 
@@ -5382,8 +5461,12 @@
      sola, quindi ogni riga si legge con calma. Il triangolino compare quando
      l'animazione ha finito (`mostraContinua`) e dice "tocca per continuare". */
   function renderMessageBox(text) {
-    const accent = ACCENT.test(text) ? " accent" : "";
-    cmd().innerHTML = `<div class="msgbox"><div class="log-line${accent}">${text}</div><span class="cont">▸</span></div>`;
+    /* Un evento può portare PIÙ RIGHE: sono le frasi dello stesso momento
+       («X usa Y!» e subito sotto «È superefficace!»). Ognuna tiene il proprio
+       risalto, così l'occhio trova le cose notevoli anche in mezzo. */
+    const righe = String(text).split("\n").filter(r => r.length)
+      .map(r => `<div class="log-line${ACCENT.test(r) ? " accent" : ""}">${r}</div>`).join("");
+    cmd().innerHTML = `<div class="msgbox">${righe}<span class="cont">▸</span></div>`;
     cmd().querySelector(".msgbox").onclick = advanceMessages;
   }
 
