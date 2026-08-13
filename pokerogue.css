@@ -163,12 +163,24 @@ html, body {
    EVOLUZIONE — buio in scena, sagome bianche che si alternano, lampo.
    Sta sopra i Pokemon ma sotto gli overlay meta.
    ========================================================================== */
+/* A PIENO SCHERMO (richiesta del proprietario): `fixed` sull'intera finestra,
+   non piu' dentro `#scene`. Sta sopra anche gli overlay meta (z-index 20),
+   perche' un'evoluzione puo' scattare subito dopo una schermata di premi. */
 #evo-overlay {
-  position: absolute; inset: 0; z-index: 8;
-  background: radial-gradient(circle at 50% 45%, rgba(20,26,48,.82), rgba(4,6,12,.97));
+  position: fixed; inset: 0; z-index: 40;
+  /* ⚠️ OPACO, non velato: con un fondo semitrasparente i riquadri PS e
+     l'indicatore d'ondata (z-index 9, dentro `#scene`) restavano leggibili
+     sotto e ANDAVANO A SOVRAPPORSI alla scritta «X si sta evolvendo…».
+     Visto solo guardando lo screenshot. */
+  background: radial-gradient(circle at 50% 42%, #161d33, #04060c 78%);
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3vh;
+  padding: calc(var(--safe-top, 26px) + 12px) 18px 4vh;
   animation: evoEntra .35s ease;
 }
+/* il tasto per fermarla ora vive DENTRO l'overlay: la fascia comandi ci sta
+   sotto. `flex: 0 0 auto` o in colonna si schiaccia e sparisce (§29). */
+#evo-overlay .evo-stop { flex: 0 0 auto; width: min(340px, 78vw); margin-top: 4vh; }
+#evo-overlay .evo-sprite { flex: 0 0 auto; }
 @keyframes evoEntra { from { opacity: 0; } to { opacity: 1; } }
 .evo-sprite {
   background-repeat: no-repeat; image-rendering: pixelated;

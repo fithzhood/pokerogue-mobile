@@ -13,10 +13,10 @@ quella lista è arrivata davvero, una segnalazione alla volta mentre giocava sul
 👉 **Vai al §29**: racconta cosa è cambiato, **le 5 cose che restano** con l'indagine già
 fatta, e le trappole in cui si ricasca ogni volta.
 
-Le 5 aperte, in breve — le prime due vanno fatte **insieme**:
-1. **stato e stadi che persistono fra le ondate** (scelta del proprietario, diversa
-   dall'originale), con richiamo+riemissione prima delle lotte con allenatore;
-2. **animazione di ritiro e uscita dalla ball**;
+Le 5 aperte erano queste. ✅ **Le prime due sono FATTE (2026-08-14, §30)**, insieme come
+previsto, e con loro l'**evoluzione a pieno schermo** chiesta a voce in corsa:
+1. ~~stato e stadi che persistono fra le ondate~~ → ✅ §30
+2. ~~animazione di ritiro e uscita dalla ball~~ → ✅ §30
 3. **scelta della natura** nella scheda starter (serve prima registrarle nel dex);
 4. consultare mossa e Pokémon nella schermata «quale mossa dimentica»;
 5. le 9 mosse che usano ancora una potenza di ripiego.
@@ -2074,3 +2074,125 @@ Il **ritratto dell'allenatore durante il dialogo di sconfitta** (rev 46): il cod
 logica è la stessa del ritratto d'ingresso, che funziona — ma due tentativi di raggiungere una
 lotta con allenatore con l'autopilota si sono impantanati e non l'ho visto a schermo.
 **Guardalo alla prima occasione.**
+
+---
+
+## 30. Stato persistente, ritiro/uscita dalla ball, evoluzione a pieno schermo (2026-08-14)
+
+Chiuse le RESTA 1 e 2 del §29 (che nel riquadro in cima erano le voci 1 e 2), più una
+richiesta arrivata a voce mentre lavoravo: **l'evoluzione a pieno schermo**.
+
+### 30.1 Stato e stadi che PERSISTONO fra le ondate
+
+🔴 **Scelta del proprietario, diversa dall'originale.** Il modello scelto è **fisico** e si
+regge da solo: *stato e stadi appartengono al Pokémon finché sta in campo*. Chi non viene
+mai richiamato se li porta dietro da un'ondata all'altra; chi rientra nella ball perde gli
+stadi. Prima una sola funzione, `resetForBattle`, azzerava tutto a ogni ondata **e a ogni
+cambio**. Ora sono tre:
+
+| funzione | quando | cosa fa |
+|---|---|---|
+| `entraInCampo(f)` | inizio ondata, cambi, rimpiazzi | **solo i volatili** (confusione, protezione, prese, tentennamento) + `fainted` + Poteslot |
+| `richiamaNellaBall(f, curaStato)` | quando un Pokémon rientra | azzera gli **stadi** e la forma mega. Cura lo **stato** solo con `curaStato` |
+| `fineBattaglia()` | inizio ondata | meteo, terreno e forme mega — cose della singola lotta |
+
+- **ondata normale → ondata normale**: `status` e `stages` **restano**.
+- **prima di una lotta con ALLENATORE** (`startTrainerBattle`): tutta la squadra viene
+  richiamata con `curaStato` → stato curato, stadi a zero, **PS invariati**. È l'unico punto
+  in cui l'attrito accumulato si ferma.
+- ⚠️ **Interpretazione**: «i Pokémon vengono rimessi nelle pokeball» l'ho letta come **tutta
+  la squadra**, non solo l'attivo (l'animazione però si vede solo su chi è in campo). Se
+  voleva dire solo l'attivo, è una riga: il `for` in `startTrainerBattle`.
+- ✅ **Un bug rientrato di striscio**: `resetForBattle` azzerava `game.weather`/`game.terrain`
+  **a ogni cambio**, quindi cambiare Pokémon spazzava via il meteo a metà lotta. Ora quella
+  roba sta in `fineBattaglia()`, chiamata solo a inizio ondata.
+
+**Verificato**: veleno + 4 stadi sopravvivono alle ondate 2→3→4 mentre la confusione (volatile)
+si azzera; la run ripresa da un salvataggio ha ancora il veleno (`monSalva` copia tutto, ed è
+giusto); davanti all'allenatore, `atk3 def2 spatk2 spd-2` + POISON + un compagno addormentato
+→ **stadi «nessuno», stato `null`, PS 8/22 invariati**.
+
+⚠️ **Equilibrio da guardare in una run vera**: veleno e scottatura ora fanno danno ondata dopo
+ondata. È voluto, ma le cure contano molto di più di prima.
+
+### 30.2 Chi c'è in campo *in quel momento* (serviva alle animazioni)
+
+`renderScene` disegnava sempre `game.player`, che al cambio è **già il Pokémon nuovo**: si
+leggeva «Ritirati, Ivysaur!» mentre a schermo c'era l'altro. Ora `snapEvent` fotografa anche
+**quali combattenti** erano in campo (`pmon`/`emon`/`p2mon`/`e2mon`, aggiunti a `CAMPI_SNAP`)
+e `renderScene(frame)` disegna quelli. Correggeva già da solo un disallineamento vecchio: il
+riquadro PS del Pokémon uscente sotto lo sprite di quello entrante.
+
+### 30.3 Animazione di ritiro e uscita dalla ball
+
+`animaBallSlot(verso, lato, onDone)` — versione ridotta di `animaBall`: niente volo e niente
+dondolii (quelli raccontano un *tiro*), solo il lampo della ball e il Pokémon che si
+rimpicciolisce o si materializza. `verso` = `"ritiro"` | `"uscita"`, `lato` = `player` |
+`enemy` | `player2` | `enemy2`.
+
+- Si aggancia alla **frase**, non al momento in cui il motore cambia Pokémon: `conBall(testo,
+  verso, lato)` marca il messaggio e `nextEvent` fa partire l'animazione. Funziona sia sui
+  log di battaglia sia sugli **array di messaggi semplici**, perché passano entrambi da
+  `snapEvent` (che ora accetta anche oggetti `{text, ball}`).
+- ⚠️ **`dentroLaBall`**: chi è rientrato deve restare invisibile anche quando la scena si
+  ridisegna — fra richiamo e riemissione, davanti a un allenatore, passano tutte le frasi
+  della sfida e ognuna chiama `renderScene`. Per questo la sparizione è uno **stato**
+  riapplicato da `applicaDentroLaBall()` in fondo a `renderScene`, non una `opacity` inline
+  che il primo ridisegno cancellerebbe. `liberaDallaBall()` in `nextWave` è la rete di
+  sicurezza: un'animazione interrotta a metà lascerebbe un Pokémon invisibile per sempre.
+- `chiudiBallSlot()` (chiamata in cima a `nextEvent`, come `stopMoveAnim`) conclude di colpo
+  l'animazione in corso se si tocca per andare avanti.
+- Agganci: cambio in singolo e in doppio, cambio forzato, allenatore che manda il prossimo,
+  furto con la Theft Ball, richiamo/riemissione dell'allenatore, e la **prima uscita
+  dell'ondata 1**. ⚠️ Dalla seconda ondata in poi il tuo Pokémon **non** riesce da una ball:
+  è proprio il non essere richiamato che gli fa portare dietro stato e stadi.
+- ⚠️ Niente `requestAnimationFrame` (nel pannello a volte non scatta, §24): un timer da 20 ms
+  fa partire la transizione, e `concludi()` mette comunque lo stato finale.
+
+### 30.4 Evoluzione a PIENO SCHERMO con lo sprite frontale
+
+Richiesta del proprietario. Prima l'overlay stava dentro `#scene` (il 68% in alto) e usava lo
+sprite **di spalle**: il Pokémon si evolveva dandoti le spalle, dentro un riquadro.
+
+- `#evo-overlay` ora è `position: fixed; inset: 0; z-index: 40` (sopra anche gli overlay meta,
+  che stanno a 20 — un'evoluzione può scattare subito dopo una schermata di premi) e viene
+  appeso a `#game`, non a `#scene`.
+- Sprite **frontali** di entrambe le forme via `loadFighterSprite`, non `loadSprite`: così
+  valgono cromatico, sprite femminile e **forma**. Per il "dopo" si passa da un combattente
+  finto con la forma che l'evoluzione produrrà (stessa regola di `evolve`).
+- La misura la detta la finestra (`min(66vw, 42vh)`), non più un tetto fisso di 150 px: a
+  pieno schermo il Pokémon sarebbe rimasto minuscolo in mezzo al nero.
+- Il tasto «✖ Interrompi» è passato **dentro** l'overlay (la fascia comandi ora ci sta sotto),
+  con `flex: 0 0 auto` o in colonna si schiaccia.
+- ⚠️ **Il fondo va OPACO.** Col fondo velato i riquadri PS e l'indicatore d'ondata (z-index 9,
+  dentro `#scene`) restavano leggibili sotto e **si sovrapponevano alla scritta**. Visto solo
+  guardando lo screenshot: è la terza volta che la regola «guarda anche la grafica» paga.
+
+### 30.5 Due sonde nuove in `window.__items`
+
+Gli autopiloti si sono impantanati **quattro volte** in questa sessione (schermata premi,
+offerta di cattura, e una volta su un msgbox stale sotto l'overlay). Invece di insistere:
+
+| Comando | Cosa fa |
+|---|---|
+| `__items.allenatore(quanti)` | avvia subito una lotta con un allenatore e **restituisce stato/stadi/PS prima e dopo il richiamo** |
+| `__items.evoluzione(specie, quale)` | mostra subito l'animazione di evoluzione (default: il primo della squadra, prima evoluzione possibile) |
+
+Arrivarci giocando voleva dire quattro ondate a click per l'allenatore, e per l'evoluzione
+azzeccare **due** condizioni insieme (Pokémon sotto la soglia **e** tetto di livello
+dell'ondata abbastanza alto — a ondata 4 un Lv.15 non prende esperienza affatto).
+
+⚠️ **Per guardare un'animazione**, rallenta i timer invece di rincorrerla con gli screenshot:
+
+```js
+window.__st = window.setTimeout;
+window.setTimeout = (fn, ms) => window.__st(fn, ms > 15 ? ms * 20 : ms);
+// ... fai partire l'animazione, fotografa ...
+window.setTimeout = window.__st;
+```
+
+⚠️ **La trappola della cache ha morso di nuovo**: il boot carica `pokerogue.css?v=<rev>` e
+`rev` cambia solo rigenerando il manifesto. Ho modificato il CSS, ricaricato, e il browser mi
+ha servito il vecchio: `#evo-overlay` risultava ancora `absolute; z-index 8` e sembrava che la
+regola nuova non si applicasse. **Fra una modifica e una prova, lancia
+`node tools/make-manifest.mjs`** (solo il passo 1 di `pubblica.mjs`, non pubblica niente).

@@ -1218,6 +1218,49 @@
     },
     // quale sprite verrebbe caricato per questo combattente (per provare il sesso)
     sprite: (f, side) => loadFighterSprite(f || game.player, side || "front").then(s => s && s.sheet),
+    /* Mostra SUBITO l'animazione di evoluzione del Pokemon attivo (o di
+       `quale`, indice in squadra). Senza specie di arrivo prende la prima
+       evoluzione possibile. Arrivarci giocando vorrebbe dire portare un
+       Pokemon fin sotto la soglia E avere il tetto di livello dell'ondata
+       abbastanza alto: due condizioni che a click non si azzeccano mai. */
+    evoluzione: (verso, quale) => {
+      const p = game.party[quale || 0];
+      if (!p) return "nessun Pokemon in squadra";
+      const to = verso || ((S[p.speciesId].evolutions || [])[0] || {}).to;
+      if (!to || !S[to]) return "questa specie non evolve: passa una specie a mano";
+      animaEvoluzione(p, to, (proseguito) => {
+        const msgs = [];
+        if (proseguito) evolve(p, to, msgs);
+        else msgs.push(`Cosa?! ${p.name} ha smesso di evolversi!`);
+        queueMessages(msgs, () => { game.phase = "CHOICE"; showMainMenu(); });
+      });
+      return `${p.name} → ${S[to].it}`;
+    },
+    /* Avvia SUBITO una lotta con un ALLENATORE, senza dover arrivare a un'onda
+       ×5. Serve a provare il RICHIAMO prima della sfida (stati curati, stadi
+       azzerati, PS invariati) e le animazioni di ritiro/uscita: a click
+       vorrebbe dire giocare quattro ondate sperando che l'autopilota non si
+       impianti — ed e' esattamente quello che succede. */
+    allenatore: (quanti) => {
+      if (!game.player) return "nessuna run in corso";
+      clearTimeout(game.timer); game.events = []; game.eventIndex = 0;
+      const lvl = enemyLevelFor(game.wave);
+      const cls = TRAINER_CLASSES[Math.floor(Math.random() * TRAINER_CLASSES.length)];
+      const mons = [];
+      for (let i = 0; i < (quanti || 2); i++) {
+        const f = makeFighter(evolvedFormFor(pickThemed(cls.types, lvl), lvl), lvl,
+                              { isTrainer: true, trainerTypes: cls.types });
+        f.trainer = cls.name;
+        mons.push(f);
+      }
+      const prima = { stato: game.player.status,
+                      stadi: Object.entries(game.player.stages).filter(([, v]) => v).map(([k, v]) => k + v).join(" ") || "nessuno",
+                      ps: game.player.hp + "/" + game.player.maxHp };
+      startTrainerBattle(mons, cls.sprites[0], cls.name, [`${cls.name} ti sfida!`]);
+      return { prima, dopoIlRichiamo: { stato: game.player.status,
+                 stadi: Object.entries(game.player.stages).filter(([, v]) => v).map(([k, v]) => k + v).join(" ") || "nessuno",
+                 ps: game.player.hp + "/" + game.player.maxHp } };
+    },
     /* Avvia SUBITO una lotta in doppio (per provarla senza aspettare il caso). */
     doppia: () => {
       if (game.party.filter(p => !p.fainted).length < 2) return "servono 2 Pokemon vivi";
@@ -1228,7 +1271,7 @@
       game.double = true; game.enemy2 = b;
       game.chooser = 0; game.queued = null;
       game.player2 = game.party.find(p => !p.fainted && p !== game.player) || null;
-      resetForBattle(game.player); if (game.player2) resetForBattle(game.player2);
+      entraInCampo(game.player); if (game.player2) entraInCampo(game.player2);
       const msgs = [];
       deployEnemy(a, msgs);
       b._heldGiven = true; giveEnemyHeldItems(b, false);
@@ -1277,17 +1320,33 @@
 
   // Cattura un evento: testo + istantanea di HP/stato/KO/colpo dei due combattenti,
   // cosi' la riproduzione mostra le barre "a quel momento" (non lo stato finale).
+  /* Un messaggio puo' arrivare come semplice stringa oppure come oggetto
+     `{ text, ball }` (vedi `conBall`): serve alle frasi che devono portarsi
+     dietro l'animazione della ball che si apre o si chiude. */
   function snapEvent(text) {
+    let ball = null;
+    if (text && typeof text === "object") { ball = text.ball || null; text = text.text; }
     const p = game.player, e = game.enemy;
     const ev = {
       text,
       php: p ? p.hp : 0, pmax: p ? p.maxHp : 1, pst: p ? p.status : null, pfaint: p ? p.fainted : false, phit: !!(p && p._justHit),
       ehp: e ? e.hp : 0, emax: e ? e.maxHp : 1, est: e ? e.status : null, efaint: e ? e.fainted : false, ehit: !!(e && e._justHit),
+      /* CHI c'e' in campo in questo momento. Senza questo la scena disegnava
+         sempre `game.player`, che al cambio e' gia' il Pokemon NUOVO: si
+         leggeva «Ritirati, Ivysaur!» mentre a schermo c'era gia' Charmander,
+         e l'animazione del ritiro avrebbe risucchiato quello sbagliato. */
+      pmon: p, emon: e, p2mon: game.player2 || null, e2mon: game.enemy2 || null,
     };
+    if (ball) ev.ball = ball;
     if (p) p._justHit = false;   // il colpo si "consuma": solo il 1° evento dopo scuote
     if (e) e._justHit = false;
     return ev;
   }
+  /* Marca un messaggio con l'animazione della ball: `verso` e' "ritiro"
+     (il Pokemon rientra) o "uscita" (il Pokemon esce). Funziona sia negli
+     array di messaggi sia nei log di battaglia, perche' passano entrambi
+     da `snapEvent`. */
+  const conBall = (text, verso, lato) => ({ text, ball: { verso, lato } });
   // "log" del turno: gli attributi del motore fanno messages.push(testo);
   // qui lo intercettiamo per catturare anche lo snapshot.
   /* Riallinea l'istantanea di un evento allo stato ATTUALE, conservando in
@@ -1295,7 +1354,8 @@
      l'animazione della mossa si mostra lui, così le barre calano al momento
      dell'impatto e non un istante prima. Vale anche per il PRIMO evento del
      turno, che non avrebbe un evento precedente da cui pescare. */
-  const CAMPI_SNAP = ["php", "pmax", "pst", "pfaint", "ehp", "emax", "est", "efaint"];
+  const CAMPI_SNAP = ["php", "pmax", "pst", "pfaint", "ehp", "emax", "est", "efaint",
+                      "pmon", "emon", "p2mon", "e2mon"];
   function riallinea(e) {
     if (!e.pre) { e.pre = {}; for (const k of CAMPI_SNAP) e.pre[k] = e[k]; }
     const s = snapEvent("");
@@ -1541,13 +1601,27 @@
     });
   }
 
-  // Riporta un combattente allo stato "inizio battaglia" mantenendo HP e PP
-  // (l'attrito tra le ondate e' il cuore del roguelite).
-  function resetForBattle(f) {
-    revertForm(f);            // mega/gigamax durano solo una battaglia
-    game.weather = null; game.terrain = null;   // non passano da una lotta all'altra
-    f.status = null; f.sleepTurns = 0;
-    f.stages = { atk: 0, def: 0, spatk: 0, spdef: 0, spd: 0, acc: 0, eva: 0 };
+  /* ======================================================================
+     ENTRARE IN CAMPO / RIENTRARE NELLA BALL
+
+     🔴 SCELTA DEL PROPRIETARIO, DIVERSA DALL'ORIGINALE (2026-08-14):
+        «i problemi di stato, i boost e i debuff devono rimanere tra un'ondata
+         e l'altra, con l'eccezione delle lotte contro gli allenatori: in quel
+         caso i Pokemon vengono prima rimessi nelle pokeball e poi riestratti,
+         guariti dai problemi di stato (ma non negli HP) e con le stats
+         iniziali.»
+
+     Il modello e' fisico e si regge da solo: stato e stadi appartengono al
+     Pokemon FINCHE' STA IN CAMPO. Chi non viene mai richiamato se li porta
+     dietro da un'ondata all'altra; chi rientra nella ball perde gli stadi
+     (e la forma mega), e si cura dallo stato solo nel richiamo davanti a un
+     allenatore. Prima invece una sola funzione azzerava tutto a ogni ondata.
+     ====================================================================== */
+
+  // Il Pokemon ENTRA IN CAMPO: si azzera solo cio' che appartiene alla singola
+  // battaglia, cioe' i volatili (confusione, protezione, prese, tentennamento).
+  function entraInCampo(f) {
+    if (!f) return;
     f.volatile = { confusion: 0, flinch: false, protect: null, protectUsi: 0,
                    trap: null, seed: false, seedBy: null, perish: 0, recharge: false,
                    charging: null, infatuated: false, encore: null, taunt: 0,
@@ -1555,10 +1629,31 @@
                    aquaring: false, saltcure: false, curse: false, lastMove: null };
     f._lansat = false;
     f.fainted = false;
-    // Poteslot: finche' dura, la squadra entra in campo con +1 stadio
+    // Poteslot: finche' dura, la squadra entra in campo con almeno +1 stadio
+    // (`max`, non `=`: ora gli stadi persistono e non vanno peggiorati)
     if (game.tempBoost && game.party.includes(f)) {
-      for (const k in game.tempBoost) if (k !== "crit" && k in f.stages) f.stages[k] = 1;
+      for (const k in game.tempBoost) if (k !== "crit" && k in f.stages) f.stages[k] = Math.max(f.stages[k], 1);
     }
+  }
+
+  /* Il Pokemon RIENTRA NELLA BALL: perde gli stadi — boost e debuff valgono
+     finche' resta in campo — e l'eventuale forma mega/gigamax.
+     Lo stato si cura SOLO con `curaStato`, cioe' nel richiamo che precede una
+     lotta con un allenatore. Gli PS non si toccano mai. */
+  function richiamaNellaBall(f, curaStato) {
+    if (!f) return;
+    revertForm(f);            // mega/gigamax durano solo una battaglia
+    f.stages = { atk: 0, def: 0, spatk: 0, spdef: 0, spd: 0, acc: 0, eva: 0 };
+    if (curaStato) { f.status = null; f.sleepTurns = 0; }
+  }
+
+  /* Fine di una battaglia: cadono meteo e terreno (non passano da una lotta
+     all'altra) e le forme mega/gigamax, che durano una lotta sola.
+     ⚠️ Prima lo faceva `resetForBattle`, che pero' veniva chiamata anche a ogni
+     CAMBIO: cambiare Pokemon spazzava via il meteo a meta' battaglia. */
+  function fineBattaglia() {
+    game.weather = null; game.terrain = null;
+    for (const p of game.party) revertForm(p);
   }
 
   /* ---------------- Avvio run + scelta starter ---------------- */
@@ -2352,7 +2447,7 @@
       if (secondo) {
         game.double = true;
         game.chooser = 0; game.queued = null;
-        resetForBattle(secondo);
+        entraInCampo(secondo);
         game.player2 = secondo;
         loadFighterSprite(secondo, "back").then(s => { secondo.spr = s; redrawScene(); });
         messages.push(`Contro una cosa simile non basta uno: anche ${secondo.name} scende in campo!`);
@@ -2456,27 +2551,46 @@
     game.trainerDefeated = 0;
     game.enemyQueue = mons.slice(1);
     game.enemy = null;                 // niente mon durante la sfida
-    showTrainerPortrait(portraitSprite);
-    renderTrainerBalls();
-    renderScene();                     // enemy null → slot vuoto; portrait visibile
+    /* 🔴 RICHIAMO PRIMA DELLA SFIDA (scelta del proprietario, vedi il riquadro
+       sopra `entraInCampo`): davanti a un allenatore la squadra rientra nelle
+       ball e ne riesce guarita dai problemi di stato e con gli stadi azzerati
+       — ma con gli PS che aveva. E' l'unico punto in cui l'attrito accumulato
+       ondata dopo ondata si ferma, ed e' anche il momento in cui si VEDE il
+       Pokemon rientrare e poi riuscire. */
+    const attivo = game.player;
+    const daCurare = game.party.filter(p => p.status).length;
+    for (const p of game.party) richiamaNellaBall(p, true);
+    const intro = [conBall(`Ritirati, ${attivo.name}!`, "ritiro", "player")];
+    if (daCurare) stessoMomento(intro, "La squadra rientra nelle ball e si rimette in sesto.");
+    renderScene();
     loadFighterSprite(game.player, "back").then(s => { game.player.spr = s; redrawScene(); });
-    queueMessages(challengeMsgs, () => {
-      hideTrainerPortrait();
-      const m = [`${name} manda in campo ${mons[0].name}!`];
-      deployEnemy(mons[0], m);
+    queueMessages(intro, () => {
+      showTrainerPortrait(portraitSprite);
       renderTrainerBalls();
-      renderScene();
-      queueMessages(m, () => { game.phase = "CHOICE"; showMainMenu(); });
+      renderScene();                   // enemy null → slot vuoto; portrait visibile
+      queueMessages(challengeMsgs, () => {
+        hideTrainerPortrait();
+        const m = [];
+        deployEnemy(mons[0], m);       // `m` raccoglie gli effetti d'ingresso
+        renderTrainerBalls();
+        renderScene();
+        const testa = [conBall(`${name} manda in campo ${mons[0].name}!`, "uscita", "enemy"),
+                       conBall(`Vai, ${attivo.name}!`, "uscita", "player")];
+        queueMessages(testa.concat(m), () => { game.phase = "CHOICE"; showMainMenu(); });
+      });
     });
   }
 
   function nextWave() {
     pulisciBallScena();      // il campo riparte pulito
+    liberaDallaBall();       // e nessuno resta chiuso dentro per un'animazione monca
     /* SALVATAGGIO AUTOMATICO (§26): si scrive PRIMA di incrementare, quindi lo
        slot contiene sempre "ondate completate". Riprendendo si rigioca da qui
        con un avversario nuovo. */
     salvaRun();
     game.wave++;
+    // all'ondata 1 il tuo Pokemon e' ancora nella ball: lo si vede uscire
+    if (game.wave === 1) { dentroLaBall.add("player"); applicaDentroLaBall(); }
     if (!game.biome) { game.biome = "TOWN"; applyBiomeBackground(); }
     hideTrainerPortrait();
     game.trainerTotal = 0; renderTrainerBalls();   // nascondi il vassoio
@@ -2512,7 +2626,12 @@
     const boss = bossRaw && !evilKind;
     const isTrainer = !boss && !isGym && !isRival && !e4 && !isChampion && !isFinal && !evilKind && (game.wave % 5 === 0 || game.wave === 5);
     const eLevel = enemyLevelFor(game.wave);
-    resetForBattle(game.player);
+    /* La lotta precedente e' chiusa: via meteo, terreno e forme mega.
+       ⚠️ Stato e stadi NON si azzerano: restano fra un'ondata e l'altra
+       (vedi il riquadro sopra `entraInCampo`). A ripulirli e' solo il
+       richiamo davanti a un allenatore, in `startTrainerBattle`. */
+    fineBattaglia();
+    entraInCampo(game.player);
     clearTimeout(game.timer); game.events = []; game.eventIndex = 0; game.afterEvents = null;
     game.enemyQueue = [];
     game.double = false; game.enemy2 = null; game.player2 = null;   // si riaccende sotto
@@ -2629,7 +2748,7 @@
       const f2 = makeFighter(biomePick(), eLevel, { shiny: rollShiny() });
       game.enemy2 = f2;
       const secondo = game.party.find(p => !p.fainted && p !== game.player);
-      if (secondo) { resetForBattle(secondo); game.player2 = secondo; }
+      if (secondo) { entraInCampo(secondo); game.player2 = secondo; }
       messages.push(`Ondata ${game.wave}: LOTTA IN DOPPIO! Appaiono ${f.name} e ${f2.name}!`);
       if (f.shiny || f2.shiny) messages.push("✨ Uno di loro è SHINY!");
       deployEnemy(f, messages);
@@ -2646,6 +2765,11 @@
       : `Ondata ${game.wave}: appare ${f.name} selvatico!`);
     if (f.shiny) messages.push("✨ È SHINY! Che fortuna!");
     deployEnemy(f, messages);
+    /* PRIMA uscita della run: qui il tuo Pokemon esce davvero dalla ball.
+       Dalla seconda ondata in poi NON deve succedere: chi non e' stato
+       richiamato resta in campo, ed e' proprio questo che gli fa portare
+       stato e stadi da un'ondata all'altra. */
+    if (game.wave === 1) messages.push(conBall(`Vai, ${game.player.name}!`, "uscita", "player"));
     renderScene();
     loadFighterSprite(game.player, "back").then(s => { game.player.spr = s; redrawScene(); });
     queueMessages(messages, () => { game.phase = "CHOICE"; showMainMenu(); });
@@ -2678,31 +2802,43 @@
   /* ======================================================================
      ANIMAZIONE DI EVOLUZIONE — e si può interrompere, come nei giochi veri
 
-     La sequenza: buio in scena, il Pokemon al centro, sagome bianche che si
-     alternano sempre più in fretta fra la vecchia e la nuova forma, lampo,
-     nuova forma. Un pulsante «✖ Interrompi» resta visibile per tutto il
-     tempo: se lo premi, l'evoluzione si ferma e il Pokemon resta com'è
+     La sequenza: buio A PIENO SCHERMO, il Pokemon al centro, sagome bianche
+     che si alternano sempre più in fretta fra la vecchia e la nuova forma,
+     lampo, nuova forma. Un pulsante «✖ Interrompi» resta visibile per tutto
+     il tempo: se lo premi, l'evoluzione si ferma e il Pokemon resta com'è
      (si riproporra' al prossimo livello, come nell'originale).
      ⚠️ Funziona anche per i membri in PANCHINA: lo sprite lo dipinge questa
      schermata, non si appoggia a quello in campo.
+
+     🔴 Richiesta del proprietario (2026-08-14): l'evoluzione va vista con lo
+     sprite FRONTALE e a PIENO SCHERMO. Prima stava dentro `#scene` (il 68%
+     in alto) e usava lo sprite di SPALLE, quello della battaglia: il Pokemon
+     si evolveva dandoti le spalle, dentro un riquadro. Ora l'overlay e' fisso
+     su tutta la finestra, il Pokemon guarda chi gioca ed e' grande quanto lo
+     schermo consente; il tasto per fermarla e' dentro l'overlay, perche' la
+     fascia comandi ora ci sta sotto.
      ====================================================================== */
   function animaEvoluzione(p, toId, fine) {
-    const scena = document.getElementById("scene");
-    if (!scena) { fine(false); return; }
+    const radice = document.getElementById("game") || document.body;
+    if (!radice) { fine(false); return; }
     const nsp = S[toId];
     const vecchio = p.name, nuovo = nsp.it;
 
     const ov = document.createElement("div");
     ov.id = "evo-overlay";
     ov.innerHTML = `<div class="evo-sprite" id="evoSprite"></div>
-                    <div class="evo-testo">${vecchio} si sta evolvendo…</div>`;
-    scena.appendChild(ov);
+                    <div class="evo-testo">${vecchio} si sta evolvendo…</div>
+                    <button class="btn back evo-stop">✖ Interrompi</button>`;
+    radice.appendChild(ov);
     const el = ov.querySelector("#evoSprite");
 
-    // dipinge un frame di sprite dentro l'elemento dell'overlay
+    /* Dipinge un frame di sprite dentro l'elemento dell'overlay.
+       La misura la detta la FINESTRA, non un tetto fisso di 150 px: a pieno
+       schermo quel tetto lasciava il Pokemon minuscolo in mezzo al nero. */
+    const lim = Math.min(window.innerWidth * 0.66, window.innerHeight * 0.42);
     const dipingi = (s) => {
       if (!s || !el) return;
-      const f = s.frame, k = Math.min(2.6, 150 / f.h, 150 / f.w);
+      const f = s.frame, k = Math.min(4.5, lim / f.h, lim / f.w);
       el.style.width = (f.w * k) + "px";
       el.style.height = (f.h * k) + "px";
       el.style.backgroundImage = `url("${s.sheet}")`;
@@ -2711,22 +2847,26 @@
     };
 
     let annullato = false, tmr = null;
-    const pulisci = () => { clearTimeout(tmr); ov.remove(); cmd().innerHTML = ""; };
+    const pulisci = () => { clearTimeout(tmr); ov.remove(); };
 
-    // il tasto per fermarla sta nella fascia comandi, dove si tocca sempre
     game.phase = "MESSAGE";
-    cmd().innerHTML = `<div class="msgbox evo-box"><div class="log-line">${vecchio} si sta evolvendo…</div>
-      <button class="btn back evo-stop">✖ Interrompi</button></div>`;
-    cmd().querySelector(".evo-stop").onclick = () => {
+    ov.querySelector(".evo-stop").onclick = () => {
       if (annullato) return;
       annullato = true;
       pulisci();
       fine(false);
     };
 
+    /* Sprite FRONTALI di entrambe le forme. Per il "dopo" si passa da un
+       combattente finto con la specie e la forma di arrivo: cosi' valgono le
+       stesse regole di `evolve` (forma ereditata per indice) e si prendono
+       cromatico e sprite femminile giusti, invece del solo sprite base. */
+    const formaDopo = formAt(toId, p.formIndex || 0);
+    const finto = { dex: nsp.dex, speciesId: toId, shiny: p.shiny, gender: p.gender,
+                    variant: formaDopo ? (formaDopo.key || null) : null, formKey: null };
     Promise.all([
-      loadSprite(S[p.speciesId].dex, "back", p.shiny),
-      loadSprite(nsp.dex, "back", p.shiny),
+      loadFighterSprite(p, "front"),
+      loadFighterSprite(finto, "front"),
     ]).then(([sVecchio, sNuovo]) => {
       if (annullato) return;
       dipingi(sVecchio);
@@ -3118,6 +3258,106 @@
     const s = document.getElementById("enemy-sprite");
     if (s) { s.style.transition = ""; s.style.transform = ""; s.style.opacity = ""; }
   }
+
+  /* ======================================================================
+     RITIRO E USCITA DALLA BALL
+
+     Versione ridotta di `animaBall`: niente volo e niente dondolii — quelli
+     raccontano un TIRO, e qui non si sta catturando nessuno. Restano il lampo
+     della ball che si apre e il Pokemon che rientra (si rimpicciolisce) o esce
+     (si materializza).
+
+     ⚠️ Chi e' rientrato deve RESTARE invisibile anche se la scena si ridisegna:
+     fra il richiamo e la riemissione, davanti a un allenatore, passano tutte le
+     frasi della sfida e ognuna chiama `renderScene`. Per questo la sparizione
+     non e' solo una `opacity` inline ma uno stato, `dentroLaBall`, riapplicato
+     a ogni ridisegno da `applicaDentroLaBall()`.
+     ====================================================================== */
+  const SPRITE_SEL = { player: "#player-sprite", enemy: "#enemy-sprite",
+                       player2: "#player2-sprite", enemy2: "#enemy2-sprite" };
+  const dentroLaBall = new Set();      // slot il cui Pokemon e' dentro la ball
+  let ballSlotTimers = [];
+  let ballSlotFine = null;             // "concludi subito" dell'animazione in corso
+
+  function applicaDentroLaBall() {
+    for (const lato in SPRITE_SEL) {
+      const el = document.querySelector(SPRITE_SEL[lato]);
+      if (el) el.style.visibility = dentroLaBall.has(lato) ? "hidden" : "";
+    }
+  }
+  /* Rimette in campo tutti: rete di sicurezza a inizio ondata, o un'animazione
+     interrotta a meta' lascerebbe un Pokemon invisibile per sempre. */
+  function liberaDallaBall() { dentroLaBall.clear(); applicaDentroLaBall(); }
+
+  /* Chiude di colpo l'animazione in corso, applicandone lo stato finale.
+     Serve quando si tocca per passare al messaggio dopo mentre e' a meta'. */
+  function chiudiBallSlot() {
+    ballSlotTimers.forEach(clearTimeout); ballSlotTimers = [];
+    const f = ballSlotFine; ballSlotFine = null;
+    if (f) f();
+  }
+
+  // verso: "ritiro" (rientra nella ball) | "uscita" (ne esce). Torna la durata.
+  function animaBallSlot(verso, lato, onDone) {
+    chiudiBallSlot();                       // mai due sovrapposte
+    const scena = document.getElementById("scene");
+    const sprite = document.querySelector(SPRITE_SEL[lato] || "#nessuno");
+    const esce = verso === "uscita";
+    let chiamata = onDone;
+    // stato finale: vale sia a fine animazione sia se si tocca per saltarla
+    const concludi = () => {
+      if (sprite) {
+        sprite.style.transition = "";
+        sprite.style.transform = esce ? "" : "scale(.05)";
+        sprite.style.opacity = esce ? "" : "0";
+      }
+      document.querySelectorAll(".ball-slot").forEach(b => b.remove());
+      if (esce) dentroLaBall.delete(lato); else dentroLaBall.add(lato);
+      applicaDentroLaBall();
+      const cb = chiamata; chiamata = null;
+      if (cb) cb();
+    };
+    const rs = scena && scena.getBoundingClientRect();
+    const rb = sprite && sprite.getBoundingClientRect();
+    if (!scena || !sprite || !rb.width || !rb.height) { concludi(); return 0; }
+
+    const ball = document.createElement("div");
+    ball.className = "ball-lancio ball-slot";
+    ball.style.backgroundImage = `url('${ballIcon("pb")}')`;
+    ball.style.left = (rb.left - rs.left + rb.width / 2) + "px";
+    ball.style.top = (rb.top - rs.top + rb.height / 2) + "px";
+    scena.appendChild(ball);
+    ball.classList.add("aperta");           // il lampo: si apre in entrambi i versi
+    sprite.style.transformOrigin = "center bottom";
+
+    /* ⚠️ Niente `requestAnimationFrame` qui: nel pannello del browser a volte
+       non scatta (§24). Con un timer breve la transizione parte comunque, e in
+       ogni caso `concludi` mette lo stato finale anche se non partisse. */
+    const dopo = (ms, fn) => ballSlotTimers.push(setTimeout(fn, ms));
+    ballSlotFine = concludi;
+
+    if (esce) {
+      dentroLaBall.delete(lato);
+      sprite.style.visibility = "";
+      sprite.style.transition = "";
+      sprite.style.transform = "scale(.05)";
+      sprite.style.opacity = "0";
+      dopo(20, () => {
+        sprite.style.transition = "transform .34s cubic-bezier(.2,1.5,.5,1), opacity .22s ease-out";
+        sprite.style.transform = "";
+        sprite.style.opacity = "1";
+      });
+      dopo(300, () => ball.remove());
+      dopo(400, concludi);
+      return 420;
+    }
+    sprite.style.transition = "transform .3s ease-in, opacity .3s ease-in";
+    dopo(20, () => { sprite.style.transform = "scale(.05)"; sprite.style.opacity = "0"; });
+    dopo(340, () => ball.classList.remove("aperta"));
+    dopo(420, () => ball.remove());
+    dopo(440, concludi);
+    return 460;
+  }
   function animaBall(ballKey, esito, onDone) {
     const scena = document.getElementById("scene");
     const bersaglio = document.getElementById("enemy-sprite");
@@ -3502,6 +3742,7 @@
     }
     const e = game.events[game.eventIndex];
     stopMoveAnim();          // l'animazione precedente non deve accavallarsi
+    chiudiBallSlot();        // idem per un ritiro/uscita ancora a meta'
 
     /* ⚠️ QUANDO SI VEDE IL DANNO. Ora un evento può raccontare più righe
        («X usa Y!» + «È superefficace!»), e la sua istantanea è quella DOPO il
@@ -3530,6 +3771,11 @@
     // mossa a due turni e poi il colpo vero (Solarraggio). In quel caso si
     // riproducono in fila, non una sopra l'altra.
     let animMs = 0;
+    /* Ritiro/uscita dalla ball: e' legato alla FRASE («Ritirati, X!»), non al
+       momento in cui il motore ha cambiato Pokemon — quello succede molto
+       prima, mentre si costruisce il log. Tenuto a parte da `animMs` perche'
+       i rami qui sotto lo riassegnano. */
+    const ballMs = e.ball ? animaBallSlot(e.ball.verso, e.ball.lato) : 0;
     const playFx = (poi) => animAvailable(e.fx.move)
       ? playMoveAnim(e.fx.move, e.fx.side === "enemy" ? "player" : "enemy", e.fx.side, e.fx.type, poi)
       : (spawnMoveFx(e.fx.type, e.fx.side), setTimeout(poi, 240), 0);
@@ -3550,7 +3796,7 @@
        mossa ha finito: cosi' si vede a colpo d'occhio se il gioco sta ancora
        mostrando qualcosa o sta aspettando te. Toccare prima va bene lo stesso:
        taglia l'animazione e passa avanti. */
-    mostraContinua(Math.min(animMs || 0, 2400));
+    mostraContinua(Math.min(Math.max(animMs || 0, ballMs), 2400));
 
     // ?fast: narrazione automatica, serve SOLO ai test (una run a mano sarebbe
     // impossibile da guidare a 40 ms per messaggio).
@@ -4022,12 +4268,13 @@
 
     if (game.double && uscente === game.player2) {
       // ---- SECONDO slot: si sostituisce `player2`, il primo ha gia' scelto --
-      log.push(`Ritirati, ${game.player2.name}!`);
+      log.push(conBall(`Ritirati, ${game.player2.name}!`, "ritiro", "player2"));
+      richiamaNellaBall(game.player2);
       game.player2 = entrante;
-      resetForBattle(entrante);
+      entraInCampo(entrante);
       entrante.spr = null;
       loadFighterSprite(entrante, "back").then(s => { entrante.spr = s; redrawScene(); });
-      log.push(`Vai, ${entrante.name}!`);
+      log.push(conBall(`Vai, ${entrante.name}!`, "uscita", "player2"));
       applyOnSummon(entrante, game.enemy, log);
       renderScene();
       // il secondo non attacca: resta l'azione del primo (se c'e') + i nemici
@@ -4060,12 +4307,13 @@
   // Effettua il cambio (ritira l'attivo, manda il nuovo, abilita' d'ingresso).
   function doSwitch(index, log) {
     const outgoing = game.player;
-    log.push(`Ritirati, ${outgoing.name}!`);
+    log.push(conBall(`Ritirati, ${outgoing.name}!`, "ritiro", "player"));
+    richiamaNellaBall(outgoing);   // rientrando perde gli stadi (lo stato no)
     setActive(index);
-    resetForBattle(game.player);   // stadi/stato-volatile azzerati entrando in campo
+    entraInCampo(game.player);     // al nuovo si azzerano solo i volatili
     game.player.spr = null;
     loadFighterSprite(game.player, "back").then(s => { game.player.spr = s; redrawScene(); });
-    log.push(`Vai, ${game.player.name}!`);
+    log.push(conBall(`Vai, ${game.player.name}!`, "uscita", "player"));
     applyOnSummon(game.player, game.enemy, log);  // Prepotenza ecc. all'ingresso
   }
 
@@ -4149,7 +4397,7 @@
       if (game.player2 && game.player2.fainted) {
         const riserva = game.party.find(p => !p.fainted && p !== game.player && p !== game.player2);
         game.player2 = riserva || null;
-        if (game.player2) { resetForBattle(game.player2); loadFighterSprite(game.player2, "back").then(s => { game.player2.spr = s; redrawScene(); }); }
+        if (game.player2) { entraInCampo(game.player2); loadFighterSprite(game.player2, "back").then(s => { game.player2.spr = s; redrawScene(); }); }
       }
       // se il PRIMO avversario cade ma il secondo e' vivo, la lotta continua:
       // il secondo prende il posto primario
@@ -4174,8 +4422,8 @@
       if (game.enemyQueue.length) {
         const next = game.enemyQueue.shift();
         const log = makeLog();
-        log.push(next.trainer ? `${next.trainer} manda in campo ${next.name}!`
-                              : `${next.name} irrompe sul campo!`);
+        log.push(conBall(next.trainer ? `${next.trainer} manda in campo ${next.name}!`
+                                      : `${next.name} irrompe sul campo!`, "uscita", "enemy"));
         deployEnemy(next, log);
         renderTrainerBalls();
         renderScene();
@@ -4208,10 +4456,11 @@
     const target = game.party[index];
     if (!target || target.fainted) return;
     setActive(index);
-    resetForBattle(game.player);
+    entraInCampo(game.player);
     game.player.spr = null;
     const log = makeLog();
-    log.push(`Vai, ${game.player.name}!`);
+    // chi e' caduto non "rientra": il posto lo prende il nuovo, che esce dalla ball
+    log.push(conBall(`Vai, ${game.player.name}!`, "uscita", "player"));
     applyOnSummon(game.player, game.enemy, log);
     loadFighterSprite(game.player, "back").then(s => { game.player.spr = s; redrawScene(); });
     playEvents(log.events, () => { game.phase = "CHOICE"; showMainMenu(); });
@@ -4340,8 +4589,11 @@
   function stessoMomento(messages, t) {
     if (!messages || !t) return;
     if (messages.add) { messages.add(t); return; }        // log di battaglia
-    if (messages.length) messages[messages.length - 1] += "\n" + t;
-    else messages.push(t);
+    if (!messages.length) { messages.push(t); return; }
+    const ultimo = messages[messages.length - 1];
+    // il messaggio puo' essere un oggetto `{text, ball}` (vedi `conBall`)
+    if (ultimo && typeof ultimo === "object") ultimo.text += "\n" + t;
+    else messages[messages.length - 1] += "\n" + t;
   }
 
   /* ======================================================================
@@ -5209,18 +5461,27 @@
     // selvatici, boss, squadre degli allenatori e incontri misteriosi
     if (game.enemy) registerSeen(game.enemy.speciesId);
     if (game.enemy2) registerSeen(game.enemy2.speciesId);
-    if (game.enemy) { $("#enemy-hp-panel").hidden = false; renderSprite($("#enemy-sprite"), game.enemy, spriteCfg(ENEMY_SPRITE, game.enemy), eSprOv); renderHpPanel($("#enemy-hp-panel"), game.enemy, eOv); }
+    /* QUALE Pokemon disegnare. Durante la narrazione e' quello che era in campo
+       a quel momento (`frame.pmon`), non quello di adesso: al cambio il motore
+       ha gia' sostituito `game.player` prima che le frasi vengano lette. */
+    const E = frame && "emon" in frame ? frame.emon : game.enemy;
+    const P = frame && "pmon" in frame ? frame.pmon : game.player;
+    const E2 = frame && "e2mon" in frame ? frame.e2mon : game.enemy2;
+    const P2 = frame && "p2mon" in frame ? frame.p2mon : game.player2;
+    if (E) { $("#enemy-hp-panel").hidden = false; renderSprite($("#enemy-sprite"), E, spriteCfg(ENEMY_SPRITE, E), eSprOv); renderHpPanel($("#enemy-hp-panel"), E, eOv); }
     else clearSlot("#enemy-sprite", "#enemy-hp-panel");
-    if (game.player) { $("#player-hp-panel").hidden = false; renderSprite($("#player-sprite"), game.player, spriteCfg(PLAYER_SPRITE, game.player), pSprOv); renderHpPanel($("#player-hp-panel"), game.player, pOv); }
+    if (P) { $("#player-hp-panel").hidden = false; renderSprite($("#player-sprite"), P, spriteCfg(PLAYER_SPRITE, P), pSprOv); renderHpPanel($("#player-hp-panel"), P, pOv); }
     else clearSlot("#player-sprite", "#player-hp-panel");
     // SECONDI slot: presenti solo nelle lotte in doppio
     const gm = $("#game");
     if (gm) gm.classList.toggle("double", !!game.double);
-    slot2("#enemy2", ".battler-slot.enemy2", game.enemy2, spriteCfg(ENEMY_SPRITE, game.enemy2));
-    slot2("#player2", ".battler-slot.ally2", game.player2, spriteCfg(PLAYER_SPRITE, game.player2));
+    slot2("#enemy2", ".battler-slot.enemy2", E2, spriteCfg(ENEMY_SPRITE, E2));
+    slot2("#player2", ".battler-slot.ally2", P2, spriteCfg(PLAYER_SPRITE, P2));
     // barre degli oggetti tenuti (giocatore e avversario)
-    renderHeldBar("#held-ally", game.player);
-    renderHeldBar("#held-enemy", game.enemy);
+    renderHeldBar("#held-ally", P);
+    renderHeldBar("#held-enemy", E);
+    // chi e' dentro la ball resta invisibile anche dopo il ridisegno
+    applicaDentroLaBall();
     const wi = $("#wave-indicator");
     const bio = BIOMES[game.biome];
     const w = WEATHER[weatherKind()];
@@ -5497,7 +5758,7 @@
         if (stolen && game.enemyQueue.length) {   // l'allenatore manda il prossimo
           const next = game.enemyQueue.shift();
           const l2 = makeLog();
-          l2.push(`${next.trainer} manda in campo ${next.name}!`);
+          l2.push(conBall(`${next.trainer} manda in campo ${next.name}!`, "uscita", "enemy"));
           deployEnemy(next, l2);
           renderTrainerBalls(); renderScene();
           playEvents(l2.events, () => { game.phase = "CHOICE"; showMainMenu(); });
