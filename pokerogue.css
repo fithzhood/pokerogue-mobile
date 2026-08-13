@@ -184,6 +184,28 @@ html, body {
   100% { filter: drop-shadow(0 0 12px rgba(160,190,255,.55)); transform: scale(1); }
 }
 .evo-testo { font-size: clamp(15px, 4.4vw, 22px); font-weight: 700; text-align: center; text-shadow: 0 2px 6px #000; }
+/* SCHIUSA: l'uovo dondola sempre più stretto, si crepa e lascia il posto al nato */
+.hatch-egg { filter: drop-shadow(0 0 12px rgba(255,255,255,.35)); }
+.hatch-egg.scuote { animation: uovoScuote .42s ease-in-out; }
+@keyframes uovoScuote {
+  0%, 100% { transform: rotate(0deg); }
+  20% { transform: rotate(-13deg); } 55% { transform: rotate(13deg); } 80% { transform: rotate(-6deg); }
+}
+.hatch-egg.crepa { animation: uovoCrepa .42s ease-out forwards; }
+@keyframes uovoCrepa {
+  0%   { filter: drop-shadow(0 0 12px #fff) brightness(1); transform: scale(1); }
+  60%  { filter: drop-shadow(0 0 34px #fff) brightness(3); transform: scale(1.28); }
+  100% { filter: drop-shadow(0 0 40px #fff) brightness(6); transform: scale(1.5); opacity: .15; }
+}
+.hatch-nato {
+  background-repeat: no-repeat; image-rendering: pixelated;
+  filter: drop-shadow(0 0 16px rgba(255,255,255,.6));
+  animation: natoEntra .45s ease-out;
+}
+@keyframes natoEntra {
+  0%   { transform: scale(.4); opacity: 0; filter: brightness(4); }
+  100% { transform: scale(1); opacity: 1; filter: drop-shadow(0 0 16px rgba(255,255,255,.6)); }
+}
 /* il tasto per fermarla, sempre raggiungibile in basso */
 .msgbox.evo-box { justify-content: space-between; }
 .btn.evo-stop { width: 100%; margin-top: 8px; }

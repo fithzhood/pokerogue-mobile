@@ -2985,13 +2985,13 @@
     }
     const wasTrainer = !!game.enemy.trainer;
     // prima le EVOLUZIONI (con la loro animazione), poi le mosse da imparare
-    queueMessages(messages, () => processEvos(() => processLearns(() => {
+    queueMessages(messages, () => processEvos(() => processHatches(() => processLearns(() => {
       // ULTIMA BALL (una sola) solo se il selvatico è stato SCONFITTO, non catturato
       if (!wasBoss && !wasTrainer && !game.capturedThisWave) { offerCapture(); return; }
       // allenatore (NON il Rivale): con una Theft Ball puoi rubargli un Pokémon
       if (wasTrainer && !game.trainerIsRival && (game.theftballs || 0) > 0 && game.trainerRoster.length) { offerSteal(); return; }
       openShop();
-    })));
+    }))));
   }
 
   function gameOver(reason) {
@@ -5893,6 +5893,73 @@
 
   // Fa avanzare la schiusa di 1 ondata su tutte le uova; le schiuse sbloccano
   // una specie del loro tier come starter. Ritorna i messaggi di schiusa.
+  /* ======================================================================
+     SCHIUSA — l'uovo dondola, si crepa, lampo, e nasce il Pokémon.
+
+     Prima era solo una riga di testo in mezzo alla narrazione: la cosa più
+     rara del gioco passava inosservata. Ora è una schermata sua, con lo
+     sprite del nato. Le notizie che seguono (caramella, mossa da uovo,
+     abilità nascosta) restano nella narrazione, ma dopo la schiusa: prima
+     l'evento, poi il bottino.
+     ⚠️ Come per le evoluzioni, le schiuse si mettono in coda: `tickEggs` è
+     chiamata mentre si costruiscono i messaggi, l'animazione arriva dopo.
+     ====================================================================== */
+  function animaSchiusa(nato, poi) {
+    const scena = document.getElementById("scene");
+    if (!scena) { poi(); return; }
+    const sp = S[nato.sp];
+    const ov = document.createElement("div");
+    ov.id = "evo-overlay";              // stessa cornice buia dell'evoluzione
+    ov.innerHTML = `<div class="hatch-egg egg-sprite big egg-${nato.tier}"></div>
+                    <div class="evo-testo">Un uovo si sta schiudendo…</div>`;
+    scena.appendChild(ov);
+    const uovo = ov.querySelector(".hatch-egg");
+    game.phase = "MESSAGE";
+    cmd().innerHTML = `<div class="msgbox"><div class="log-line">Un uovo ${(GACHA[nato.tipo] || GACHA.MOVE).emoji} si muove…</div></div>`;
+
+    let tmr = null;
+    const chiudi = () => { clearTimeout(tmr); ov.remove(); poi(); };
+    // tre dondolii che stringono, poi il lampo e il nuovo arrivato
+    const scosse = [520, 420, 340];
+    let i = 0;
+    const scuoti = () => {
+      if (i >= scosse.length) return nascita();
+      uovo.classList.remove("scuote"); void uovo.offsetWidth; uovo.classList.add("scuote");
+      tmr = setTimeout(scuoti, scosse[i++]);
+    };
+    const nascita = () => {
+      loadSprite(sp.dex, "front", nato.shiny).then(s => {
+        uovo.classList.remove("scuote");
+        uovo.classList.add("crepa");
+        tmr = setTimeout(() => {
+          if (s) {
+            const k = Math.min(2.6, 150 / s.frame.h, 150 / s.frame.w);
+            uovo.className = "hatch-nato";
+            uovo.style.width = (s.frame.w * k) + "px";
+            uovo.style.height = (s.frame.h * k) + "px";
+            uovo.style.backgroundImage = `url("${s.sheet}")`;
+            uovo.style.backgroundPosition = `-${s.frame.x * k}px -${s.frame.y * k}px`;
+            uovo.style.backgroundSize = `${s.sheet_w * k}px ${s.sheet_h * k}px`;
+          }
+          ov.querySelector(".evo-testo").textContent =
+            `È nato ${sp.it}${nato.shiny ? " ✨" : ""}!`;
+          cmd().innerHTML = `<div class="msgbox"><div class="log-line">È nato ${sp.it}${nato.shiny ? " ✨CROMATICO" : ""}!</div><span class="cont pronto">▸</span></div>`;
+          cmd().querySelector(".msgbox").onclick = chiudi;
+        }, 420);
+      }).catch(chiudi);
+    };
+    scuoti();
+  }
+
+  /* Coda delle schiuse: una alla volta, poi le notizie che ne conseguono. */
+  function processHatches(done) {
+    const nato = (game.pendingHatches || []).shift();
+    if (!nato) { done(); return; }
+    animaSchiusa(nato, () => {
+      queueMessages(nato.extra || [], () => processHatches(done));
+    });
+  }
+
   function tickEggs(messages) {
     if (!meta.eggs.length) return;
     const hatched = [];
@@ -5918,23 +5985,28 @@
         meta.stats.hatched++;
         meta.candy = meta.candy || {};
         meta.candy[sp] = (meta.candy[sp] || 0) + 3;   // le uova danno più caramelle
-        if (messages) messages.push(`🥚 Un uovo ${GACHA[tipo].emoji} si è schiuso! È nato ${S[sp].it}${shiny ? " ✨CROMATICO" : ""} — sbloccato come starter!`);
+        /* La NOTIZIA della nascita non va nella narrazione: se ne occupa
+           `processHatches`, che le dà una schermata con l'uovo che si apre.
+           Qui si prepara solo cosa dire DOPO. */
+        const extra = [`${S[sp].it} è sbloccato come starter! 🍬 +3 caramelle`];
         /* ABILITÀ NASCOSTA: 1 su 192, come `GACHA_EGG_HA_RATE`. È l'altra via
            per sbloccarla, oltre a catturare un esemplare che ce l'ha. */
         if (S[sp].abilities.hidden && Math.floor(Math.random() * GACHA_EGG_HA_RATE) === 0) {
           const nuova = registraAbilita(rootOf(sp), 2);
-          if (nuova && messages) messages.push(`🔓✨ È nato con l'abilità NASCOSTA: ${nuova.it} sbloccata per ${S[sp].it}!`);
+          if (nuova) stessoMomento(extra, `🔓✨ È nato con l'abilità NASCOSTA: ${nuova.it} sbloccata per ${S[sp].it}!`);
         }
         /* Ogni schiusa sblocca UNA mossa da uovo della specie nata: e' l'unico
            modo di ottenerle, ed e' cio' che fa crescere le mosse iniziali
            selezionabili nel menu di partenza. Il gacha MOSSE rende molto piu'
            probabile che tocchi la RARA (`BOOSTED_RARE_EGGMOVE_RATES`). */
         const em = unlockEggMove(sp, egg.tier, tipo === "MOVE");
-        if (em && messages) {
-          messages.push(em.rara
+        if (em) {
+          stessoMomento(extra, em.rara
             ? `🥚✨ ${S[sp].it} ha imparato la mossa da uovo RARA ${em.it}!`
             : `🥚 ${S[sp].it} ha imparato la mossa da uovo ${em.it}!`);
         }
+        game.pendingHatches = game.pendingHatches || [];
+        game.pendingHatches.push({ sp, shiny, tipo, tier: egg.tier, extra });
       }
     }
     saveMeta();
