@@ -1015,6 +1015,7 @@
     timer: null,       // timer dell'auto-avanzamento
     pendingLearns: [], // mosse in attesa di sostituzione (4 slot pieni)
     expPending: 0,     // esperienza dei nemici caduti in questa ondata
+    rivalBattuto: 0,   // a quale incontro col Rivale siamo (per i premi garantiti)
     biome: null,       // id del bioma corrente (chiave di BIOMES)
     enemyQueue: [],    // Pokemon rimanenti dell'allenatore (combattuti in sequenza)
   };
@@ -1780,6 +1781,38 @@
     { region: "Paldea", e4: [["Rika","rika","GROUND"],["Poppy","poppy","STEEL"],["Larry","larry","FLYING"],["Hassel","hassel","DRAGON"]], champ: ["Geeta","geeta"] },
   ];
   const RIVAL_WAVES = [8, 25, 55, 95, 145, 195];   // come l'originale (RIVAL_1..6)
+  /* Ranghi dei premi GARANTITI dopo ogni Rivale (dal 2° in poi: il primo non ne
+     dà). Presi da `fixed-battle-configs.ts`, dove hanno `allowLuckUpgrades:
+     false` — quindi sono esattamente questi, non migliorabili dalla fortuna. */
+  const TIER_PREMI_RIVALE = [
+    [],                                                   // 1° incontro: niente
+    ["ULTRA", "GREAT", "GREAT"],                          // 2°
+    ["ULTRA", "ULTRA", "GREAT", "GREAT"],                 // 3°
+    ["ULTRA", "ULTRA", "ULTRA", "ULTRA"],                 // 4°
+    ["ROGUE", "ULTRA", "ULTRA", "ULTRA"],                 // 5°
+    ["ROGUE", "ROGUE", "ULTRA", "ULTRA"],                 // 6°
+  ];
+
+  /* PREMI FISSI DELLA RUN (`victory-phase.ts`, modalità Classica). Arrivano
+     sulle ondate multiple di 10, quando non c'è la schermata di scelta. */
+  function premiFissi(onda, messages) {
+    const dai = (id, testo) => {
+      const it = REWARD_POOL.find(r => r.id === id);
+      if (!it) return;
+      const pick = fillPick(it);
+      if (!pick) return;
+      it.apply(null, pick);
+      stessoMomento(messages, testo);
+    };
+    if (onda % 10) return;                       // solo sulle ondate x10
+    // un Espamuleto ogni 10 ondate, che ogni 30 diventa il Super
+    if (onda <= 500) {
+      if (onda % 30 === 20) dai("superexpcharm", "🎁 Ricevi un Superespamuleto!");
+      else dai("expcharm", "🎁 Ricevi un Espamuleto!");
+    }
+    if (onda === 10) dai("expcharm", "🎁 Il professore ti manda un Espamuleto!");
+    if (onda === 50 || onda === 100 || onda === 150) dai("amulet", "🎁 Ricevi un Monetamuleto!");
+  }
 
   /* ---- TEAM CATTIVO della run: uno dei 10, coerente per tutta la partita ----
      Onde fisse dell'originale: recluta 35/62/64, admin 66/114/164, boss 115/165. */
@@ -3000,6 +3033,17 @@
       messages.push(`🕶 Tra le cose di ${game.enemy.trainer} c'è un bottino speciale…`);
     }
     const wasTrainer = !!game.enemy.trainer;
+    // premi fissi della run (Espamuleti sulle x10, Monetamuleto a 50/100/150)
+    premiFissi(game.wave, messages);
+    /* Il Rivale non dà oggetti in mano: rende RICCA la scelta premi che segue
+       (vedi TIER_PREMI_RIVALE). Qui si segna a che incontro siamo. */
+    if (game.trainerIsRival) {
+      const tappa = RIVAL_WAVES.indexOf(game.wave) + 1;
+      if (tappa > 1) {
+        game.rivalBattuto = tappa;
+        stessoMomento(messages, "🎁 Ti lascia degli strumenti prima di andarsene…");
+      }
+    }
     // prima le EVOLUZIONI (con la loro animazione), poi le mosse da imparare
     queueMessages(messages, () => { hideTrainerPortrait(); processEvos(() => processHatches(() => processLearns(() => {
       // ULTIMA BALL (una sola) solo se il selvatico è stato SCONFITTO, non catturato
@@ -8035,6 +8079,21 @@
   /* Genera una scelta: prima il TIER (pesato dalla fortuna), poi l'oggetto
      DENTRO il tier coi pesi dell'originale. Gli oggetti con `avail` falso
      (cure senza feriti, pietre inutili...) non entrano proprio nell'urna. */
+  /* Estrae un premio di un TIER IMPOSTO (serve ai premi garantiti del Rivale). */
+  function rollRewardTier(tier, excludeIds) {
+    for (let tries = 0; tries < 30; tries++) {
+      const pool = REWARD_POOL.filter(x =>
+        x.tier === tier && x.weight > 0 && !excludeIds.includes(x.id) && (!x.avail || x.avail()));
+      if (!pool.length) break;
+      let wt = pool.reduce((s, x) => s + x.weight, 0), r = Math.random() * wt;
+      let item = pool[pool.length - 1];
+      for (const x of pool) { r -= x.weight; if (r <= 0) { item = x; break; } }
+      const pick = fillPick(item);
+      if (pick) return pick;
+    }
+    return rollReward(excludeIds);      // se quel tier non ha nulla di utile
+  }
+
   function rollReward(excludeIds) {
     for (let tries = 0; tries < 40; tries++) {
       const W = luckedTierWeights();
@@ -8258,6 +8317,18 @@
       if (heals.length) {
         const g = heals[Math.floor(Math.random() * heals.length)];
         picks.push(fillPick(g));
+      }
+      /* PREMI GARANTITI DEL RIVALE. Nell'originale ogni incontro col Rivale ha
+         `guaranteedModifierTiers` con `allowLuckUpgrades: false`: la scelta è
+         ricca per costruzione, ed è il motivo per cui il suo dialogo dice «il
+         professore mi ha chiesto di darti questi strumenti». Cresce a ogni
+         incontro: 2° ULTRA+GREAT+GREAT · 3° ULTRA+ULTRA+GREAT+GREAT ·
+         dal 4° in poi tutti ULTRA (e ROGUE negli ultimi). */
+      const tappa = game.rivalBattuto;
+      if (tappa) {
+        const tiers = TIER_PREMI_RIVALE[Math.min(tappa, TIER_PREMI_RIVALE.length) - 1] || [];
+        for (const t of tiers) picks.push(rollRewardTier(t, picks.map(x => x.item.id)));
+        game.rivalBattuto = 0;
       }
       while (picks.length < 3) picks.push(rollReward(picks.map(x => x.item.id)));
     }
