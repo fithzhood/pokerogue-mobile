@@ -457,6 +457,17 @@ function normalizeAbAttr(name, a) {
   switch (name) {
     case "LowHpMoveTypePowerBoostAbAttr":   return { kind: "lowHpTypeBoost", moveType: types(a[0])[0], mult: 1.5 };
     case "MoveTypePowerBoostAbAttr":        return { kind: "typeBoost", moveType: types(a[0])[0], mult: a[1] ? Number(a[1]) : 1.5 };
+    /* ABILITÀ CHE SCATTANO DOPO UN KO (`PostVictoryStatStageChangeAbAttr`):
+       Arroganza e Nitrito Bianco +1 Attacco, Nitrito Nero +1 Att. Speciale,
+       Ultraboost +1 alla statistica PIÙ ALTA (`beastBoostHighestStatCalc`).
+       Senza questo restavano tutte senza effetto. */
+    case "PostVictoryStatStageChangeAbAttr": {
+      if (/beastBoost/i.test(a[0] || "")) return { kind: "postVictoryStat", piuAlta: true, stages: 1 };
+      const changes = [];
+      const re = /stat:\s*Stat\.(\w+),\s*stages:\s*(-?\d+)/g; let mv;
+      while ((mv = re.exec(a[0] || "")) !== null) changes.push({ stat: mv[1], stages: Number(mv[2]) });
+      return changes.length ? { kind: "postVictoryStat", changes } : null;
+    }
     case "PostSummonStatStageChangeAbAttr": {
       const changes = [];
       const re = /stat:\s*Stat\.(\w+),\s*stages:\s*(-?\d+)/g; let m2;

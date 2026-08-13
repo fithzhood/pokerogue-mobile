@@ -2348,7 +2348,16 @@
   function renderTrainerBalls() {
     const el = document.getElementById("trainer-balls");
     if (!el) return;
-    if (!game.trainerTotal) { el.hidden = true; el.innerHTML = ""; return; }
+    /* ⚠️ Il vassoio e il riquadro PS del nemico stanno tutti e due in alto a
+       sinistra e si sovrappongono (misurati 14 px di sconfinamento). La classe
+       dice al CSS di abbassare il riquadro solo quando il vassoio c'è. */
+    const cornice = document.getElementById("game");
+    if (!game.trainerTotal) {
+      el.hidden = true; el.innerHTML = "";
+      if (cornice) cornice.classList.remove("con-vassoio");
+      return;
+    }
+    if (cornice) cornice.classList.add("con-vassoio");
     let html = "";
     for (let i = 0; i < game.trainerTotal; i++) {
       const down = i < game.trainerDefeated;
@@ -4467,6 +4476,26 @@
     return doDamage(actor, foe, move, messages, potenza);
   }
 
+  /* ABILITÀ CHE SCATTANO DOPO UN KO (`PostVictoryStatStageChangeAbAttr`).
+     Arroganza e Nitrito Bianco alzano l'Attacco, Nitrito Nero l'Att. Speciale,
+     **Ultraboost** alza la statistica PIÙ ALTA di chi ha messo KO — ed è quella
+     vera, calcolata sulle statistiche del momento, non su quelle base.
+     Prima queste quattro abilità non facevano assolutamente nulla. */
+  const STAT_PER_ABIL = ["atk", "def", "spatk", "spdef", "spd"];
+  function applyPostVictory(vincitore, messages) {
+    if (!vincitore || vincitore.fainted) return;
+    const a = findAb(vincitore, "postVictoryStat");
+    if (!a) return;
+    if (a.piuAlta) {
+      // la più alta fra Att, Dif, Att.Sp, Dif.Sp, Vel (i PS non contano)
+      let migliore = STAT_PER_ABIL[0];
+      for (const k of STAT_PER_ABIL) if (vincitore.stats[k] > vincitore.stats[migliore]) migliore = k;
+      applyStatStage(vincitore, [migliore.toUpperCase()], a.stages || 1, messages, true);
+    } else {
+      for (const c of (a.changes || [])) applyStatStage(vincitore, [c.stat], c.stages, messages, true);
+    }
+  }
+
   // Applica il danno (gestisce OHKO, multi-colpo, critico, drain, contraccolpo).
   // Ritorna true se la mossa ha colpito (non immune).
   function doDamage(actor, foe, move, messages, potenza) {
@@ -4586,7 +4615,11 @@
       messages.push(`Il Seme Rinascita riporta in forze ${foe.name}!`);
       if (messages.anim) messages.anim("COMMON_HEALTH_UP", sideOf(foe));
     }
-    if (foe.fainted) messages.push(`${foe.name} è esausto!`);
+    if (foe.fainted) {
+      messages.push(`${foe.name} è esausto!`);
+      // Arroganza / Ultraboost / Nitriti: scattano su chi ha messo KO
+      applyPostVictory(actor, messages);
+    }
     else { checkEnigmaBerry(foe, lastEff, messages); checkBerries(foe, messages); }
     return true;
   }

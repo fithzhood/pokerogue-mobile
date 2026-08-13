@@ -322,6 +322,10 @@ html, body {
 /* ⚠️ Il riquadro del nemico e' l'elemento in cima che porta piu' informazione
    (nome, livello, PS): va tenuto sotto il foro della fotocamera. */
 .hp-panel.side-enemy { top: calc(var(--safe-top) + 8%); left: calc(var(--safe-x) + 1%); }
+/* Contro un ALLENATORE in alto a sinistra c'è anche il vassoio delle sue ball:
+   il riquadro scende sotto di esso invece di coprirlo (il vassoio finisce a
+   `--safe-top + 58px`, qui si lascia un margine). */
+#game.con-vassoio .hp-panel.side-enemy { top: calc(var(--safe-top) + 66px); }
 .hp-panel.side-ally  { bottom: 3%; right: 4%; }     /* alleato: sprite a sinistra */
 /* in doppio il secondo riquadro si accoda al primo: la percentuale di translateY
    è riferita all'altezza del riquadro stesso, quindi si incolonnano da soli */
