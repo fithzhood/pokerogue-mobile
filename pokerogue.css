@@ -238,11 +238,18 @@ html, body {
 .ball-lancio.aperta { filter: drop-shadow(0 0 8px #fff) brightness(2.2); transform: scale(1.15); }
 /* Pokéball accanto al nome dell'avversario: ce l'hai già come starter.
    È l'`icon_owned` vera di PokéRogue (7×7 px). Grigia e smorta = ce l'hai, ma
-   questo esemplare ha ancora qualcosa da darti (abilità, natura o forma). */
+   questo esemplare ha ancora qualcosa da darti (abilità, natura o forma).
+
+   ⚠️ È INCORPORATA come data URI, non caricata da `assets/`. Gli asset stanno
+   solo dentro l'APK e NON viaggiano con l'aggiornamento a caldo (§28): messa in
+   `assets/ui/` sarebbe rimasta un buco vuoto sul telefono fino al prossimo APK.
+   Pesa 143 byte, quindi incorporarla non costa niente. Vale come regola per
+   qualunque micro-icona nuova. Il file resta in `assets/ui/icon_owned.png` come
+   sorgente da cui è stata ricavata. */
 .dex-owned {
   display: inline-block; vertical-align: middle;
   width: 14px; height: 14px; margin-right: 4px;
-  background: url("assets/ui/icon_owned.png") center/contain no-repeat;
+  background: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAcAAAAHBAMAAAA2fErgAAAAFVBMVEUAAAAhISFjY2ObNUelpaX/LGP///8IQjb5AAAAAXRSTlMAQObYZgAAAChJREFUeF5jYBAUYGBgTA1kYBAODRZgEFJSEmAQSUsRYGBMS2QAywIAQroD4c7WsG4AAAAASUVORK5CYII=") center/contain no-repeat;
   image-rendering: pixelated;
   filter: drop-shadow(0 1px 1px rgba(0,0,0,.6));
 }
