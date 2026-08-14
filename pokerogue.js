@@ -1069,6 +1069,11 @@
     }
   }
   window.__game = game; // hook di debug (ispezione stato/stadi/stati)
+  /* Il DEX persistente (starter sbloccati, caramelle, abilità, nature, IV).
+     ⚠️ È una funzione, non un riferimento: `meta` viene RIASSEGNATA da
+     `loadMeta()` e da «Azzera tutto», quindi un riferimento fisso punterebbe
+     all'oggetto sbagliato. */
+  window.__meta = () => meta;
   /* hook di debug per le FORME. Le regole dipendono da bioma, ora del giorno,
      sesso e natura: provarle a click vorrebbe dire giocare per ore sperando
      nell'incontro giusto. Qui si estraggono a comando.
@@ -1255,6 +1260,39 @@
     },
     // quale sprite verrebbe caricato per questo combattente (per provare il sesso)
     sprite: (f, side) => loadFighterSprite(f || game.player, side || "front").then(s => s && s.sheet),
+    /* Stato dex dell'avversario in campo: perche' la pokeball accanto al nome
+       e' assente, grigia o piena. Elenca cosa manca ancora. */
+    dex: (f) => {
+      const e = f || game.enemy;
+      if (!e) return "nessun avversario in campo";
+      const root = rootOf(e.speciesId);
+      return { specie: e.speciesId, capostipite: root, stato: statoDex(e),
+        sbloccato: meta.unlocked[root] || 0,
+        abilita: { indice: e.abilIndex, maschera: (meta.abils || {})[root] || 0 },
+        natura: { quale: e.nature, bit: 1 << NATURE_KEYS.indexOf(e.nature), maschera: (meta.nature || {})[root] || 0 },
+        forma: e.variant || "«base»", cromatico: !!e.shiny };
+    },
+    /* Distribuzione delle SCOSSE della ball sul nemico in campo: quante volte
+       dondola prima di aprirsi. Serve a capire se l'animazione "e' sempre
+       uguale" per un difetto o perche' la matematica manda quasi sempre lo
+       stesso numero. */
+    scosse: (mult, prove) => {
+      const e = game.enemy;
+      if (!e) return "serve un avversario in campo";
+      const n = prove || 2000, conta = {}, fallite = {};
+      let presi = 0;
+      for (let i = 0; i < n; i++) {
+        const r = rollCaptureDettaglio(e, mult || 1);
+        conta[r.scosse] = (conta[r.scosse] || 0) + 1;
+        if (r.preso) presi++; else fallite[r.scosse] = (fallite[r.scosse] || 0) + 1;
+      }
+      const perc = (o, tot) => Object.fromEntries(Object.entries(o)
+        .sort((a, b) => a[0] - b[0]).map(([k, v]) => [k + " scosse", Math.round(v / tot * 100) + "%"]));
+      return { bersaglio: e.name, ps: e.hp + "/" + e.maxHp,
+        percentualeCattura: captureChancePct(e, mult || 1) + "%",
+        catturati: Math.round(presi / n * 100) + "%",
+        seSCAPPA: perc(fallite, n - presi) };
+    },
     /* Apre la schermata «quale mossa dimentica» a comando. Aspettare che un
        Pokemon con 4 mosse ne impari una quinta al livello giusto e' l'ennesima
        coincidenza da rincorrere a click. */
@@ -3597,14 +3635,35 @@
         ball.style.transition = "top .3s cubic-bezier(.5,0,.9,.6)";
         ball.style.top = (ay + rs.height * 0.10) + "px";
         dopo(320, () => {
-          // 4. i dondolii veri
+          /* 4. I DONDOLII — è qui che sta la suspense.
+             Il numero è quello vero uscito dal tiro, e varia già parecchio
+             (misurato su un selvatico a piena vita: 34% zero · 26% uno ·
+             22% due · 18% tre). Ma a schermo non si sentiva, per due motivi:
+             la ball si apriva SUBITO quando le scosse erano zero, e tutte le
+             oscillazioni erano identiche, così due o tre si somigliavano.
+
+             Ora, come nell'originale (`shakeCounter` con `repeatDelay: 500`
+             in `attempt-capture-phase.ts`): c'è un BEAT di attesa prima del
+             primo controllo — anche il fallimento immediato ha il suo momento
+             di sospensione — le oscillazioni CRESCONO in ampiezza e durata,
+             e più la ball ha dondolato più il verdetto si fa aspettare. */
+          const AMPIEZZA = [15, 21, 27, 30];   // gradi: ogni scossa più larga
+          const DURATA   = [380, 470, 580, 640];
           let n = 0;
           const dondola = () => {
-            if (n >= esito.scosse) return chiusura();
+            if (n >= esito.scosse) return attesaVerdetto();
+            const amp = AMPIEZZA[Math.min(n, AMPIEZZA.length - 1)];
+            const dur = DURATA[Math.min(n, DURATA.length - 1)];
             n++;
+            ball.style.setProperty("--dondolo-amp", amp + "deg");
+            ball.style.setProperty("--dondolo-dur", dur + "ms");
             ball.classList.add("dondola");
-            dopo(460, () => { ball.classList.remove("dondola"); dopo(140, dondola); });
+            dopo(dur, () => { ball.classList.remove("dondola"); dopo(150, dondola); });
           };
+          /* Il silenzio prima del verdetto: cresce con le scosse. Una ball che
+             si è fermata dopo la terza tiene col fiato sospeso; una che non ha
+             dondolato affatto va liquidata in fretta. */
+          const attesaVerdetto = () => dopo(240 + 150 * n, chiusura);
           const chiusura = () => {
             if (esito.preso) {
               // scatto: la ball si chiude e lampeggia
@@ -3738,8 +3797,12 @@
       messages.push(`🦋 Nuova forma: ${formNameOf(speciesId, variant)} (${got}/${tot} di ${S[speciesId].it})`);
     }
     const val = shiny ? 2 : 1;
-    // Voce nel dex per la specie presa...
-    if (val > (meta.unlocked[speciesId] || 0)) meta.unlocked[speciesId] = val;
+    /* ⚠️ Cosa è DAVVERO nuovo va deciso prima di scrivere nel dex: altrimenti
+       si annuncia «registrato nel dex!» anche alla decima cattura della stessa
+       specie. Chi ce l'ha già deve sentirsi dire solo cosa ha guadagnato
+       (caramelle, IV, abilità, natura). */
+    const specieNuova = val > (meta.unlocked[speciesId] || 0);
+    if (specieNuova) meta.unlocked[speciesId] = val;
     /* ...ma quello che si SCHIERA è il capostipite: prendendo un Venusaur si
        sblocca Bulbasaur, prendendone uno cromatico si sblocca Bulbasaur
        cromatico. Senza questo, catturare un evoluto non darebbe più nulla
@@ -3750,7 +3813,8 @@
       messages.push(root === speciesId
         ? `📖 ${S[root].it}${shiny ? " ✨" : ""} registrato come starter!`
         : `📖 ${S[speciesId].it}${shiny ? " ✨" : ""} nel dex — sbloccato ${S[root].it}${shiny ? " ✨" : ""} come starter!`);
-    } else if (meta.unlocked[speciesId] === val && val > 0 && root !== speciesId) {
+    } else if (specieNuova && root !== speciesId) {
+      // il capostipite c'era già, ma questa forma evoluta no: vale dirlo
       messages.push(`📖 ${S[speciesId].it}${shiny ? " ✨" : ""} registrato nel dex!`);
     }
     meta.candy = meta.candy || {};
@@ -5723,6 +5787,43 @@
   }
 
   // ov (opzionale) = { hp, maxHp, status } snapshot.
+  /* ======================================================================
+     INDICATORE «CE L'HAI GIÀ» sui Pokemon avversari
+
+     Nell'originale (`enemy-battle-info.ts`) accanto al nome del nemico c'è la
+     pokéball `icon_owned`, visibile se la specie è nel dex, e **tinta di
+     grigio** (`0x808080`) se quell'esemplare avrebbe ancora qualcosa da darti
+     — forma o abilità che non possiedi. Stessa regola qui, con quello che il
+     nostro dex tiene: abilità, natura e forma.
+
+       nessuna icona → non ce l'hai: catturarlo lo sblocca come starter
+       ball grigia   → ce l'hai, ma QUESTO ha ancora qualcosa di nuovo
+       ball piena    → ce l'hai già tutto: è solo un avversario
+
+     Vale per i selvatici **e** per quelli degli allenatori: con la Theft Ball
+     si rubano, quindi l'informazione serve lo stesso. */
+  function statoDex(f) {
+    if (!f || !isEnemySide(f) || !S[f.speciesId]) return null;
+    const root = rootOf(f.speciesId);
+    if (!meta.unlocked[root]) return "nuovo";
+    // c'è ancora qualcosa da prendere da questo esemplare?
+    const abilNuova = f.abilIndex != null
+      && !((meta.abils && meta.abils[root]) & (f.abilIndex === 2 ? ABIL_H : (1 << f.abilIndex)));
+    const natNuova = f.nature
+      && !((meta.nature && meta.nature[root]) & (1 << NATURE_KEYS.indexOf(f.nature)));
+    const formaNuova = f.variant
+      && !((meta.formsSeen || {})[S[f.speciesId].dex] || {})[f.variant];
+    const cromNuovo = f.shiny && meta.unlocked[root] < 2;
+    return (abilNuova || natNuova || formaNuova || cromNuovo) ? "parziale" : "completo";
+  }
+  const iconaDex = (f) => {
+    const s = statoDex(f);
+    return s && s !== "nuovo"
+      ? `<span class="dex-owned ${s === "parziale" ? "parziale" : ""}" title="${
+          s === "parziale" ? "ce l'hai, ma questo ha qualcosa di nuovo" : "già disponibile come starter"}"></span>`
+      : "";
+  };
+
   function renderHpPanel(el, fighter, ov) {
     const hp = ov ? ov.hp : fighter.hp;
     const maxHp = ov ? ov.maxHp : fighter.maxHp;
@@ -5733,7 +5834,7 @@
       ? `<span class="status-badge st-${status}">${STATUS_IT[status]}</span>` : "";
     el.innerHTML = `
       <div class="row1">
-        <span class="name">${fighter.name}<span class="gen g-${fighter.gender}">${genderSymbol(fighter)}</span>${badge}</span>
+        <span class="name">${iconaDex(fighter)}${fighter.name}<span class="gen g-${fighter.gender}">${genderSymbol(fighter)}</span>${badge}</span>
         <span class="lvl">Lv.${fighter.level}</span>
       </div>
       <div class="hp-bar-track">
@@ -6825,6 +6926,11 @@
         // CROMATICO: 1/128, ma il gacha cromatico raddoppia (1/64)
         const tassoShiny = tipo === "SHINY" ? TASSO_SHINY_GACHA_SU : TASSO_SHINY_GACHA;
         const shiny = Math.floor(Math.random() * tassoShiny) === 0;
+        /* ⚠️ Va deciso PRIMA di scrivere nel dex se questa nascita sblocca
+           davvero qualcosa: se no ogni schiusa annunciava «è sbloccato come
+           starter!» anche per una specie che avevi già da un pezzo. */
+        const eraNuovo = !meta.unlocked[sp];
+        const primoCromatico = shiny && (meta.unlocked[sp] || 0) < 2;
         if (!meta.unlocked[sp] || shiny) meta.unlocked[sp] = shiny ? 2 : (meta.unlocked[sp] || 1);
         meta.stats.hatched++;
         meta.candy = meta.candy || {};
@@ -6832,7 +6938,11 @@
         /* La NOTIZIA della nascita non va nella narrazione: se ne occupa
            `processHatches`, che le dà una schermata con l'uovo che si apre.
            Qui si prepara solo cosa dire DOPO. */
-        const extra = [`${S[sp].it} è sbloccato come starter! 🍬 +3 caramelle`];
+        const extra = [eraNuovo
+          ? `${S[sp].it} è sbloccato come starter! 🍬 +3 caramelle`
+          : primoCromatico
+            ? `${S[sp].it} ✨ cromatico è sbloccato come starter! 🍬 +3 caramelle`
+            : `🍬 +3 caramelle ${S[sp].it} (totale ${meta.candy[sp]})`];
         /* ABILITÀ NASCOSTA: 1 su 192, come `GACHA_EGG_HA_RATE`. È l'altra via
            per sbloccarla, oltre a catturare un esemplare che ce l'ha. */
         if (S[sp].abilities.hidden && Math.floor(Math.random() * GACHA_EGG_HA_RATE) === 0) {

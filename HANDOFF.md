@@ -2310,3 +2310,91 @@ Anche stavolta le sonde hanno fatto tutto il lavoro (`mosse9`, `impara`, più `a
 `evoluzione` del §30). Le uniche cose trovate a occhio sono state le due di layout: i 25 chip
 che sfondavano la scheda starter e il fondo velato dell'evoluzione. **Le sonde dicono se
 funziona, lo screenshot dice se si può usare.**
+
+---
+
+## 32. Suspense della ball e indicatore «ce l'hai già» (2026-08-14)
+
+Due segnalazioni del proprietario mentre giocava. Entrambe partite da una diagnosi che ha
+smentito il sospetto iniziale — vale la pena leggere *come*, non solo *cosa*.
+
+### 32.1 I dondolii della ball: la variazione c'era, ma non si sentiva
+
+**Segnalazione**: «l'animazione della pokeball è sempre la stessa quando un Pokémon fugge,
+dovrebbe avere un diverso numero di oscillazioni per la suspense».
+
+**Prima cosa fatta: misurare.** `__items.scosse(mult, prove)` tira la cattura N volte e
+stampa la distribuzione. Su un selvatico a piena vita (44% di cattura): **0 scosse 34% · 1
+scossa 26% · 2 scosse 22% · 3 scosse 18%**. Il tiro variava eccome — il difetto era a valle.
+
+**Le due cause vere, trovate confrontando con `attempt-capture-phase.ts` dell'originale:**
+1. Con **zero** scosse la ball si apriva *all'istante*: nessun momento di sospensione, e
+   siccome è il caso più frequente (34%) è quello che si vede sempre. L'originale ha un
+   `repeatDelay: 500` **prima** del primo controllo, quindi anche il fallimento immediato ha
+   il suo battito d'attesa.
+2. Tutte le oscillazioni erano **identiche** (460 ms, ±22°), quindi due o tre si somigliavano.
+
+**Fatto**: beat d'attesa prima del primo controllo; oscillazioni che **crescono** in ampiezza
+e durata (15°/380 ms → 21°/470 ms → 27°/580 ms, da `--dondolo-amp` e `--dondolo-dur` passate
+dal JS al CSS); e un **silenzio finale proporzionale** alle scosse (`240 + 150 × n` ms) — una
+ball che si è fermata dopo la terza tiene col fiato sospeso, una che non ha dondolato va
+liquidata in fretta.
+
+Durata totale misurata a schermo: **0 scosse 1,8 s · 1 scossa 2,5 s · 3 scosse 4,2 s.**
+
+⚠️ **Trovato per strada, NON corretto — decisione del proprietario.** L'originale fa **3**
+controlli di scossa (`onRepeat` con `shakeCount++ < 3`), noi ne facciamo **4**: la nostra
+probabilità di cattura è `p⁴` invece di `p³`, cioè **più bassa dell'originale**. Correggerlo
+alzerebbe tutte le percentuali di cattura del gioco — è un cambio di bilanciamento, non una
+svista da sistemare di nascosto. Le percentuali mostrate sono coerenti col nostro tiro, quindi
+niente è "rotto".
+
+### 32.2 Pokéball accanto al nome: «questo ce l'hai già»
+
+**Segnalazione**: i Pokémon incontrati (selvatici **e degli allenatori**) devono dire se sono
+già disponibili come starter; l'originale usa una pokéball accanto al nome.
+
+Confermato in `src/ui/battle-info/enemy-battle-info.ts`: c'è `ownedIcon` (`icon_owned`),
+visibile se `dexEntry.caughtAttr`, e **tinta di grigio** (`0x808080`) se mancano ancora forme,
+generi o l'abilità di quell'esemplare. Copiata l'icona vera (7×7 px, 143 byte) in
+`assets/ui/icon_owned.png`.
+
+Stessa regola, con quello che il nostro dex tiene (`meta.unlocked`, `abils`, `nature`,
+`formsSeen`) — la funzione è `statoDex(f)`:
+
+| a schermo | significa |
+|---|---|
+| nessuna icona | **non ce l'hai**: catturarlo lo sblocca come starter |
+| ball **grigia** | ce l'hai, ma QUESTO ha ancora qualcosa (abilità, natura, forma, cromatico) |
+| ball **piena** | ce l'hai già tutto: è solo un avversario |
+
+Vale anche per i Pokémon degli allenatori (verificato sul Larvesta del Mangiafuoco): con la
+Theft Ball si rubano, quindi l'informazione serve lo stesso.
+
+### 32.3 «Ora puoi usarlo come starter» detto a sproposito
+
+Il colpevole era la **schiusa**: `const extra = ["${S[sp].it} è sbloccato come starter!"]` era
+**incondizionato**, quindi ogni uovo lo annunciava anche per una specie posseduta da un pezzo.
+Ora la frase esce solo se la nascita sblocca davvero qualcosa (specie nuova, o primo
+cromatico); altrimenti dice solo le caramelle.
+
+Stesso trattamento alla cattura: il ramo «📖 registrato nel dex!» scattava su qualunque
+duplicato, perché la condizione guardava `meta.unlocked[specie]` **dopo** averlo già
+aggiornato. Ora `specieNuova` si calcola PRIMA della scrittura.
+Verificato rubando un Larvesta già posseduto: dice solo «🕶 Rubato! … 🍬 +1 Caramella …
+📈 Nuovi IV migliori», niente starter, niente dex.
+
+### 32.4 Sonde nuove e una trappola in cui sono ricascato
+
+| Comando | Cosa fa |
+|---|---|
+| `__items.scosse(mult, prove)` | distribuzione delle scosse della ball sul nemico in campo |
+| `__items.dex(f)` | perché la pokéball accanto al nome è assente / grigia / piena, con cosa manca |
+| `__meta()` | il dex persistente. **È una funzione**: `meta` viene riassegnata da `loadMeta()` e da «Azzera tutto», un riferimento fisso punterebbe all'oggetto sbagliato |
+
+⚠️ **Ho perso un giro leggendo un pannello che non era stato ridisegnato.** Cambiavo `meta` e
+rileggevo `#enemy-hp-panel`, concludendo che la logica fosse sbagliata: era giusta, ma il
+pannello si ridisegna solo quando gira un turno — aprire e chiudere «Squadra» non basta. È la
+stessa trappola del §8 (*«le mie asserzioni sul DOM leggono elementi che il ridisegno ha
+staccato»*). **Prima di dare la colpa al codice, verifica che il DOM sia stato riscritto
+davvero** — un marcatore `dataset` sull'elemento lo dice in due righe.

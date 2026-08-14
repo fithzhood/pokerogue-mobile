@@ -236,12 +236,28 @@ html, body {
 }
 /* mentre e' aperta lampeggia di bianco: e' il momento in cui risucchia o libera */
 .ball-lancio.aperta { filter: drop-shadow(0 0 8px #fff) brightness(2.2); transform: scale(1.15); }
-/* dondolio: due oscillazioni per scossa, come nei giochi */
-.ball-lancio.dondola { animation: ballDondola .46s ease-in-out; }
+/* Pokéball accanto al nome dell'avversario: ce l'hai già come starter.
+   È l'`icon_owned` vera di PokéRogue (7×7 px). Grigia e smorta = ce l'hai, ma
+   questo esemplare ha ancora qualcosa da darti (abilità, natura o forma). */
+.dex-owned {
+  display: inline-block; vertical-align: middle;
+  width: 14px; height: 14px; margin-right: 4px;
+  background: url("assets/ui/icon_owned.png") center/contain no-repeat;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 1px 1px rgba(0,0,0,.6));
+}
+.dex-owned.parziale { filter: grayscale(1) brightness(.75); opacity: .8; }
+
+/* Dondolio: due oscillazioni per scossa, come nei giochi.
+   Ampiezza e durata arrivano dal JS (`--dondolo-amp` / `--dondolo-dur`) perché
+   ogni scossa dev'essere più larga e più lenta della precedente: è quello che
+   fa CRESCERE la tensione. Con oscillazioni tutte uguali, due o tre scosse si
+   somigliavano e il tiro sembrava sempre lo stesso. */
+.ball-lancio.dondola { animation: ballDondola var(--dondolo-dur, 460ms) ease-in-out; }
 @keyframes ballDondola {
   0%, 100% { transform: rotate(0deg); }
-  25%      { transform: rotate(-22deg) translateX(-3px); }
-  75%      { transform: rotate(22deg)  translateX(3px); }
+  25%      { transform: rotate(calc(var(--dondolo-amp, 22deg) * -1)) translateX(-3px); }
+  75%      { transform: rotate(var(--dondolo-amp, 22deg))            translateX(3px); }
 }
 /* dopo la cattura la ball CHIUSA resta in campo (il Pokemon è dentro): se
    sparisse tutto, sembrerebbe scappato */
