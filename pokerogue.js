@@ -1335,6 +1335,30 @@
         natura: { quale: e.nature, bit: 1 << NATURE_KEYS.indexOf(e.nature), maschera: (meta.nature || {})[root] || 0 },
         forma: e.variant || "«base»", cromatico: !!e.shiny };
     },
+    /* Squadra di prova nel CASO PEGGIORE: sei membri, nomi lunghi, stati,
+       oggetti tenuti, PS bassi, uno esausto e uno cromatico. Serve a misurare
+       il pannello squadra: con un solo Pokémon in squadra la schermata sta
+       comoda sempre, e non dice niente. */
+    squadraProva: (quanti) => {
+      if (!game.player) return "serve una run in corso";
+      const lunghi = SPECIES_KEYS.filter(k => !S[k].noSprite && S[k].it.length >= 10);
+      const stati = ["BURN", "PARALYSIS", "SLEEP", "POISON", "FREEZE", null];
+      const n = Math.min(6, quanti || 6);
+      game.party.length = 0;
+      for (let i = 0; i < n; i++) {
+        const k = lunghi[Math.floor(Math.random() * lunghi.length)];
+        const p = makeFighter(k, 18 + i * 9, { shiny: i === 0, shinyVar: 2, ignoreArena: true });
+        p.fainted = (i === n - 1 && n > 1);
+        p.hp = p.fainted ? 0 : Math.max(1, Math.floor(p.maxHp * (i + 1) / (n + 1)));
+        p.status = p.fainted ? null : stati[i % stati.length];
+        addHeld(p, "leftovers"); addHeld(p, "shellbell");
+        if (p.moves[3]) p.moves[3].pp = 0;
+        game.party.push(p);
+      }
+      setActive(0);
+      redrawScene();
+      return `squadra di prova: ${game.party.length} membri, ${game.party.filter(x => x.fainted).length} esausti`;
+    },
     /* --- FORTUNA E LIVREE CROMATICHE (§33) ------------------------------ */
     /* Da dove viene la fortuna che hai adesso, membro per membro. */
     fortuna: () => {
@@ -6450,22 +6474,30 @@
         : p.fainted ? '<span class="party-ko">KO</span>' : "";
       const st = p.status ? `<span class="status-badge st-${p.status}">${STATUS_IT[p.status]}</span>` : "";
       const types = p.types.map(t => `<span class="ticon t-${t}"></span>`).join("");
-      const held = Object.keys(p.held || {}).length ? `<span class="pd-held">🎒 ${heldSummary(p)}</span>` : "";
-      // mosse coi PP residui: e' l'informazione che serve davvero per decidere
-      const moves = p.moves.map(m => {
+      /* ⚠️ Oggetti tenuti e punti fortuna NON stanno più nella casella. Con due
+         tipi, uno stato e il tag «in campo» la riga andava a capo e mangiava
+         una riga intera su tre. Vanno nella scheda personale, che è il posto
+         dove uno se li va a leggere davvero. */
+      /* MOSSE ridotte a quattro pallini del colore del TIPO (§35). Non è un
+         taglio per far spazio: in questa schermata si decide CHI mandare in
+         campo, e per quello serve sapere che copertura hai e quante mosse sono
+         ancora cariche — non i nomi e non i PP esatti. Quattro pallini lo
+         dicono in 40 px invece che in due righe di testo. Il nome resta nel
+         `title`, per chi ci tiene a saperlo. */
+      const pips = p.moves.map(m => {
         const mv = M[m.id];
-        return `<span class="pd-move${m.pp === 0 ? " vuota" : ""}"><span class="ticon t-${mv.type}"></span>${mv.it} <b>${m.pp}/${m.maxPp}</b></span>`;
+        return `<i class="pc-pip${m.pp === 0 ? " vuota" : ""}" style="background:${T[mv.type].color}" title="${mv.it} ${m.pp}/${m.maxPp}"></i>`;
       }).join("");
-      /* Quanto porta alla fortuna di squadra. Sbarrato se è esausto: gli
-         esausti non contano, ed è la domanda che uno si fa guardando qui. */
-      const lk = p.luck ? `<span class="pd-luck">🍀+${p.luck}</span>` : "";
-      return `<button class="pd-card sceglibile ${p.fainted ? "ko" : ""}" data-i="${i}" ${selectable ? "" : "disabled"}>
-          <div class="pd-top"><span class="pd-name">${miniIcon(p.dex, 1.1)}${p.shiny ? cromStella(p.shinyVar) : ""}${p.name.replace("✨", "")}<span class="gen g-${p.gender}">${genderSymbol(p)}</span>${st}${lk}</span><span class="pd-lv">Lv.${p.level} ${tag}</span></div>
-          <div class="pd-types">${types} ${p.ability ? `<span class="pd-ab">${p.ability.it}</span>` : ""}${p.passiveAbility ? `<span class="pd-ab pd-pass">+${p.passiveAbility.it}</span>` : ""} ${held}</div>
+      const nome = p.name.replace("✨", "").replace(/\s*\(.*\)\s*$/, "");
+      /* ⚠️ `disabled` NON si mette più: un esausto o chi è già in campo non si
+         può schierare, ma la sua scheda si deve poter aprire lo stesso — anzi,
+         è proprio quello che si vuole guardare. Il fatto che non sia
+         schierabile lo dice la scheda, col tasto spento e il motivo scritto. */
+      return `<button class="pd-card compatta ${p.fainted ? "ko" : ""} ${inCampo ? "attiva" : ""} ${selectable ? "" : "nonschierabile"}" data-i="${i}" title="${p.name} · ${p.ability ? p.ability.it : ""}">
+          <div class="pc-r1">${miniIcon(p.dex, 1.25)}<span class="pc-nome">${p.shiny ? cromStella(p.shinyVar) : ""}${nome}<span class="gen g-${p.gender}">${genderSymbol(p)}</span></span><span class="pc-lv">${p.level}</span></div>
+          <div class="pc-r2">${types}${st}</div>
           <div class="party-hp-track"><div class="party-hp-fill" style="width:${ratio * 100}%;background:${col};"></div></div>
-          <div class="pd-hp">${Math.max(0, p.hp)}/${p.maxHp} PS · <span class="pd-exp">Lv.${p.level}${expEtichetta(p)}</span></div>
-          ${barraExp(p)}
-          <div class="pd-moves-row">${moves}</div>
+          <div class="pc-r3"><span class="pc-ps">${Math.max(0, p.hp)}/${p.maxHp}</span><span class="pc-pips">${pips}</span>${tag}</div>
         </button>`;
     }).join("");
     const boxLine = game.box.length ? `<div class="meta-sub">Box: ${game.box.length} Pokémon in deposito</div>` : "";
@@ -6478,17 +6510,91 @@
       <div class="meta-title" style="font-size:clamp(19px,5.6vw,30px)">${title}</div>
       <div class="meta-sub">${sub}</div>
       ${luckBar()}
-      <div class="pd-list">${cards}</div>${boxLine}${backRow}`);
+      <div class="pd-list griglia2">${cards}</div>${boxLine}${backRow}`);
+    /* ⚠️ Toccare una casella apre la SCHEDA, non manda in campo. Prima il
+       Pokémon scendeva in campo al primo tocco, senza che si potesse guardarlo:
+       una scelta importante presa senza poter leggere niente. Ora il tocco
+       serve a guardare, e a mandare in campo ci pensa un tasto dedicato dentro
+       la scheda. Vale anche nel cambio FORZATO: è proprio lì che vuoi vedere
+       chi stai mandando allo sbaraglio. */
     metaEl().querySelectorAll(".pd-card[data-i]").forEach(b => b.onclick = () => {
-      if (b.disabled) return;
-      const i = parseInt(b.dataset.i, 10);
-      hideMeta();
-      if (mode === "force") forceSwitchTo(i); else playerSwitch(i);
+      showMonScheda(parseInt(b.dataset.i, 10), mode);
     });
     if (mode === "switch") metaEl().querySelector('[data-act="back"]').onclick = () => { hideMeta(); showMainMenu(); };
   }
 
   // Offerta di cattura dopo aver sconfitto un selvatico: scegli quale ball usare.
+  /* ======================================================================
+     SCHEDA PERSONALE di un Pokémon in squadra (§35)
+
+     Divisione del lavoro con la griglia: là c'è solo ciò che serve a decidere
+     CHI guardare (identità, PS, tipi, stato, copertura delle mosse); qui c'è
+     tutto il resto, che in una casella da 165 px non entrerebbe mai — mosse
+     coi nomi e i PP, abilità, passiva, natura, oggetti tenuti, statistiche
+     con gli IV, esperienza.
+     ====================================================================== */
+  function showMonScheda(i, mode) {
+    const p = game.party[i];
+    if (!p) { renderParty(mode); return; }
+    const inCampo = p === game.player || (game.double && p === game.player2);
+    const puoScendere = !p.fainted && !inCampo;
+    const perche = p.fainted ? "è esausto" : inCampo ? "è già in campo" : "";
+    const ratio = Math.max(0, p.hp / p.maxHp);
+    const col = ratio > 0.5 ? "var(--hp-green)" : ratio > 0.2 ? "var(--hp-yellow)" : "var(--hp-red)";
+    const types = p.types.map(t => `<span class="ticon t-${t}"></span>`).join("");
+    const st = p.status ? `<span class="status-badge st-${p.status}">${STATUS_IT[p.status]}</span>` : "";
+    const held = heldSummary(p);
+    const iv = p.ivs || {};
+    const STAT_IT = { atk: "Att", def: "Dif", spatk: "A.Sp", spdef: "D.Sp", spd: "Vel" };
+    const stats = Object.keys(STAT_IT).map(k =>
+      `<div class="ms-stat"><span class="ms-k">${STAT_IT[k]}</span><b>${p.stats[k]}</b><span class="ms-iv">IV ${iv[k] != null ? iv[k] : "?"}</span></div>`).join("");
+    const moves = p.moves.map(m => {
+      const mv = M[m.id];
+      return `<div class="ms-mossa${m.pp === 0 ? " vuota" : ""}"><span class="ticon t-${mv.type}"></span><span class="ms-mv-nome">${mv.it}</span><b>${m.pp}/${m.maxPp}</b></div>`;
+    }).join("");
+    showMetaScreen(`
+      <div class="sd-head">
+        <div class="sd-sprite-box"><span class="sd-sprite" id="msSprite"></span></div>
+        <div class="sd-id">
+          <div class="sd-name">${p.shiny ? cromStella(p.shinyVar) : ""}${p.name.replace("✨", "")}<span class="gen g-${p.gender}">${genderSymbol(p)}</span></div>
+          <div class="sd-types">${types}${st}</div>
+          <div class="ms-lv">Lv.<b>${p.level}</b>${expEtichetta(p)}</div>
+          ${barraExp(p)}
+        </div>
+      </div>
+      <div class="ms-hp">
+        <div class="party-hp-track"><div class="party-hp-fill" style="width:${ratio * 100}%;background:${col};"></div></div>
+        <div class="ms-hp-num">${Math.max(0, p.hp)} / ${p.maxHp} PS</div>
+      </div>
+      <div class="sd-riga"><span class="sd-lab">Abilità</span><span class="sd-chips">
+        <span class="pd-ab">${p.ability ? p.ability.it : "—"}</span>
+        ${p.passiveAbility ? `<span class="pd-ab pd-pass">+${p.passiveAbility.it}</span>` : ""}</span></div>
+      <div class="sd-riga"><span class="sd-lab">Natura</span><span class="sd-chips"><span class="pd-ab pd-nat">${natureLabel(p) || "—"}</span></span></div>
+      ${held ? `<div class="sd-riga"><span class="sd-lab">Tiene</span><span class="sd-chips"><span class="pd-held">🎒 ${held}</span></span></div>` : ""}
+      ${p.luck ? `<div class="sd-riga"><span class="sd-lab">Fortuna</span><span class="sd-chips"><span class="pd-luck">🍀 +${p.luck} alla squadra${p.fainted ? " — ma è esausto, quindi non contano" : ""}</span></span></div>` : ""}
+      <div class="meta-sub">Mosse</div>
+      <div class="ms-mosse">${moves}</div>
+      <div class="meta-sub">Statistiche</div>
+      <div class="ms-stats">${stats}</div>
+      <div class="meta-actions two-col sd-azioni">
+        <button class="meta-btn ghost" data-act="back">↩ Squadra</button>
+        <button class="meta-btn primary" data-act="go" ${puoScendere ? "" : "disabled"}>${puoScendere ? "▶ Manda in campo" : perche}</button>
+      </div>`);
+    loadFighterSprite(p, "front").then(spr => {
+      const el = document.getElementById("msSprite"); if (!el || !spr) return;
+      const k = Math.min(1.7, 104 / spr.frame.h, 104 / spr.frame.w);
+      el.style.width = spr.frame.w * k + "px"; el.style.height = spr.frame.h * k + "px";
+      el.style.background = `url("${spr.sheet}") -${spr.frame.x * k}px -${spr.frame.y * k}px / ${spr.sheet_w * k}px ${spr.sheet_h * k}px no-repeat`;
+      el.style.imageRendering = "pixelated";
+    });
+    metaEl().querySelector('[data-act="back"]').onclick = () => renderParty(mode);
+    const go = metaEl().querySelector('[data-act="go"]');
+    if (puoScendere) go.onclick = () => {
+      hideMeta();
+      if (mode === "force") forceSwitchTo(i); else playerSwitch(i);
+    };
+  }
+
   function renderCaptureScreen() {
     const BALL_IMG = { balls: "pb", greatballs: "gb", ultraballs: "ub", rogueballs: "rb", theftballs: "tb", masterballs: "mb" };
     const owned = BALL_TYPES.filter(b => (game[b.key] || 0) > 0);

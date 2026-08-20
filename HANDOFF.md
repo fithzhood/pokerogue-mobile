@@ -2751,3 +2751,72 @@ Dopo: mosse **520→619**, nota delle uova **636→667**, barra dei tasti a **73
 Tutto ciò che si tocca è sopra la piega; sotto scorrono solo le statistiche.
 
 ---
+
+## 35. Pannello squadra a griglia e scheda personale del Pokémon (2026-08-20)
+
+Richiesta: «l'obiettivo sarebbe avere tutti e sei i Pokémon della squadra in una
+sola schermata senza scroll, in tre righe da due». E poi, mentre lavoravo:
+«bisogna pensare a quali elementi tenere e quali mettere nella scheda personale
+del Pokémon. A proposito, devo avere la possibilità di vedere la scheda da qui:
+invece appena clicco un Pokémon viene mandato subito in gioco».
+
+Le due cose si risolvono insieme, ed è il punto: **la griglia non ci sta perché la
+scheda lunga contiene roba che non serve a scegliere**. Aprire una scheda vera dà
+alla griglia il permesso di dimenticare.
+
+### La spartizione
+
+| nella GRIGLIA (6 caselle da ~170×100) | nella SCHEDA personale |
+|---|---|
+| mini icona (identità e colore) | sprite grande |
+| nome troncato, sesso, stellina cromatica | nome intero con la forma |
+| livello | livello + barra esperienza + quanto manca |
+| i due tipi | i due tipi |
+| stato (SCT/PAR/DOR/VEL/CON) | stato |
+| barra PS + numeri | barra PS + numeri |
+| **quattro pallini del colore del tipo** delle mosse | mosse con nome, tipo e PP |
+| «in campo» / «KO» | abilità, passiva, natura |
+| | oggetti tenuti (elenco intero) |
+| | statistiche vere con gli IV |
+| | punti di fortuna che porta alla squadra |
+
+🔴 **I quattro pallini sono la mossa che rende possibile la griglia.** Per decidere
+chi mandare in campo servono due cose sulle mosse: che **copertura di tipi** hai, e
+**quante sono ancora cariche**. Non i nomi, non i PP esatti. Quattro pallini colorati
+(vuoti se i PP sono finiti) lo dicono in 40 px invece che in due righe di testo. Il
+nome sta nel `title`. È la regola «ricomponi, non ritagliare» della skill
+`interfacce-dense-mobile`: la rappresentazione piccola non è la grande rimpicciolita.
+
+### Il tocco apre la scheda, non manda in campo
+
+⚠️ Prima il primo tocco schierava il Pokémon: una scelta importante presa senza
+poter leggere niente. Ora il tocco serve a **guardare**, e a mandare in campo pensa
+un tasto dedicato dentro la scheda. Vale anche nel cambio **forzato**: è proprio lì
+che vuoi vedere chi stai mandando allo sbaraglio.
+
+⚠️ Conseguenza non ovvia: le caselle non schierabili (esausto, già in campo) **non
+sono più `disabled`**. Un `disabled` non riceve il tocco, e il tocco adesso serve a
+guardare — che si deve poter fare sempre. Lo dice la scheda, col tasto spento e il
+motivo scritto sopra («è esausto», «è già in campo»). È la trappola già annotata
+nella skill: *«un bottone disabled non riceve il tocco, quindi tutto il feedback che
+hai costruito non scatterà mai»*.
+
+### Cosa è stato tolto dalla casella, e perché
+
+Oggetti tenuti (🎒) e punti fortuna (🍀) c'erano, e sono stati **tolti**: con due
+tipi, uno stato e il tag «in campo» la seconda riga andava a capo e si mangiava una
+riga su tre. Ora la riga 2 è tipi + stato, la riga 3 è PS + pallini + tag, e nessuna
+va a capo (`white-space: nowrap` sui tag). Entrambi vivono nella scheda.
+
+### La sonda che serviva
+
+`__items.squadraProva(n)` riempie la squadra col **caso peggiore**: sei membri, nomi
+lunghi, stati diversi, oggetti tenuti, PS bassi, uno esausto, uno cromatico epico.
+Con un Pokémon solo in squadra questa schermata sta comoda sempre e non dice niente:
+misurarla così è come non misurarla.
+
+⚠️ La griglia vale **solo** in questa schermata (`.pd-list.griglia2`). La stessa
+`.pd-card` la usano anche «dove lo metto in squadra» e «a chi do l'oggetto», dove la
+domanda è un'altra e la scheda lunga va bene.
+
+---
