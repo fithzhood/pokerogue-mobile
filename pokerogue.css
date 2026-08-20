@@ -1037,6 +1037,18 @@ button.pd-card:not(:disabled):active { background: rgba(255,255,255,.14); }
   font-size: clamp(9px, 2.4vw, 11px);
 }
 .pd-card.compatta .pc-r2 .status-badge { margin-left: auto; }
+/* quanti oggetti tiene, mostrato al posto del tag nello spostamento */
+.pc-conta { margin-left: auto; white-space: nowrap; font-size: clamp(9px, 2.4vw, 11px); }
+.pc-conta.vuoto { opacity: .5; }
+
+/* ---- scelta dell oggetto da spostare (§36) ---- */
+.og-lista { display: flex; flex-wrap: wrap; gap: 7px; justify-content: center; margin: 1.5vh 0; }
+.og-chip { display: inline-flex; align-items: center; gap: 6px; padding: 9px 12px; }
+.og-ic {
+  width: 22px; height: 22px; flex: 0 0 auto;
+  background-size: contain; background-repeat: no-repeat; background-position: center;
+  image-rendering: pixelated;
+}
 .pd-card.compatta .ticon { transform: scale(.82); transform-origin: left center; }
 /* Chi non si può schierare resta TOCCABILE (la scheda si guarda comunque), ma
    si vede che non è una scelta valida. Niente `disabled`: quello toglie anche

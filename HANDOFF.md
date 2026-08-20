@@ -2820,3 +2820,91 @@ misurarla così è come non misurarla.
 domanda è un'altra e la scheda lunga va bene.
 
 ---
+
+## 36. Il negozio porta al pannello vero, e si spostano gli oggetti (2026-08-21)
+
+Segnalazione: «nel negozio il pulsante squadra dovrebbe portare alla schermata che
+abbiamo appena sistemato, solo senza possibilità di schierare Pokémon, e non a
+questa qui. Qui inoltre è dove si dovrebbe poter spostare oggetti da un Pokémon
+all'altro». Più la richiesta di controllare **nell'originale** come funzionano dare
+uno strumento, insegnare una MT e usare uno strumento su un Pokémon.
+
+### Come funziona davvero nell'originale
+
+Nell'originale **c'è un solo pannello squadra** (`party-ui-handler.ts`) con
+**quattordici modi** (`PartyUiMode`). Non sono schermate diverse: è la stessa, che
+cambia le opzioni che offre quando scegli un Pokémon.
+
+| modo | a cosa serve | opzione che aggiunge |
+|---|---|---|
+| `CHECK` (11) | guardare la squadra | nessuna: solo Riepilogo, Pokédex, Rinomina |
+| `MODIFIER` (4) | **usare uno strumento** su un Pokémon | `APPLY` |
+| `MOVE_MODIFIER` (5) | Etere, PP-su: strumento su una MOSSA | `MOVE_1…MOVE_4` |
+| `TM_MODIFIER` (6) | **insegnare una MT** | `TEACH` |
+| `MODIFIER_TRANSFER` (8) | **spostare oggetti fra Pokémon** | l'elenco degli oggetti trasferibili, più «tutti» |
+| `SWITCH` / `FAINT_SWITCH` | mandare in campo | `SEND_OUT`, `PASS_BATON` |
+
+**Dare uno strumento** non esiste come azione a sé: gli oggetti tenuti si
+attaccano quando **scegli un premio** e ti viene chiesto a chi darlo — è il modo
+`MODIFIER`. I bersagli non validi restano visibili ma grigi, con scritto il
+perché (`NoEffectMessage`, `tooManyItems`).
+
+**Insegnare una MT**: la MT è un premio; sceglierla apre il pannello in
+`TM_MODIFIER`, scegli il Pokémon, opzione `TEACH`, e se ha già quattro mosse parte
+la schermata «quale dimentica».
+
+**Spostare oggetti** è un giro di tre passi:
+1. da chi → 2. quale oggetto (e **quanti**, con destra/sinistra) → 3. a chi.
+Nel negozio ha **un pulsante suo** nella riga in basso, accanto a «Rimescola»,
+«Squadra» e «Blocca rarità» (`select-modifier-phase.ts:104`, `openModifierTransferScreen`).
+
+### Cosa abbiamo fatto
+
+- 🔴 il tasto «👥 Squadra» del negozio ora apre **il pannello vero** in modo
+  `check`, non più l'elenco di sola lettura `showPartyOverlay`
+- in `check` la scheda personale **non ha il tasto «Manda in campo»**: non c'è una
+  lotta in corso in cui mandare qualcuno. Il tasto non c'è proprio, invece di
+  esserci spento
+- lo **spostamento oggetti** è un pulsante dentro il pannello squadra, non nella
+  riga del negozio: su un telefono quella riga non regge un quarto tasto, e il
+  posto dove uno va a guardare gli oggetti è comunque la squadra. Stessi tre passi
+  dell'originale, con «uno solo / tutti e N» al posto del contatore destra-sinistra
+- gli oggetti stanno da noi in **tre posti diversi** (`held`, il sotto-oggetto
+  `held.typeboost`, e `berries`): `heldElenco(p)` li unisce in un elenco solo, e
+  `spostaOggetto` sa travasare tutte e tre le famiglie
+- ⚠️ dopo un travaso si chiama `recomputeStats` su **entrambi**: Sferapalla,
+  Ossoduro ed Evolcondensa cambiano le statistiche, e senza ricalcolo restano
+  quelle di prima finché non succede altro
+
+### ⚠️ Una differenza col'originale, lasciata apposta
+
+Là ogni oggetto ha un **tetto di pile per Pokémon** (`getMaxHeldItemCount`: gli
+Avanzi 4, la Bandana 5…) e il trasferimento viene **rifiutato** se il destinatario
+è già al massimo (`FilterItemMaxStacks`). **Noi il tetto non ce l'abbiamo da
+nessuna parte** — nemmeno sui premi, dove si accumulano senza limite. Metterlo solo
+sullo spostamento sarebbe incoerente: è un cambio di bilanciamento da decidere a
+parte, non una svista da correggere di nascosto.
+
+### Sonde nuove
+
+| comando | cosa fa |
+|---|---|
+| `__items.negozio()` | apre il negozio di fine ondata senza vincere una lotta |
+| `__items.squadraProva(n)` | riempie la squadra col caso peggiore (§35) |
+
+⚠️ `negozio()` è nata da un fallimento di metodo: per collaudare questa schermata
+provavo ad arrivarci **giocando**, e con una squadra costruita a mano finiva ogni
+volta in un game over prima del negozio. Tre giri buttati. Se una schermata non è
+raggiungibile a comando, non è collaudabile.
+
+### Verificato (browser 384×832)
+
+- il tasto del negozio apre «La tua Squadra» con la griglia 3×2, la fascia della
+  fortuna e i due tasti — nessuno scorrimento
+- la scheda aperta da lì ha **solo** «↩ Squadra» (`[data-act="go"]` assente), e sta
+  in `832 in 832`
+- travaso reale: Wigglytuff (Avanzi×1, Conchiglia×1) → Fletchling. Dopo:
+  Wigglytuff **Conchiglia×1**, Fletchling **Avanzi×2 Conchiglia×1**
+- le caselle di chi non ha niente da dare sono spente, con «—» al posto del conto
+
+---

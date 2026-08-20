@@ -1335,6 +1335,11 @@
         natura: { quale: e.nature, bit: 1 << NATURE_KEYS.indexOf(e.nature), maschera: (meta.nature || {})[root] || 0 },
         forma: e.variant || "«base»", cromatico: !!e.shiny };
     },
+    /* Apre il NEGOZIO di fine ondata senza dover vincere una lotta. Serve a
+       collaudare la schermata dei premi e il pannello squadra che ci si apre
+       da dentro: arrivarci giocando costa una lotta intera, e con una squadra
+       di prova costruita a mano finisce spesso in un game over. */
+    negozio: () => { if (!game.player) return "serve una run in corso"; hideMeta(); openShop(); return "negozio aperto"; },
     /* Squadra di prova nel CASO PEGGIORE: sei membri, nomi lunghi, stati,
        oggetti tenuti, PS bassi, uno esausto e uno cromatico. Serve a misurare
        il pannello squadra: con un solo Pokémon in squadra la schermata sta
@@ -6461,51 +6466,223 @@
      erano minuscole: per un menu che si apre a ogni cambio, e in cui bisogna
      confrontare PS, stato e mosse, era troppo poco. Ora e' una carta per
      Pokemon con tipi, abilita', oggetti tenuti e mosse coi PP. */
+  /* ======================================================================
+     SPOSTARE OGGETTI FRA POKÉMON (§36)
+
+     Nell'originale è un modo del pannello squadra (`PartyUiMode.MODIFIER_TRANSFER`)
+     e ha un pulsante suo nella riga in basso del negozio, accanto a
+     «Rimescola», «Squadra» e «Blocca rarità». Il giro è di tre passi:
+       1. scegli DA CHI  → 2. scegli QUALE oggetto (e quanti) → 3. scegli A CHI
+     Da noi il pulsante sta dentro il pannello squadra invece che nel negozio:
+     su un telefono la riga in basso del negozio non regge un quarto tasto, e il
+     posto dove uno va a guardare gli oggetti è comunque la squadra.
+
+     ⚠️ Differenza con l'originale che vale la pena sapere: là ogni oggetto ha un
+     TETTO di pile per Pokémon (`getMaxHeldItemCount`) e il trasferimento viene
+     rifiutato se il destinatario è già al massimo. Noi il tetto non ce l'abbiamo
+     da nessuna parte — nemmeno sui premi — quindi metterlo solo qui sarebbe
+     incoerente. È una scelta di bilanciamento da fare a parte.
+     ====================================================================== */
+  let ritornoSquadra = null;            // dove si torna uscendo dal pannello
+  let trasf = null;                     // { da, voce, quanti } durante lo spostamento
+
+  /* Gli oggetti tenuti di un Pokémon, in forma maneggiabile: chiave, nome,
+     icona e quantità. Unisce i tre posti in cui li teniamo (`held`, il
+     sotto-oggetto `typeboost`, e `berries`). */
+  function heldElenco(p) {
+    const out = [];
+    for (const k in (p.held || {})) {
+      if (k === "typeboost") {
+        for (const t in p.held.typeboost) {
+          out.push({ tipo: "typeboost", chiave: t, n: p.held.typeboost[t],
+                     nome: `Boost ${T[t].it}`, icon: TYPEBOOST_ICON[t] || "silk_scarf" });
+        }
+        continue;
+      }
+      const b = SPECIE_BOOST[k];
+      out.push({ tipo: "held", chiave: k, n: p.held[k],
+                 nome: nomeHeld(k), icon: b ? b.icon : (HELD_ICON[k] || "leftovers") });
+    }
+    for (const k in (p.berries || {})) {
+      out.push({ tipo: "berry", chiave: k, n: p.berries[k],
+                 nome: BERRY_DATA[k].it, icon: BERRY_DATA[k].icon });
+    }
+    return out;
+  }
+  const haOggetti = p => heldElenco(p).length > 0;
+  const puoSpostare = () => game.party.length > 1 && game.party.some(haOggetti);
+
+  /* Toglie `quanti` pezzi a `da` e li dà a `a`. Le tre famiglie di oggetti
+     stanno in posti diversi, quindi il travaso va scritto per ognuna. */
+  function spostaOggetto(da, a, voce, quanti) {
+    const n = Math.min(quanti, voce.n);
+    if (voce.tipo === "berry") {
+      da.berries[voce.chiave] -= n;
+      if (da.berries[voce.chiave] <= 0) delete da.berries[voce.chiave];
+      a.berries = a.berries || {};
+      a.berries[voce.chiave] = (a.berries[voce.chiave] || 0) + n;
+    } else if (voce.tipo === "typeboost") {
+      da.held.typeboost[voce.chiave] -= n;
+      if (da.held.typeboost[voce.chiave] <= 0) delete da.held.typeboost[voce.chiave];
+      if (!Object.keys(da.held.typeboost).length) delete da.held.typeboost;
+      a.held.typeboost = a.held.typeboost || {};
+      a.held.typeboost[voce.chiave] = (a.held.typeboost[voce.chiave] || 0) + n;
+    } else {
+      da.held[voce.chiave] -= n;
+      if (da.held[voce.chiave] <= 0) delete da.held[voce.chiave];
+      a.held[voce.chiave] = (a.held[voce.chiave] || 0) + n;
+    }
+    /* ⚠️ Gli oggetti legati alla specie (Sferapalla, Ossoduro…) e l'Evolcondensa
+       cambiano le STATISTICHE: dopo un travaso vanno ricalcolate su entrambi, o
+       restano quelle di prima finché non succede altro. */
+    recomputeStats(da); recomputeStats(a);
+    salvaRun();
+    return n;
+  }
+
+  /* Le tre schermate dello spostamento. `passo` null = scegli da chi. */
+  function renderSposta(passo) {
+    if (!passo) trasf = null;
+    const da = trasf && game.party[trasf.da];
+
+    if (!trasf) {                                  // 1. DA CHI
+      const cards = game.party.map((p, i) =>
+        cardCompatta(p, i, haOggetti(p) ? "vivo" : "spento",
+          haOggetti(p) ? `<span class="pc-conta">🎒${heldElenco(p).reduce((x, o) => x + o.n, 0)}</span>` : `<span class="pc-conta vuoto">—</span>`)).join("");
+      showMetaScreen(`
+        <div class="meta-title" style="font-size:clamp(19px,5.6vw,30px)">Sposta oggetti</div>
+        <div class="meta-sub">da chi li prendi?</div>
+        <div class="pd-list griglia2">${cards}</div>
+        <div class="meta-actions"><button class="meta-btn ghost" data-act="back">↩ Squadra</button></div>`);
+      metaEl().querySelectorAll(".pd-card[data-i]").forEach(b => b.onclick = () => {
+        const i = parseInt(b.dataset.i, 10);
+        if (!haOggetti(game.party[i])) { return; }
+        trasf = { da: i, voce: null, quanti: 1 };
+        renderSposta("oggetto");
+      });
+      metaEl().querySelector('[data-act="back"]').onclick = () => renderParty("check");
+      return;
+    }
+
+    if (passo === "oggetto") {                     // 2. QUALE, e quanti
+      const voci = heldElenco(da);
+      const chips = voci.map((o, j) =>
+        `<button class="chip og-chip" data-o="${j}">
+           <span class="og-ic" style="background-image:url('${itemIcon(o.icon)}')"></span>${o.nome}${o.n > 1 ? ` ×${o.n}` : ""}</button>`).join("");
+      showMetaScreen(`
+        <div class="meta-title" style="font-size:clamp(19px,5.6vw,30px)">${da.name.replace("✨", "")}</div>
+        <div class="meta-sub">quale oggetto sposti?</div>
+        <div class="og-lista">${chips}</div>
+        <div class="meta-actions"><button class="meta-btn ghost" data-act="back">↩ Indietro</button></div>`);
+      metaEl().querySelectorAll("[data-o]").forEach(b => b.onclick = () => {
+        trasf.voce = voci[parseInt(b.dataset.o, 10)];
+        trasf.quanti = 1;
+        renderSposta(trasf.voce.n > 1 ? "quanti" : "a");
+      });
+      metaEl().querySelector('[data-act="back"]').onclick = () => renderSposta(null);
+      return;
+    }
+
+    if (passo === "quanti") {                      // 2b. uno o tutti
+      const o = trasf.voce;
+      showMetaScreen(`
+        <div class="meta-title" style="font-size:clamp(19px,5.6vw,30px)">${o.nome}</div>
+        <div class="meta-sub">${da.name.replace("✨", "")} ne ha ${o.n}: quanti ne sposti?</div>
+        <div class="og-lista">
+          <button class="chip og-chip" data-q="1">uno solo</button>
+          <button class="chip og-chip" data-q="${o.n}">tutti e ${o.n}</button>
+        </div>
+        <div class="meta-actions"><button class="meta-btn ghost" data-act="back">↩ Indietro</button></div>`);
+      metaEl().querySelectorAll("[data-q]").forEach(b => b.onclick = () => {
+        trasf.quanti = parseInt(b.dataset.q, 10);
+        renderSposta("a");
+      });
+      metaEl().querySelector('[data-act="back"]').onclick = () => renderSposta("oggetto");
+      return;
+    }
+
+    // 3. A CHI
+    const cards = game.party.map((p, i) =>
+      cardCompatta(p, i, i === trasf.da ? "spento" : "vivo",
+        i === trasf.da ? `<span class="pc-conta vuoto">da qui</span>` : "")).join("");
+    showMetaScreen(`
+      <div class="meta-title" style="font-size:clamp(19px,5.6vw,30px)">${trasf.voce.nome}${trasf.quanti > 1 ? ` ×${trasf.quanti}` : ""}</div>
+      <div class="meta-sub">a chi lo dai?</div>
+      <div class="pd-list griglia2">${cards}</div>
+      <div class="meta-actions"><button class="meta-btn ghost" data-act="back">↩ Indietro</button></div>`);
+    metaEl().querySelectorAll(".pd-card[data-i]").forEach(b => b.onclick = () => {
+      const i = parseInt(b.dataset.i, 10);
+      if (i === trasf.da) return;
+      const a = game.party[i];
+      const n = spostaOggetto(da, a, trasf.voce, trasf.quanti);
+      const nome = trasf.voce.nome;
+      trasf = null;
+      showMetaScreen(`
+        <div class="meta-title" style="font-size:clamp(19px,5.6vw,30px)">Fatto</div>
+        <div class="meta-sub">${nome}${n > 1 ? ` ×${n}` : ""}: da ${da.name.replace("✨", "")} a ${a.name.replace("✨", "")}</div>
+        <div class="meta-actions two-col">
+          <button class="meta-btn ghost" data-act="squadra">↩ Squadra</button>
+          <button class="meta-btn gacha" data-act="ancora">🎒 Sposta ancora</button></div>`);
+      metaEl().querySelector('[data-act="squadra"]').onclick = () => renderParty("check");
+      metaEl().querySelector('[data-act="ancora"]').onclick = () => renderSposta(null);
+    });
+    metaEl().querySelector('[data-act="back"]').onclick = () => renderSposta(trasf.voce.n > 1 ? "quanti" : "oggetto");
+  }
+
+  function tornaAlNegozio() { const f = ritornoSquadra; ritornoSquadra = null; if (f) f(); }
+
+  /* Una casella della griglia squadra. `stato` dice come deve comportarsi:
+       "vivo"     → si può scegliere
+       "spento"   → si vede ma non è una scelta valida (esausto, già in campo,
+                    o — nello spostamento — non ha niente da dare)
+     ⚠️ Non si usa mai `disabled`: un bottone disabilitato non riceve il tocco,
+     e il tocco serve comunque per aprire la scheda o per dire perché no. */
+  function cardCompatta(p, i, stato, tagExtra) {
+    const ratio = Math.max(0, p.hp / p.maxHp);
+    const col = ratio > 0.5 ? "var(--hp-green)" : ratio > 0.2 ? "var(--hp-yellow)" : "var(--hp-red)";
+    const inCampo = p === game.player || (game.double && p === game.player2);
+    const st = p.status ? `<span class="status-badge st-${p.status}">${STATUS_IT[p.status]}</span>` : "";
+    const types = p.types.map(t => `<span class="ticon t-${t}"></span>`).join("");
+    const tag = tagExtra != null ? tagExtra
+      : inCampo ? '<span class="party-active">in campo</span>'
+      : p.fainted ? '<span class="party-ko">KO</span>' : "";
+    const pips = p.moves.map(m => {
+      const mv = M[m.id];
+      return `<i class="pc-pip${m.pp === 0 ? " vuota" : ""}" style="background:${T[mv.type].color}" title="${mv.it} ${m.pp}/${m.maxPp}"></i>`;
+    }).join("");
+    const nome = p.name.replace("✨", "").replace(/\s*\(.*\)\s*$/, "");
+    return `<button class="pd-card compatta ${p.fainted ? "ko" : ""} ${inCampo ? "attiva" : ""} ${stato === "spento" ? "nonschierabile" : ""}" data-i="${i}" title="${p.name} · ${p.ability ? p.ability.it : ""}">
+        <div class="pc-r1">${miniIcon(p.dex, 1.25)}<span class="pc-nome">${p.shiny ? cromStella(p.shinyVar) : ""}${nome}<span class="gen g-${p.gender}">${genderSymbol(p)}</span></span><span class="pc-lv">${p.level}</span></div>
+        <div class="pc-r2">${types}${st}</div>
+        <div class="party-hp-track"><div class="party-hp-fill" style="width:${ratio * 100}%;background:${col};"></div></div>
+        <div class="pc-r3"><span class="pc-ps">${Math.max(0, p.hp)}/${p.maxHp}</span><span class="pc-pips">${pips}</span>${tag}</div>
+      </button>`;
+  }
+
   function renderParty(mode) {
     const cards = game.party.map((p, i) => {
-      const ratio = Math.max(0, p.hp / p.maxHp);
-      const col = ratio > 0.5 ? "var(--hp-green)" : ratio > 0.2 ? "var(--hp-yellow)" : "var(--hp-red)";
       /* ⚠️ In doppio sono in campo DUE Pokemon: nessuno dei due può essere
          scelto come sostituto (prima si poteva toccare il secondo alleato e
          non succedeva nulla). */
       const inCampo = p === game.player || (game.double && p === game.player2);
       const selectable = !p.fainted && !inCampo;
-      const tag = inCampo ? '<span class="party-active">in campo</span>'
-        : p.fainted ? '<span class="party-ko">KO</span>' : "";
-      const st = p.status ? `<span class="status-badge st-${p.status}">${STATUS_IT[p.status]}</span>` : "";
-      const types = p.types.map(t => `<span class="ticon t-${t}"></span>`).join("");
-      /* ⚠️ Oggetti tenuti e punti fortuna NON stanno più nella casella. Con due
-         tipi, uno stato e il tag «in campo» la riga andava a capo e mangiava
-         una riga intera su tre. Vanno nella scheda personale, che è il posto
-         dove uno se li va a leggere davvero. */
-      /* MOSSE ridotte a quattro pallini del colore del TIPO (§35). Non è un
-         taglio per far spazio: in questa schermata si decide CHI mandare in
-         campo, e per quello serve sapere che copertura hai e quante mosse sono
-         ancora cariche — non i nomi e non i PP esatti. Quattro pallini lo
-         dicono in 40 px invece che in due righe di testo. Il nome resta nel
-         `title`, per chi ci tiene a saperlo. */
-      const pips = p.moves.map(m => {
-        const mv = M[m.id];
-        return `<i class="pc-pip${m.pp === 0 ? " vuota" : ""}" style="background:${T[mv.type].color}" title="${mv.it} ${m.pp}/${m.maxPp}"></i>`;
-      }).join("");
-      const nome = p.name.replace("✨", "").replace(/\s*\(.*\)\s*$/, "");
-      /* ⚠️ `disabled` NON si mette più: un esausto o chi è già in campo non si
-         può schierare, ma la sua scheda si deve poter aprire lo stesso — anzi,
-         è proprio quello che si vuole guardare. Il fatto che non sia
-         schierabile lo dice la scheda, col tasto spento e il motivo scritto. */
-      return `<button class="pd-card compatta ${p.fainted ? "ko" : ""} ${inCampo ? "attiva" : ""} ${selectable ? "" : "nonschierabile"}" data-i="${i}" title="${p.name} · ${p.ability ? p.ability.it : ""}">
-          <div class="pc-r1">${miniIcon(p.dex, 1.25)}<span class="pc-nome">${p.shiny ? cromStella(p.shinyVar) : ""}${nome}<span class="gen g-${p.gender}">${genderSymbol(p)}</span></span><span class="pc-lv">${p.level}</span></div>
-          <div class="pc-r2">${types}${st}</div>
-          <div class="party-hp-track"><div class="party-hp-fill" style="width:${ratio * 100}%;background:${col};"></div></div>
-          <div class="pc-r3"><span class="pc-ps">${Math.max(0, p.hp)}/${p.maxHp}</span><span class="pc-pips">${pips}</span>${tag}</div>
-        </button>`;
+      /* MOSSE ridotte a quattro pallini del colore del TIPO (§35): serve la
+         copertura e quante sono cariche, non i nomi né i PP esatti. */
+      return cardCompatta(p, i, selectable || mode === "check" ? "vivo" : "spento");
     }).join("");
     const boxLine = game.box.length ? `<div class="meta-sub">Box: ${game.box.length} Pokémon in deposito</div>` : "";
-    // nel cambio FORZATO non si torna indietro: qualcuno deve scendere in campo
-    const backRow = mode === "switch"
-      ? `<div class="meta-actions"><button class="meta-btn ghost" data-act="back">↩ Indietro</button></div>` : "";
-    const title = mode === "force" ? "Chi mandi in campo?" : "Cambia Pokémon";
-    const sub = mode === "force" ? "il tuo Pokémon è esausto" : "tocca chi deve scendere in campo";
+    /* Nel cambio FORZATO non si torna indietro: qualcuno deve scendere in campo.
+       In «check» (dal negozio) si torna al negozio, e c'è lo spostamento oggetti. */
+    const backRow = mode === "force" ? ""
+      : mode === "check"
+        ? `<div class="meta-actions ${puoSpostare() ? "two-col" : ""}">
+             ${puoSpostare() ? `<button class="meta-btn gacha" data-act="sposta">🎒 Sposta oggetti</button>` : ""}
+             <button class="meta-btn ghost" data-act="back">↩ Indietro</button></div>`
+        : `<div class="meta-actions"><button class="meta-btn ghost" data-act="back">↩ Indietro</button></div>`;
+    const title = mode === "force" ? "Chi mandi in campo?" : mode === "check" ? "La tua Squadra" : "Cambia Pokémon";
+    const sub = mode === "force" ? "il tuo Pokémon è esausto"
+      : mode === "check" ? "tocca un Pokémon per vedere la sua scheda"
+      : "tocca chi deve scendere in campo";
     showMetaScreen(`
       <div class="meta-title" style="font-size:clamp(19px,5.6vw,30px)">${title}</div>
       <div class="meta-sub">${sub}</div>
@@ -6521,6 +6698,11 @@
       showMonScheda(parseInt(b.dataset.i, 10), mode);
     });
     if (mode === "switch") metaEl().querySelector('[data-act="back"]').onclick = () => { hideMeta(); showMainMenu(); };
+    if (mode === "check") {
+      metaEl().querySelector('[data-act="back"]').onclick = () => tornaAlNegozio();
+      const sp = metaEl().querySelector('[data-act="sposta"]');
+      if (sp) sp.onclick = () => renderSposta(null);
+    }
   }
 
   // Offerta di cattura dopo aver sconfitto un selvatico: scegli quale ball usare.
@@ -6576,9 +6758,9 @@
       <div class="ms-mosse">${moves}</div>
       <div class="meta-sub">Statistiche</div>
       <div class="ms-stats">${stats}</div>
-      <div class="meta-actions two-col sd-azioni">
+      <div class="meta-actions ${mode === "check" ? "" : "two-col"} sd-azioni">
         <button class="meta-btn ghost" data-act="back">↩ Squadra</button>
-        <button class="meta-btn primary" data-act="go" ${puoScendere ? "" : "disabled"}>${puoScendere ? "▶ Manda in campo" : perche}</button>
+        ${mode === "check" ? "" : `<button class="meta-btn primary" data-act="go" ${puoScendere ? "" : "disabled"}>${puoScendere ? "▶ Manda in campo" : perche}</button>`}
       </div>`);
     loadFighterSprite(p, "front").then(spr => {
       const el = document.getElementById("msSprite"); if (!el || !spr) return;
@@ -6589,7 +6771,9 @@
     });
     metaEl().querySelector('[data-act="back"]').onclick = () => renderParty(mode);
     const go = metaEl().querySelector('[data-act="go"]');
-    if (puoScendere) go.onclick = () => {
+    /* ⚠️ Dal negozio non si schiera: non c'è una lotta in corso in cui mandare
+       qualcuno. Il tasto non c'è proprio, invece di esserci spento. */
+    if (puoScendere && go) go.onclick = () => {
       hideMeta();
       if (mode === "force") forceSwitchTo(i); else playerSwitch(i);
     };
@@ -9735,7 +9919,13 @@
         </div>
         ${shopBlock}
       </div>`);
-    metaEl().querySelector('[data-act="team"]').onclick = () => showPartyOverlay(() => showReward(picks));
+    /* 🔴 Il tasto «Squadra» del negozio porta al pannello vero (§35), non più a
+       un elenco di sola lettura. In modo «check»: si guardano le schede e si
+       spostano gli oggetti, ma non si schiera nessuno — non c'è una lotta. */
+    metaEl().querySelector('[data-act="team"]').onclick = () => {
+      ritornoSquadra = () => showReward(picks);
+      renderParty("check");
+    };
     if (canEvolve) metaEl().querySelector('[data-act="evolve"]').onclick = () => showEvolvePicker(() => showReward(picks));
     metaEl().querySelectorAll(".shop-card[data-i]").forEach(b => b.onclick = () => {
       const pk = picks[parseInt(b.dataset.i, 10)];
