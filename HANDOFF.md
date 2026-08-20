@@ -2571,3 +2571,37 @@ La percentuale mostrata è quella vera del passo di promozione, `4/floor(512/(f+
 non un'etichetta decorativa.
 
 ---
+
+### APK rifatto (2026-08-20) — assetsRev 4
+
+`C:\Users\lfili\CapacitorApps\pokerogue-mobile`. Il giro, per intero:
+
+```powershell
+robocopy <app> <proj>\www /E /XF "ZZ.zip" "*.md" "pokerogue.jpeg" /XD "icone" "prova-remoto" ".git" "tools" ".claude" /MT:16
+npx --no-install cap sync android
+.\gradlew.bat assembleDebug --no-daemon --warning-mode=none
+```
+
+⚠️ `robocopy` **senza `/PURGE`**: `www\index.html` è il trampolino di due righe verso
+`pokerogue.html`, non esiste nella cartella dell'app e con `/PURGE` verrebbe
+cancellato ad ogni sincronizzazione. Robocopy torna codice **3** (file copiati +
+«supplementari» in destinazione): non è un errore.
+
+APK: **56,6 MB** (era 54,5), copiato in `G:\Il mio Drive\PokeRogue-debug.apk`.
+Installato con `adb install -r`, che **conserva i dati**: dex ricontrollato subito
+dopo, 54 specie ancora al loro posto.
+
+Verificato sul telefono dopo l'installazione:
+
+- `__ota.stato()` → `revApk: 64`, `inUso: "APK (rev 64)"`, strato di rete azzerato
+  (`pronta: null`, `file: 0`). È giusto così: l'APK adesso *è* la rev 64, non c'è
+  più niente da scaricare finché non si pubblica altro.
+- livree da **file dedicato** ora disegnate: Charizard rara ed epica `disegnata: true`
+  (prima dell'APK erano `false` e ripiegavano sulla comune)
+- livree da **ricolore** invariate: Gyarados epica 20.538 pixel, Pikachu epica 41.886
+- guardate a schermo le quattro versioni di Charizard (normale / comune / rara /
+  epica): tutte e quattro giuste
+- maschera CSS delle stelline: funziona nella WebView di Android (`CSS.supports` vero,
+  e le tre tinte si distinguono a occhio)
+
+---
