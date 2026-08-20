@@ -166,6 +166,13 @@ html, body {
 /* A PIENO SCHERMO (richiesta del proprietario): `fixed` sull'intera finestra,
    non piu' dentro `#scene`. Sta sopra anche gli overlay meta (z-index 20),
    perche' un'evoluzione puo' scattare subito dopo una schermata di premi. */
+/* Riga «tocca per continuare»: la usano sia l evoluzione (§37) sia la
+   schiusa. Sta DENTRO l overlay, che copre tutto lo schermo. */
+.evo-prompt {
+  margin-top: 4px; font-size: clamp(12px, 3.2vw, 15px); opacity: .75;
+  display: flex; align-items: center; gap: 6px;
+}
+.evo-prompt[hidden] { display: none; }
 #evo-overlay {
   position: fixed; inset: 0; z-index: 40;
   /* ⚠️ OPACO, non velato: con un fondo semitrasparente i riquadri PS e

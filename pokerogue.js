@@ -1216,6 +1216,18 @@
         maschera: mask,
       };
     },
+    /* Fa schiudere un uovo ADESSO, con la sua animazione: è l unico modo di
+       collaudare quella schermata senza aspettare dieci ondate. */
+    schiusa: (k, tier) => {
+      if (!game.player) return "serve una run in corso";
+      const sp = k && S[k] ? k : SPECIES_KEYS[Math.floor(Math.random() * SPECIES_KEYS.length)];
+      game.pendingHatches = game.pendingHatches || [];
+      game.pendingHatches.push({ sp, shiny: false, shinyVar: 0, tipo: "MOVE", tier: tier || "COMMON",
+                                 extra: [`Prova di schiusa: ${S[sp].it}.`] });
+      hideMeta();
+      processHatches(() => { game.phase = "CHOICE"; showMainMenu(); });
+      return "schiusa avviata: " + S[sp].it;
+    },
     schiudi: (k, tier) => { const r = unlockEggMove(k, tier || "COMMON"); saveMeta(); return r || "niente di nuovo"; },
     tiriUovo: (n, tier) => {
       const c = [0, 0, 0, 0];
@@ -3231,6 +3243,7 @@
     ov.id = "evo-overlay";
     ov.innerHTML = `<div class="evo-sprite" id="evoSprite"></div>
                     <div class="evo-testo">${vecchio} si sta evolvendo…</div>
+                    <div class="evo-prompt">tocca per continuare <span class="cont pronto">▸</span></div>
                     <button class="btn back evo-stop">✖ Interrompi</button>`;
     radice.appendChild(ov);
     const el = ov.querySelector("#evoSprite");
@@ -3253,7 +3266,10 @@
     const pulisci = () => { clearTimeout(tmr); ov.remove(); };
 
     game.phase = "MESSAGE";
-    ov.querySelector(".evo-stop").onclick = () => {
+    ov.querySelector(".evo-stop").onclick = (ev) => {
+      /* ⚠️ senza `stopPropagation` il clic sul tasto risale all'overlay e FA
+         PARTIRE l'evoluzione che si stava rifiutando */
+      ev.stopPropagation();
       if (annullato) return;
       annullato = true;
       pulisci();
@@ -3274,7 +3290,12 @@
       if (annullato) return;
       dipingi(sVecchio);
       // 8 alternanze che accelerano: 260 ms → 90 ms
-      const passi = [260, 240, 210, 180, 150, 130, 110, 90, 90, 90];
+      /* 13 alternanze che accelerano: 320 → 100 ms, cioè 2,4 s di
+         trasformazione contro gli 1,6 di prima. ⚠️ Non basta rallentare i
+         passi: rallentandoli e basta si perde l'ACCELERAZIONE, che è quello che
+         fa sembrare l'evoluzione una cosa che sta succedendo invece di un
+         lampeggio regolare. Se ne aggiungono, e si allunga la coda. */
+      const passi = [320, 300, 280, 250, 220, 200, 180, 160, 140, 120, 110, 100, 100];
       let i = 0;
       const passo = () => {
         if (annullato) return;
@@ -3284,7 +3305,7 @@
           dipingi(sNuovo);
           el.classList.remove("evo-sagoma");
           ov.querySelector(".evo-testo").textContent = `${nuovo}!`;
-          tmr = setTimeout(() => { if (!annullato) { pulisci(); fine(true); } }, 900);
+          tmr = setTimeout(() => { if (!annullato) { pulisci(); fine(true); } }, 1400);
           return;
         }
         // a sagoma bianca mostra la forma NUOVA, a colori quella vecchia
@@ -3293,7 +3314,23 @@
         dipingi(sagoma ? sNuovo : sVecchio);
         tmr = setTimeout(passo, passi[i++]);
       };
-      passo();
+      /* ⚠️ L'evoluzione NON parte da sola: esce l'annuncio e si aspetta il
+         TOCCO. Nell'originale non è così (`doEvolution` usa
+         `showText(..., 1000)`, che avanza da solo dopo un secondo): è una
+         scelta nostra, e va nel verso dei giochi ufficiali. Un'evoluzione è
+         irreversibile e c'è un tasto per rifiutarla: farla partire da sola
+         toglie la scelta a chi ha guardato lo schermo un attimo dopo. */
+      let partito = false;
+      const parti = () => {
+        if (partito || annullato) return;
+        partito = true;
+        const pr = ov.querySelector(".evo-prompt");
+        if (pr) pr.remove();
+        // un respiro prima del primo lampo: non deve cominciare nello stesso
+        // istante in cui alzi il dito
+        tmr = setTimeout(passo, 380);
+      };
+      ov.addEventListener("click", parti);
     }).catch(() => { if (!annullato) { pulisci(); fine(true); } });
   }
 
@@ -7512,7 +7549,8 @@
     const ov = document.createElement("div");
     ov.id = "evo-overlay";              // stessa cornice buia dell'evoluzione
     ov.innerHTML = `<div class="hatch-egg egg-sprite big egg-${nato.tier}"></div>
-                    <div class="evo-testo">Un uovo si sta schiudendo…</div>`;
+                    <div class="evo-testo">Un uovo si sta schiudendo…</div>
+                    <div class="evo-prompt" hidden>tocca per continuare <span class="cont pronto">▸</span></div>`;
     scena.appendChild(ov);
     const uovo = ov.querySelector(".hatch-egg");
     game.phase = "MESSAGE";
@@ -7544,8 +7582,22 @@
           }
           ov.querySelector(".evo-testo").textContent =
             `È nato ${sp.it}${nato.shiny ? " ✨" : ""}!`;
-          cmd().innerHTML = `<div class="msgbox"><div class="log-line">È nato ${sp.it}${nato.shiny ? " ✨CROMATICO" : ""}!</div><span class="cont pronto">▸</span></div>`;
-          cmd().querySelector(".msgbox").onclick = chiudi;
+          /* 🔴 IL TOCCO PER PROSEGUIRE VA DENTRO L'OVERLAY.
+             Prima stava nella `msgbox` della fascia comandi — che è SOTTO
+             `#evo-overlay` (`position: fixed; inset: 0; z-index: 40`). Il tocco
+             finiva sull'overlay e non arrivava mai al bersaglio: chi faceva
+             schiudere un uovo restava chiuso nella schermata «È nato X!» senza
+             alcun modo di uscirne, e l'unica via era chiudere l'app.
+             L'evoluzione non ne soffriva perché il suo tasto è già dentro
+             l'overlay — ed è esattamente la stessa lezione, scritta nel CSS di
+             `.evo-stop`: «il tasto vive DENTRO l'overlay, la fascia comandi ci
+             sta sotto». Qui non era stata applicata.
+             ⚠️ Regola: qualunque cosa da toccare, mentre `#evo-overlay` è a
+             schermo, deve stare dentro `#evo-overlay`. */
+          cmd().innerHTML = `<div class="msgbox"><div class="log-line">È nato ${sp.it}${nato.shiny ? " ✨CROMATICO" : ""}!</div></div>`;
+          const pr = ov.querySelector(".evo-prompt");
+          if (pr) pr.hidden = false;
+          ov.addEventListener("click", chiudi);
         }, 420);
       }).catch(chiudi);
     };

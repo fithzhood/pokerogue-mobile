@@ -2908,3 +2908,68 @@ raggiungibile a comando, non è collaudabile.
 - le caselle di chi non ha niente da dare sono spente, con «—» al posto del conto
 
 ---
+
+## 37. 🔴 La schiusa era un vicolo cieco, e l'evoluzione ora aspetta il tocco (2026-08-21)
+
+### Il difetto grave: schiusa senza uscita
+
+Segnalazione dal vivo: «mi è nato un Pokémon da un uovo e non ho modo di uscire
+dalla schermata». Vero, e senza vie di fuga se non chiudere l'app.
+
+**Causa.** `animaSchiusa` riusa `#evo-overlay`, che è
+`position: fixed; inset: 0; z-index: 40` — copre **tutto lo schermo, fascia
+comandi compresa**. Ma metteva il suo bersaglio da toccare nella `msgbox` di
+`#commands`, cioè **sotto** l'overlay: il tocco finiva sull'overlay e non
+arrivava mai. Misurato: il `.cont.pronto` esisteva ed era a (341, 778), dentro il
+viewport, largo 6 px — presente, visibile nel DOM, e irraggiungibile.
+
+L'evoluzione non ne soffriva perché il suo tasto sta già dentro l'overlay. E la
+regola era **già scritta** nel CSS di `.evo-stop` dal §29: «il tasto per fermarla
+ora vive DENTRO l'overlay: la fascia comandi ci sta sotto». Alla schiusa non era
+stata applicata.
+
+⚠️ **Regola, questa volta scritta dove si vede:** finché `#evo-overlay` è a
+schermo, qualunque cosa da toccare deve stare **dentro** `#evo-overlay`.
+
+### L'evoluzione aspetta il tocco
+
+Richiesta: «l'evoluzione non deve partire automaticamente: deve arrivare il
+messaggio "tizio si sta evolvendo", io clicco per andare avanti ed è lì che deve
+partire».
+
+⚠️ **Nell'originale non è così.** `doEvolution` (evolution-phase.ts:271) usa
+`showText(msg, null, callback, 1000)`: nessun prompt, avanza da solo dopo un
+secondo. È una differenza voluta, e va nel verso dei giochi ufficiali — «Cosa? X
+si sta evolvendo!» aspetta che tu prema. Un'evoluzione è irreversibile e c'è un
+tasto per rifiutarla: farla partire da sola toglie la scelta a chi ha guardato lo
+schermo un attimo dopo.
+
+⚠️ `stopPropagation` sul tasto «Interrompi»: senza, il clic risale all'overlay e
+**fa partire l'evoluzione che stavi rifiutando**.
+
+### Dura di più
+
+Da **2,5 a 4,35 secondi** misurati dal tocco alla chiusura:
+- un respiro di **380 ms** dopo il tocco, prima del primo lampo
+- **13** alternanze invece di 10, da 320 a 100 ms (2,4 s di trasformazione contro 1,6)
+- posa finale sulla forma nuova da 900 a **1400 ms**
+
+⚠️ Non basta rallentare i passi: rallentandoli e basta si perde
+l'**accelerazione**, che è quello che fa sembrare l'evoluzione una cosa che sta
+succedendo invece di un lampeggio regolare. Se ne aggiungono, e si allunga la coda.
+
+### Sonda nuova
+
+`__items.schiusa(specie, tier)` fa schiudere un uovo adesso, con la sua
+animazione. Senza, quella schermata si vede una volta ogni dieci ondate — ed è
+esattamente il motivo per cui il vicolo cieco è arrivato fino al giocatore.
+
+### Verificato (browser 384×832)
+
+- schiusa tracciata nel tempo: a 2400 ms «È nato Gulpin!» con il prompt **dentro**
+  l'overlay, e ci resta finché non si tocca; al tocco l'overlay sparisce
+- evoluzione: overlay ancora fermo sull'annuncio a 2000 ms senza toccare
+- dal tocco alla fine: **4351 ms**
+- «Interrompi» chiude e **non** fa partire la trasformazione
+
+---
