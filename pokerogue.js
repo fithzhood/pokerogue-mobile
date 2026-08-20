@@ -199,6 +199,10 @@
       seen: {},          // specie INCONTRATE (anche senza catturarle): { SPECIE: true }
       eggMoves: {},      // mosse da uovo sbloccate: { SPECIE: maschera di bit 0-15 }
       abils: {},         // abilità sbloccate: { SPECIE: 1|2|4 } (4 = nascosta)
+      // livrea cromatica più alta vista per specie: { SPECIE: 0|1|2 }
+      // (0 = comune, 1 = rara, 2 = epica). È da qui che lo starter prende i
+      // suoi punti di fortuna, come `getDexAttrLuck` nell'originale.
+      shinyVar: {},
     };
   }
 
@@ -815,11 +819,22 @@
     // dell'originale — tranne quando la forma È il sesso, che si vede già da ♂/♀.
     const formSuffix = (form && form.key && form.it && !FORM_BY_GENDER.has(speciesId))
       ? ` (${form.it})` : "";
+    /* LIVREA cromatica (0 comune · 1 rara · 2 epica) e i punti di fortuna che
+       ne derivano. `opts.shinyVar` la impone: la usano cattura, furto,
+       evoluzione e ripresa da salvataggio, che devono conservare quella che
+       avevi davanti. Va estratta DOPO la forma, perché le forme hanno livree
+       proprie (Rotom Lavaggio non ha le stesse di Rotom). */
+    const shinyVar = shiny
+      ? (opts.shinyVar != null ? opts.shinyVar : rollShinyVar(sp.dex, form && form.key))
+      : 0;
     const f = {
       speciesId,
       dex: sp.dex,
       name: (boss ? "👑 " : "") + (shiny ? "✨" : "") + sp.it + formSuffix,
       shiny,
+      shinyVar,                          // 0 comune · 1 rara · 2 epica
+      // `pokemon.ts:445`. Sta sul singolo: sopravvive all'evoluzione.
+      luck: shiny ? shinyVar + 1 : 0,
       level: level,
       // ESPERIENZA: si parte con quella minima del proprio livello, come i
       // Pokemon che incontri gia' cresciuti. Da qui in poi sale davvero.
@@ -1271,6 +1286,78 @@
         abilita: { indice: e.abilIndex, maschera: (meta.abils || {})[root] || 0 },
         natura: { quale: e.nature, bit: 1 << NATURE_KEYS.indexOf(e.nature), maschera: (meta.nature || {})[root] || 0 },
         forma: e.variant || "«base»", cromatico: !!e.shiny };
+    },
+    /* --- FORTUNA E LIVREE CROMATICHE (§33) ------------------------------ */
+    /* Da dove viene la fortuna che hai adesso, membro per membro. */
+    fortuna: () => {
+      const l = runLuck();
+      const odds = Math.floor(512 / (l + 4));
+      return {
+        fortuna: l, rango: LUCK_RANK[l],
+        squadra: (game.party || []).map(p => ({
+          nome: p.name, punti: p.luck || 0, esausto: !!p.fainted,
+          livrea: p.shiny ? CROM_IT[p.shinyVar || 0] : "—",
+          contaPerLaFortuna: !p.fainted ? (p.luck || 0) : 0 })),
+        promozione: `${(4 / odds * 100).toFixed(2)}% per passo (odds ${odds}), ripetuta finché fallisce`,
+        promozioneMedia: (4 / odds / (1 - 4 / odds)).toFixed(3) + " tier a premio",
+      };
+    },
+    /* Che premi escono a una data fortuna. Confrontare 0 e 14 è l'unico modo
+       di vedere se la cascata di promozioni sposta davvero qualcosa. */
+    premi: (fortuna, prove) => {
+      const n = prove || 20000, prima = fortunaForzata;
+      fortunaForzata = fortuna == null ? null : Math.max(0, Math.min(14, fortuna));
+      const l = runLuck(), odds = Math.floor(512 / (l + 4)), conta = {};
+      /* try/finally NON e' pignoleria: `rollReward` fuori da una run lancia
+         (legge game.charms), e senza il finally la fortuna restava FISSATA al
+         valore di prova. Ci sono cascato: la sonda diceva fortuna 0 mentre la
+         squadra aveva 2 punti, e sembrava un difetto del gioco. */
+      try {
+        for (let i = 0; i < n; i++) { const t = rollReward([]).item.tier; conta[t] = (conta[t] || 0) + 1; }
+      } finally { fortunaForzata = prima; }
+      const out = { fortuna: l, rango: LUCK_RANK[l], promozione: (4 / odds * 100).toFixed(2) + "%" };
+      for (const k of TIER_ORD) out[k] = ((conta[k] || 0) / n * 100).toFixed(2) + "%";
+      return out;
+    },
+    /* Il tiro delle livree deve dare 60/30/10. Se una specie non ha livree
+       nell'originale esce sempre 0: è giusto così, non è un difetto nostro. */
+    livree: (specie, prove) => {
+      const k = specie || (game.party && game.party[0] && game.party[0].speciesId) || SPECIES_KEYS[0];
+      const dex = S[k].dex, n = prove || 10000, conta = { 0: 0, 1: 0, 2: 0 };
+      for (let i = 0; i < n; i++) conta[rollShinyVar(dex, null)]++;
+      return { specie: S[k].it, haLivree: !!cromTerna("front", dex, null),
+        terna: cromTerna("front", dex, null),
+        comune: (conta[0] / n * 100).toFixed(1) + "% (atteso 60)",
+        rara: (conta[1] / n * 100).toFixed(1) + "% (atteso 30)",
+        epica: (conta[2] / n * 100).toFixed(1) + "% (atteso 10)" };
+    },
+    /* Come viene disegnata una livrea: file dedicato, ricolore, o ripiego.
+       `pixel: 0` vuol dire che la tabella colore non ha trovato niente da
+       cambiare — in quel caso si ripiega apposta sulla cromatica classica. */
+    cromatico: (specie, sv, side) => {
+      const k = specie || (game.party && game.party[0] && game.party[0].speciesId);
+      if (!k || !S[k]) return "specie sconosciuta";
+      const dex = S[k].dex, v = sv == null ? 1 : sv, lato = side || "front";
+      const terna = cromTerna(lato, dex, null);
+      const modo = terna ? ["ripiego sulla cromatica classica", "ricolore dello sprite normale", "file dedicato"][terna[v]] : "nessuna livrea";
+      return cromSprite(cromChiave(lato, false), String(dex), v).then(spr => ({
+        specie: S[k].it, dex, livrea: CROM_IT[v], terna, modo,
+        disegnata: !!spr, foglio: spr ? spr.sheet.slice(0, 60) : null,
+        diagnosi: cromDiagnosi[`${cromChiave(lato, false)}/${dex}#${v}`] || null,
+      }));
+    },
+    /* Rende cromatico un membro della squadra per guardarlo davvero: è l'unico
+       modo di vedere una epica senza aspettare un incontro su 10.240. */
+    daiLivrea: (i, sv) => {
+      const p = (game.party || [])[i || 0];
+      if (!p) return "nessun Pokémon in quella posizione";
+      p.shiny = true;
+      p.shinyVar = sv == null ? 1 : sv;
+      p.luck = p.shinyVar + 1;
+      if (!p.name.startsWith("✨") && !p.name.includes("✨")) p.name = "✨" + p.name;
+      p.spr = null;
+      loadFighterSprite(p, game.player === p ? "back" : "front").then(spr => { p.spr = spr; redrawScene(); });
+      return { nome: p.name, livrea: CROM_IT[p.shinyVar], punti: p.luck, fortunaOra: runLuck() };
     },
     /* Distribuzione delle SCOSSE della ball sul nemico in campo: quante volte
        dondola prima di aprirsi. Serve a capire se l'animazione "e' sempre
@@ -1844,7 +1931,9 @@
       // la natura scelta nella scheda vale da subito: `makeFighter` la usa nel
       // calcolo delle statistiche, non basta assegnarla dopo
       const mon = makeFighter(e.k, START_LEVEL, { shiny: e.shiny, nature: e.nature,
+                                                 shinyVar: (meta.shinyVar && meta.shinyVar[e.k]) || 0,
                                                  ivs: bestIVsFor(e.k) || rollIVs(), ignoreArena: true });
+      mon.luck = dexLuck(e.k);       // starter: fortuna dal DEX (§33)
       if (e.ability && ABIL[e.ability]) {
         mon.ability = ABIL[e.ability];
         // tiene allineato l'indice: 2 = nascosta (serve se poi lo si registra)
@@ -1867,7 +1956,11 @@
     opts = opts || {};
     hideMeta();
     const shiny = opts.shiny != null ? opts.shiny : meta.unlocked[speciesId] === 2;
-    const mon = makeFighter(speciesId, START_LEVEL, { shiny, ignoreArena: true });
+    // lo starter esce con la livrea migliore che hai sbloccato per quella specie
+    const shinyVar = opts.shinyVar != null ? opts.shinyVar
+      : (meta.shinyVar && meta.shinyVar[speciesId]) || 0;
+    const mon = makeFighter(speciesId, START_LEVEL, { shiny, shinyVar, ignoreArena: true });
+    mon.luck = dexLuck(speciesId);   // dal DEX, non dalla livrea a schermo (§33)
     if (opts.ability) mon.ability = opts.ability;
     if (opts.moves && opts.moves.length) {
       mon.moves = opts.moves.map(id => ({ id, pp: M[id].pp, maxPp: M[id].pp }));
@@ -1886,6 +1979,89 @@
   function rollShiny() {
     const mult = 1 + 2 * ((game.charms && game.charms.shiny) || 0);
     return Math.random() * 65536 < 64 * mult;
+  }
+
+  /* ======================================================================
+     LIVREE CROMATICHE E FORTUNA (§33)
+
+     Un cromatico non è uno solo: l'originale ne ha TRE livree, estratte
+     60% / 30% / 10% (`generateShinyVariant` in pokemon.ts, con
+     SHINY_VARIANT_CHANCE=4 e SHINY_EPIC_CHANCE=1 su un tiro 0-9). Valgono
+     1, 2 e 3 punti di FORTUNA.
+
+     Le livree stanno in data/cromatici.json (le fa tools/extract-cromatici.mjs):
+       set["front/25"] = [0, 1, 1]   che fare per la variante 0 / 1 / 2
+         0 → lo sprite della cartella `shiny/`: quello che usiamo da sempre
+         1 → lo sprite NORMALE, RICOLORATO con la tabella esadecimale in
+             data/cromatici-col.json
+         2 → un file dedicato in assets/pokemon/cromatico/
+     ⚠️ Le 340 specie che nell'originale non hanno voce nel masterlist non
+     possono avere livree rare: `generateShinyVariant` lì torna 0 e basta.
+     Non è una nostra mancanza, è il comportamento giusto.
+     ====================================================================== */
+  let CROMSET = {};            // le terne: piccole (47 KiB), si caricano all'avvio
+  let CROMCOL = null;          // le tabelle colore: 930 KiB, solo alla prima rara
+  let cromColPromessa = null;
+  /* Le tabelle servono una volta ogni ~2560 incontri: farle scaricare a tutti
+     all'avvio sarebbe un megabyte speso per niente. */
+  function cromColCarica() {
+    if (CROMCOL) return Promise.resolve(CROMCOL);
+    if (!cromColPromessa) {
+      cromColPromessa = loadJson("cromatici-col")
+        .then(j => (CROMCOL = j || {}))
+        .catch(() => (CROMCOL = {}));   // senza tabelle si ricade sulla livrea 0
+    }
+    return cromColPromessa;
+  }
+  const cromNome = (dex, formKey) => (formKey ? `${dex}-${formKey}` : String(dex));
+  /* La terna di uno sprite: prima la forma, poi la specie — come l'originale,
+     che cerca "3-mega" e poi ripiega su "3". */
+  function cromTerna(chiave, dex, formKey) {
+    return CROMSET[`${chiave}/${cromNome(dex, formKey)}`] || CROMSET[`${chiave}/${dex}`] || null;
+  }
+  function rollShinyVar(dex, formKey) {
+    if (!cromTerna("front", dex, formKey)) return 0;
+    const r = Math.floor(Math.random() * 10);
+    return r >= 4 ? 0 : r >= 1 ? 1 : 2;      // 6/10 · 3/10 · 1/10
+  }
+  const CROM_IT = ["cromatico", "cromatico RARO", "cromatico EPICO"];
+  // stellina della livrea giusta (sono le icone vere dell'originale, 8x8)
+  const cromStella = v => `<img class="crom-stella" src="assets/ui/shiny_${v || 0}.png" alt="✨">`;
+
+  /* --- FORTUNA ---------------------------------------------------------
+     `getPartyLuckValue` (modifier-type.ts:2906): somma dei punti dei membri
+     SCHIERABILI — un esausto vale 0 — con tetto a 14.
+
+     I punti stanno sul SINGOLO Pokémon (`f.luck`), non sulla specie. È la
+     differenza che conta: prima li ricavavamo dal dex a ogni chiamata, e così
+     un evoluto li perdeva (cambiava `speciesId` e il dex non aveva quella
+     voce), mentre un catturato NON cromatico li guadagnava per il solo fatto
+     che quella specie era già stata trovata cromatica in passato.
+
+     ⚠️ Lo STARTER è l'eccezione, e c'è anche nell'originale
+     (`select-starter-phase.ts:80`): i suoi punti vengono dal DEX, cioè dalla
+     livrea più alta mai catturata di quella specie — anche se lo stai giocando
+     in versione normale. */
+  function dexLuck(speciesId) {
+    if ((meta.unlocked[speciesId] || 0) < 2) return 0;
+    return 1 + Math.min(2, (meta.shinyVar && meta.shinyVar[speciesId]) || 0);
+  }
+  /* Fortuna imposta a mano: serve solo alle prove (`__items.premi`). Per
+     arrivare a 14 davvero servirebbero sei epici in squadra, cioè un incontro
+     su 10.240 sei volte di fila. */
+  let fortunaForzata = null;
+  function runLuck() {
+    if (fortunaForzata != null) return fortunaForzata;
+    let l = 0;
+    for (const p of game.party || []) if (!p.fainted) l += p.luck || 0;
+    return Math.max(0, Math.min(14, l));
+  }
+  /* Ranghi e colori dell'originale (`getLuckString` / `getLuckTextTint`). */
+  const LUCK_RANK = ["D", "C", "C+", "B-", "B", "B+", "A-", "A", "A+", "A++", "S", "S+", "SS", "SS+", "SSS"];
+  function luckColor(l) {
+    if (l >= 14) return "#ffd05c";                 // il massimo: nell'originale è arcobaleno
+    return l > 11 ? "#e07a2a" : l > 9 ? TIER_COL.MASTER : l > 5 ? TIER_COL.ROGUE
+         : l > 2 ? TIER_COL.ULTRA : l ? TIER_COL.GREAT : "#9aa4b4";
   }
 
   /* ---- Classi allenatore: nome, sprite e TIPI preferiti (squadre a tema) ---
@@ -2899,7 +3075,9 @@
     messages.push(boss
       ? `⚠️ Ondata ${game.wave} — BOSS! ${f.name} sbarra la strada!`
       : `Ondata ${game.wave}: appare ${f.name} selvatico!`);
-    if (f.shiny) messages.push("✨ È SHINY! Che fortuna!");
+    if (f.shiny) messages.push(f.shinyVar
+      ? `✨ È ${CROM_IT[f.shinyVar]}! Vale ${f.shinyVar + 1} punti di fortuna!`
+      : "✨ È SHINY! Che fortuna!");
     deployEnemy(f, messages);
     /* PRIMA uscita della run: qui il tuo Pokemon esce davvero dalla ball.
        Dalla seconda ondata in poi NON deve succedere: chi non e' stato
@@ -2998,7 +3176,7 @@
        stesse regole di `evolve` (forma ereditata per indice) e si prendono
        cromatico e sprite femminile giusti, invece del solo sprite base. */
     const formaDopo = formAt(toId, p.formIndex || 0);
-    const finto = { dex: nsp.dex, speciesId: toId, shiny: p.shiny, gender: p.gender,
+    const finto = { dex: nsp.dex, speciesId: toId, shiny: p.shiny, shinyVar: p.shinyVar, gender: p.gender,
                     variant: formaDopo ? (formaDopo.key || null) : null, formKey: null };
     Promise.all([
       loadFighterSprite(p, "front"),
@@ -3720,9 +3898,9 @@
       const caught = rollCapture(m, 2, 1);
       const msgs = [`Lanci una Theft Ball su ${m.name}…`];
       if (caught) {
-        const mon = makeFighter(m.speciesId, m.level, { shiny: m.shiny, ivs: m.ivs, variant: m.variant, abilIndex: m.abilIndex });
+        const mon = makeFighter(m.speciesId, m.level, { shiny: m.shiny, shinyVar: m.shinyVar, ivs: m.ivs, variant: m.variant, abilIndex: m.abilIndex });
         accogliPokemon(mon, msgs, "🕶 Rubato!");
-        registerCaught(m.speciesId, m.shiny, m.ivs, msgs, m.variant, m.abilIndex, m.nature);
+        registerCaught(m.speciesId, m.shiny, m.ivs, msgs, m.variant, m.abilIndex, m.nature, m.shinyVar);
       } else msgs.push(`${m.name} è sfuggito alla Theft Ball!`);
       renderScene();
       queueMessages(msgs, () => chiediPostoInSquadra(() => openShop()));
@@ -3761,7 +3939,7 @@
       const col = ratio > 0.5 ? "var(--hp-green)" : ratio > 0.2 ? "var(--hp-yellow)" : "var(--hp-red)";
       const types = p.types.map(t => `<span class="ticon t-${t}"></span>`).join("");
       return `<button class="pd-card sceglibile ${p.fainted ? "ko" : ""}" data-i="${i}">
-          <div class="pd-top"><span class="pd-name">${miniIcon(p.dex, 1.1)}${p.shiny ? "✨" : ""}${p.name.replace("✨", "")}</span><span class="pd-lv">Lv.${p.level}</span></div>
+          <div class="pd-top"><span class="pd-name">${miniIcon(p.dex, 1.1)}${p.shiny ? cromStella(p.shinyVar) : ""}${p.name.replace("✨", "")}</span><span class="pd-lv">Lv.${p.level}</span></div>
           <div class="pd-types">${types}${p.ability ? `<span class="pd-ab">${p.ability.it}</span>` : ""}</div>
           <div class="party-hp-track"><div class="party-hp-fill" style="width:${ratio * 100}%;background:${col};"></div></div>
           <div class="pd-hp">${Math.max(0, p.hp)}/${p.maxHp} PS</div>
@@ -3790,7 +3968,9 @@
   }
 
   // Registra una specie catturata nel meta: starter sbloccato, caramella, IV migliori.
-  function registerCaught(speciesId, shiny, ivs, messages, variant, abilIndex, nature) {
+  /* ⚠️ `variant` qui è la FORMA (Unown-B, Rotom Lavaggio…), `shinyVar` è la
+     LIVREA cromatica. Due cose diverse con nomi vicini: attenzione. */
+  function registerCaught(speciesId, shiny, ivs, messages, variant, abilIndex, nature, shinyVar) {
     if (variant && registerForm(S[speciesId].dex, variant) && messages) {
       const tot = collectableForms(speciesId);
       const got = Object.keys(meta.formsSeen[S[speciesId].dex]).length;
@@ -3816,6 +3996,18 @@
     } else if (specieNuova && root !== speciesId) {
       // il capostipite c'era già, ma questa forma evoluta no: vale dirlo
       messages.push(`📖 ${S[speciesId].it}${shiny ? " ✨" : ""} registrato nel dex!`);
+    }
+    /* LIVREA cromatica: si tiene la più alta mai vista, sulla specie E sul
+       capostipite. È quella del capostipite a dare i punti di fortuna allo
+       starter, quindi è quella che vale la pena annunciare. */
+    if (shiny) {
+      meta.shinyVar = meta.shinyVar || {};
+      const sv = shinyVar || 0;
+      if (sv > (meta.shinyVar[speciesId] || 0)) meta.shinyVar[speciesId] = sv;
+      if (sv > (meta.shinyVar[root] || 0)) {
+        meta.shinyVar[root] = sv;
+        if (sv > 0) messages.push(`💠 Livrea ${CROM_IT[sv]} di ${S[root].it}: come starter ora vale ${sv + 1} punti di fortuna`);
+      }
     }
     meta.candy = meta.candy || {};
     meta.candy[speciesId] = (meta.candy[speciesId] || 0) + 1;
@@ -3875,10 +4067,10 @@
   function risolviUltimaBall(enemy, caught) {
     const messages = [];
     if (caught) {
-      const mon = makeFighter(enemy.speciesId, enemy.level, { shiny: enemy.shiny, ivs: enemy.ivs, variant: enemy.variant, abilIndex: enemy.abilIndex }); // fresco, HP/PP pieni
+      const mon = makeFighter(enemy.speciesId, enemy.level, { shiny: enemy.shiny, shinyVar: enemy.shinyVar, ivs: enemy.ivs, variant: enemy.variant, abilIndex: enemy.abilIndex }); // fresco, HP/PP pieni
       accogliPokemon(mon, messages, "Preso!");
       // meta-progressione: starter sbloccato + caramella + IV migliori
-      registerCaught(enemy.speciesId, enemy.shiny, enemy.ivs, messages, enemy.variant, enemy.abilIndex, enemy.nature);
+      registerCaught(enemy.speciesId, enemy.shiny, enemy.ivs, messages, enemy.variant, enemy.abilIndex, enemy.nature, enemy.shinyVar);
     } else {
       messages.push(`Oh no! ${enemy.name} si è liberato!`);
     }
@@ -3923,34 +4115,128 @@
       (p, dir) => p.then(got => got || loadSpriteFrom(dir, name)),
       Promise.resolve(null));
   }
-  function loadSprite(dex, side, shiny, femmina) {
+  /* ======================================================================
+     LIVREE RARE ED EPICHE: come si disegnano (§33)
+
+     Per la livrea COMUNE (0) non cambia niente: è il file della cartella
+     `shiny/`, come da sempre. Per rara ed epica l'originale fa due cose
+     diverse a seconda della specie (`pokemon-species.ts:410`):
+       terna[v] === 2 → esiste un file dedicato, si carica e basta
+       terna[v] === 1 → si prende lo sprite NORMALE e lo si RICOLORA con una
+                        tabella colore→colore (lo shader di `sprite.ts:131`;
+                        qui è un canvas, fatto una volta e tenuto in cache)
+     Se la livrea non ha di che disegnarsi si torna alla cromatica classica —
+     la stessa rete di sicurezza che ha `getSpriteId`.
+     ====================================================================== */
+  const cromChiave = (side, femmina) => (femmina ? "femmina/" : "") + side;
+  const cromSheetCache = {};       // "front/25#1" -> Promise<spr|null>
+  const cromDiagnosi = {};         // per la sonda __items.cromatico()
+
+  function cromSprite(chiave, nome, sv) {
+    const terna = CROMSET[`${chiave}/${nome}`];
+    if (!terna) return Promise.resolve(null);
+    const cacheKey = `${chiave}/${nome}#${sv}`;
+    if (cromSheetCache[cacheKey] !== undefined) return cromSheetCache[cacheKey];
+    const modo = terna[sv];
+    let pr;
+    if (modo === 2) {
+      // file dedicato: è già della livrea giusta, si carica come ogni altro
+      pr = loadSpriteFrom(`assets/pokemon/cromatico/${chiave}`, `${nome}_${sv + 1}`);
+    } else if (modo === 1) {
+      pr = cromColCarica().then(col => {
+        const tab = col[`${chiave}/${nome}`];
+        const mappa = tab && tab[String(sv)];
+        if (!mappa) return null;
+        // ⚠️ si ricolora il file NORMALE, non quello della cartella shiny
+        return loadSpriteFrom(`assets/pokemon/${chiave}`, nome)
+          .then(base => (base ? ricoloraSprite(base, mappa, cacheKey) : null));
+      });
+    } else {
+      pr = Promise.resolve(null);    // livrea 0, o specie senza livree
+    }
+    cromSheetCache[cacheKey] = pr;
+    return pr;
+  }
+
+  function ricoloraSprite(base, mappa, cacheKey) {
+    return new Promise(res => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const c = document.createElement("canvas");
+          c.width = img.naturalWidth; c.height = img.naturalHeight;
+          const cx = c.getContext("2d", { willReadFrequently: true });
+          cx.drawImage(img, 0, 0);
+          const d = cx.getImageData(0, 0, c.width, c.height), px = d.data;
+          /* Indice intero r<<16|g<<8|b: un foglio di sprite ha ~200.000 pixel
+             e confrontare stringhe esadecimali costerebbe decine di ms. */
+          const tab = new Map();
+          for (const da in mappa) tab.set(parseInt(da, 16), parseInt(mappa[da], 16));
+          let toccati = 0;
+          for (let i = 0; i < px.length; i += 4) {
+            if (!px[i + 3]) continue;
+            const v = tab.get((px[i] << 16) | (px[i + 1] << 8) | px[i + 2]);
+            if (v === undefined) continue;
+            px[i] = (v >> 16) & 255; px[i + 1] = (v >> 8) & 255; px[i + 2] = v & 255;
+            toccati++;
+          }
+          cromDiagnosi[cacheKey] = { colori: tab.size, pixel: toccati };
+          /* ⚠️ Rete di sicurezza vera: se NESSUN pixel combacia, la tabella non
+             sta parlando di questo file (o il browser ha applicato una
+             correzione colore in fase di decodifica). Meglio la cromatica
+             classica che un "cromatico" coi colori normali. */
+          if (!toccati) return res(null);
+          cx.putImageData(d, 0, 0);
+          c.toBlob(b => res(b ? Object.assign({}, base, { sheet: URL.createObjectURL(b) }) : null));
+        } catch (e) { console.warn("[cromatico] ricolore fallito:", e.message); res(null); }
+      };
+      img.onerror = () => res(null);
+      img.src = base.sheet;
+    });
+  }
+
+  function loadSprite(dex, side, shiny, femmina, shinyVar) {
     /* Catena di ripieghi, dal più giusto al meno peggio. L'ultimo anello serve
        a non mostrare MAI il segnaposto colorato: 4 specie (Koraidon, Miraidon,
        Poltchageist Autentica, Sinistcha Capolavoro) non hanno lo sprite
        cromatico nemmeno nell'originale, e il modello giusto coi colori normali
        è comunque meglio di un rettangolo tinta unita. */
-    const dirs = [];
-    if (femmina && shiny) dirs.push(`assets/pokemon/femmina/shiny/${side}`);
-    if (shiny) dirs.push(`assets/pokemon/shiny/${side}`);
-    if (femmina) dirs.push(`assets/pokemon/femmina/${side}`);
-    dirs.push(`assets/pokemon/${side}`);
-    return loadSpriteChain(dirs, String(dex));
+    const classico = () => {
+      const dirs = [];
+      if (femmina && shiny) dirs.push(`assets/pokemon/femmina/shiny/${side}`);
+      if (shiny) dirs.push(`assets/pokemon/shiny/${side}`);
+      if (femmina) dirs.push(`assets/pokemon/femmina/${side}`);
+      dirs.push(`assets/pokemon/${side}`);
+      return loadSpriteChain(dirs, String(dex));
+    };
+    if (!shiny || !shinyVar) return classico();
+    return cromSprite(cromChiave(side, femmina), String(dex), shinyVar).then(s => s || classico());
   }
   // Carica lo sprite giusto per un combattente: se ha una forma (estetica o di
   // battaglia) usa "<dex>-<forma>", altrimenti lo sprite base.
   function loadFighterSprite(f, side) {
     const form = f.formKey || f.variant;
-    const base = () => loadSprite(f.dex, side, f.shiny, usaSpriteFemmina(f));
+    const sv = f.shiny ? (f.shinyVar || 0) : 0;
+    const femmina = usaSpriteFemmina(f);
+    const base = () => loadSprite(f.dex, side, f.shiny, femmina, sv);
     if (!form) return base();
     /* ⚠️ Anche le forme hanno il loro sprite CROMATICO: prima si prendeva
        sempre quello normale e un Unown cromatico usciva coi colori sbagliati.
        Se la forma non ha un file suo si ricade sulla specie — ed è giusto:
        nemmeno l'originale ne ha uno per le 20 fantasie di Scatterbug o per le
        taglie di Pumpkaboo, che sono identiche a vedersi. */
-    const dirs = [];
-    if (f.shiny) dirs.push(`assets/pokemon/shiny/${side}`);
-    dirs.push(`assets/pokemon/${side}`);
-    return loadSpriteChain(dirs, `${f.dex}-${form}`).then(spr => spr || base());
+    const nome = `${f.dex}-${form}`;
+    const classicoForma = () => {
+      const dirs = [];
+      if (f.shiny) dirs.push(`assets/pokemon/shiny/${side}`);
+      dirs.push(`assets/pokemon/${side}`);
+      return loadSpriteChain(dirs, nome);
+    };
+    /* Ordine: livrea della FORMA → forma classica → livrea della SPECIE →
+       specie classica. La forma giusta viene sempre prima. */
+    return (sv ? cromSprite(cromChiave(side, false), nome, sv) : Promise.resolve(null))
+      .then(spr => spr || classicoForma())
+      .then(spr => spr || base());
   }
   /* Va usato lo sprite femminile? Solo per le 98 specie che nell'originale
      hanno `genderDiffs` (le mega/gigamax usano sempre quello base). */
@@ -5777,6 +6063,11 @@
        ⚠️ Come per le Ombra: solo a sprite CARICATO, o il filtro disegnerebbe
        un rettangolo attorno al segnaposto. */
     el.classList.toggle("cromatico", caricato && !!fighter.shiny);
+    /* Le tre livree hanno tinte diverse anche nell'originale (`getVariantTint`:
+       oro · ciano · cremisi). Sono l'unico modo per accorgersi a colpo d'occhio
+       di aver preso una rara: la livrea in sé può somigliare molto alla comune. */
+    el.classList.toggle("crom-1", caricato && !!fighter.shiny && fighter.shinyVar === 1);
+    el.classList.toggle("crom-2", caricato && !!fighter.shiny && fighter.shinyVar === 2);
     const fainted = ov ? ov.fainted : fighter.fainted;
     const hit = ov ? ov.hit : fighter._justHit;
     el.classList.toggle("faint", fainted);
@@ -5897,7 +6188,11 @@
     for (const [f, sel, side] of pairs) {
       if (!f) continue;
       const el = $(sel);
-      const painted = el && el.style.backgroundImage.includes("assets/pokemon");
+      /* ⚠️ Non basta più cercare "assets/pokemon": le livree rare ed epiche
+         sono immagini ricolorate al volo e il loro indirizzo è un `blob:`,
+         che di percorso non ne ha. Cercando la stringa vecchia il controllo
+         diceva "non dipinto" a ogni giro e si ridisegnava all'infinito. */
+      const painted = el && f.spr && el.style.backgroundImage.includes(f.spr.sheet);
       if (f.spr && !painted) needRedraw = true;
       else if (!f.spr) {
         // sprite mai risolto per questo oggetto: (ri)caricalo e dipingi
@@ -6040,7 +6335,7 @@
     const tfRow = tf
       ? `<div class="back-row"><button class="btn transform-btn" data-act="transform">${tf === "mega" ? "✨ MEGAEVOLVI" : "🔴 GIGAMAXIZZA"}</button></div>` : "";
     cmd().innerHTML = `
-      <div class="prompt-line">Cosa deve fare ${(chi || game.player).name}?${game.double ? ` <b>(${game.chooser === 1 ? "2°" : "1°"})</b>` : ""} <span class="hud">· ${alive}/${game.party.length} · 🔴${totalBalls()}${game.theftballs ? " 🕶" + game.theftballs : ""} · ₽${game.money}${runLuck() ? " · 🍀" + runLuck() : ""}</span></div>
+      <div class="prompt-line">Cosa deve fare ${(chi || game.player).name}?${game.double ? ` <b>(${game.chooser === 1 ? "2°" : "1°"})</b>` : ""} <span class="hud">· ${alive}/${game.party.length} · 🔴${totalBalls()}${game.theftballs ? " 🕶" + game.theftballs : ""} · ₽${game.money}${runLuck() ? ` · 🍀<b style="color:${luckColor(runLuck())}">${LUCK_RANK[runLuck()]}</b>` : ""}</span></div>
       <div class="grid2">
         <button class="btn main-fight" data-act="fight">Lotta</button>
         <button class="btn main-bag"   data-act="ball">Ball</button>
@@ -6095,7 +6390,7 @@
         return `<span class="pd-move${m.pp === 0 ? " vuota" : ""}"><span class="ticon t-${mv.type}"></span>${mv.it} <b>${m.pp}/${m.maxPp}</b></span>`;
       }).join("");
       return `<button class="pd-card sceglibile ${p.fainted ? "ko" : ""}" data-i="${i}" ${selectable ? "" : "disabled"}>
-          <div class="pd-top"><span class="pd-name">${miniIcon(p.dex, 1.1)}${p.shiny ? "✨" : ""}${p.name.replace("✨", "")}<span class="gen g-${p.gender}">${genderSymbol(p)}</span>${st}</span><span class="pd-lv">Lv.${p.level} ${tag}</span></div>
+          <div class="pd-top"><span class="pd-name">${miniIcon(p.dex, 1.1)}${p.shiny ? cromStella(p.shinyVar) : ""}${p.name.replace("✨", "")}<span class="gen g-${p.gender}">${genderSymbol(p)}</span>${st}</span><span class="pd-lv">Lv.${p.level} ${tag}</span></div>
           <div class="pd-types">${types} ${p.ability ? `<span class="pd-ab">${p.ability.it}</span>` : ""}${p.passiveAbility ? `<span class="pd-ab pd-pass">+${p.passiveAbility.it}</span>` : ""} ${held}</div>
           <div class="party-hp-track"><div class="party-hp-fill" style="width:${ratio * 100}%;background:${col};"></div></div>
           <div class="pd-hp">${Math.max(0, p.hp)}/${p.maxHp} PS · <span class="pd-exp">Lv.${p.level}${expEtichetta(p)}</span></div>
@@ -6218,10 +6513,10 @@
     const log = makeLog();
 
     if (caught) {
-      const mon = makeFighter(enemy.speciesId, enemy.level, { shiny: enemy.shiny, ivs: enemy.ivs, variant: enemy.variant, abilIndex: enemy.abilIndex });
+      const mon = makeFighter(enemy.speciesId, enemy.level, { shiny: enemy.shiny, shinyVar: enemy.shinyVar, ivs: enemy.ivs, variant: enemy.variant, abilIndex: enemy.abilIndex });
       const stolen = !!enemy.trainer;
       accogliPokemon(mon, log, stolen ? "🕶 Rubato!" : "Preso!");
-      registerCaught(enemy.speciesId, enemy.shiny, enemy.ivs, log, enemy.variant, enemy.abilIndex, enemy.nature);
+      registerCaught(enemy.speciesId, enemy.shiny, enemy.ivs, log, enemy.variant, enemy.abilIndex, enemy.nature, enemy.shinyVar);
       enemy.fainted = true;                        // esce dal campo
       game.capturedThisWave = true;                // niente seconda offerta a fine lotta
       if (stolen) {
@@ -6873,7 +7168,7 @@
       tmr = setTimeout(scuoti, scosse[i++]);
     };
     const nascita = () => {
-      loadSprite(sp.dex, "front", nato.shiny).then(s => {
+      loadSprite(sp.dex, "front", nato.shiny, false, nato.shinyVar).then(s => {
         uovo.classList.remove("scuote");
         uovo.classList.add("crepa");
         tmr = setTimeout(() => {
@@ -6926,12 +7221,18 @@
         // CROMATICO: 1/128, ma il gacha cromatico raddoppia (1/64)
         const tassoShiny = tipo === "SHINY" ? TASSO_SHINY_GACHA_SU : TASSO_SHINY_GACHA;
         const shiny = Math.floor(Math.random() * tassoShiny) === 0;
+        // anche le uova possono dare una livrea rara o epica (60/30/10)
+        const shinyVar = shiny ? rollShinyVar(S[sp].dex, null) : 0;
         /* ⚠️ Va deciso PRIMA di scrivere nel dex se questa nascita sblocca
            davvero qualcosa: se no ogni schiusa annunciava «è sbloccato come
            starter!» anche per una specie che avevi già da un pezzo. */
         const eraNuovo = !meta.unlocked[sp];
         const primoCromatico = shiny && (meta.unlocked[sp] || 0) < 2;
         if (!meta.unlocked[sp] || shiny) meta.unlocked[sp] = shiny ? 2 : (meta.unlocked[sp] || 1);
+        // livrea più alta vista: da qui prenderà i punti di fortuna come starter
+        meta.shinyVar = meta.shinyVar || {};
+        const livreaMigliore = shiny && shinyVar > (meta.shinyVar[sp] || 0);
+        if (livreaMigliore) meta.shinyVar[sp] = shinyVar;
         meta.stats.hatched++;
         meta.candy = meta.candy || {};
         meta.candy[sp] = (meta.candy[sp] || 0) + 3;   // le uova danno più caramelle
@@ -6943,6 +7244,9 @@
           : primoCromatico
             ? `${S[sp].it} ✨ cromatico è sbloccato come starter! 🍬 +3 caramelle`
             : `🍬 +3 caramelle ${S[sp].it} (totale ${meta.candy[sp]})`];
+        if (livreaMigliore && shinyVar > 0 && !primoCromatico) {
+          stessoMomento(extra, `💠 Livrea ${CROM_IT[shinyVar]}: come starter ora vale ${shinyVar + 1} punti di fortuna`);
+        }
         /* ABILITÀ NASCOSTA: 1 su 192, come `GACHA_EGG_HA_RATE`. È l'altra via
            per sbloccarla, oltre a catturare un esemplare che ce l'ha. */
         if (S[sp].abilities.hidden && Math.floor(Math.random() * GACHA_EGG_HA_RATE) === 0) {
@@ -6964,7 +7268,7 @@
             : `🥚 ${S[sp].it} ha imparato la mossa da uovo ${em.it}!`);
         }
         game.pendingHatches = game.pendingHatches || [];
-        game.pendingHatches.push({ sp, shiny, tipo, tier: egg.tier, extra });
+        game.pendingHatches.push({ sp, shiny, shinyVar, tipo, tier: egg.tier, extra });
       }
     }
     saveMeta();
@@ -8247,7 +8551,7 @@
       <div class="sd-head">
         <span class="sd-sprite" id="sdSprite"></span>
         <div class="sd-info">
-          <div class="sd-name">${c.shiny ? "✨" : ""}${sp.it} ${c.pkrs ? '<span class="sb-pkrs">💜</span>' : ""} ${hasRibbon(c.k) ? "🎀" : ""}</div>
+          <div class="sd-name">${c.shiny ? cromStella((meta.shinyVar && meta.shinyVar[c.k]) || 0) : ""}${sp.it} ${c.pkrs ? '<span class="sb-pkrs">💜</span>' : ""} ${hasRibbon(c.k) ? "🎀" : ""}</div>
           <div class="sd-types">${sp.types.map(t => `<span class="ticon t-${t}"></span>`).join("")}</div>
           <div class="sd-abrow">Abilità: ${abils}</div>
           ${c.info && c.info.tipo === "ab" ? snippetAbilita(c.info.id) : ""}
@@ -8272,7 +8576,7 @@
         <button class="meta-btn primary" data-act="go" ${c.moves.length ? "" : "disabled"}>➕ Aggiungi ${sp.it}</button>
       </div>`);
     // sprite grande
-    loadSprite(sp.dex, "front", c.shiny).then(s => {
+    loadSprite(sp.dex, "front", c.shiny, false, (meta.shinyVar && meta.shinyVar[c.k]) || 0).then(s => {
       const el = document.getElementById("sdSprite"); if (!el || !s) return;
       const k = Math.min(1.4, 88 / s.frame.h, 88 / s.frame.w);
       el.style.width = s.frame.w * k + "px"; el.style.height = s.frame.h * k + "px";
@@ -8744,19 +9048,25 @@
   ];
   // Probabilita' del TIER (poi si pesca l'oggetto dentro al tier, coi pesi sopra)
   const TIER_W = { COMMON: 50, GREAT: 34, ULTRA: 13, ROGUE: 3, MASTER: 0.5 };
-  // FORTUNA (come PokeRogue): ogni membro della squadra la cui specie e' shiny
-  // sbloccata da +1; la fortuna sposta i pesi verso i tier alti.
-  function runLuck() {
-    let l = 0;
-    for (const p of game.party) if (meta.unlocked[p.speciesId] === 2) l++;
-    return Math.min(9, l);
-  }
-  function luckedTierWeights() {
-    const L = runLuck();
-    if (!L) return TIER_W;
-    return { COMMON: Math.max(10, TIER_W.COMMON - L * 4), GREAT: TIER_W.GREAT,
-             ULTRA: TIER_W.ULTRA + L * 2.5, ROGUE: TIER_W.ROGUE + L * 1.5,
-             MASTER: TIER_W.MASTER + L * 0.3 };
+  /* PROMOZIONE DI TIER PER FORTUNA — la cascata dell'originale
+     (`getNewModifierTypeOption`, modifier-type.ts:2795):
+
+         upgradeOdds = floor(128 / ((fortuna + 4) / 4))  =  floor(512 / (fortuna+4))
+         si promuove se un tiro 0..odds-1 esce < 4, e SI RIPETE finché fallisce
+
+     Cioè 3,13% a fortuna 0 e 14,29% a fortuna 14 — e, di rado, due tier in un
+     colpo solo, che è metà del divertimento.
+     ⚠️ Ha sostituito uno spostamento di pesi fatto in casa: quello non poteva
+     mai promuovere due volte, e a fortuna 0 dava già percentuali diverse da
+     quelle di base. La fortuna ora entra SOLO qui, i pesi di TIER_W restano
+     quelli nostri. */
+  const TIER_ORD = ["COMMON", "GREAT", "ULTRA", "ROGUE", "MASTER"];
+  function promuoviPerFortuna(tier) {
+    const odds = Math.floor(512 / (runLuck() + 4));
+    let i = TIER_ORD.indexOf(tier);
+    if (i < 0) return tier;
+    while (i < TIER_ORD.length - 1 && Math.floor(Math.random() * odds) < 4) i++;
+    return TIER_ORD[i];
   }
   const TIER_COL = { COMMON: "#7f8ba0", GREAT: "#3a7bd0", ULTRA: "#d0a53a", ROGUE: "#8a4ad0", MASTER: "#c0452a" };
 
@@ -8872,10 +9182,11 @@
 
   function rollReward(excludeIds) {
     for (let tries = 0; tries < 40; tries++) {
-      const W = luckedTierWeights();
+      const W = TIER_W;
       const tot = Object.values(W).reduce((a, b) => a + b, 0);
       let r = Math.random() * tot, tier = "COMMON";
       for (const k in W) { r -= W[k]; if (r <= 0) { tier = k; break; } }
+      tier = promuoviPerFortuna(tier);
       const pool = REWARD_POOL.filter(x =>
         x.tier === tier && x.weight > 0 && !excludeIds.includes(x.id) && (!x.avail || x.avail()));
       if (!pool.length) continue;
@@ -9048,7 +9359,7 @@
         ? `<span class="pd-held">🎒 ${heldSummary(p)}</span>` : "";
       return `<button class="pd-card tgt ${ok ? "" : "ko"}" data-i="${i}" ${ok ? "" : "disabled"}>
           <div class="pd-top">
-            <span class="pd-name">${miniIcon(p.dex, 1.1)}${p.shiny ? "✨" : ""}${p.name.replace("✨", "")}<span class="gen g-${p.gender}">${genderSymbol(p)}</span>${st}</span>
+            <span class="pd-name">${miniIcon(p.dex, 1.1)}${p.shiny ? cromStella(p.shinyVar) : ""}${p.name.replace("✨", "")}<span class="gen g-${p.gender}">${genderSymbol(p)}</span>${st}</span>
             <span class="pd-lv">Lv.${p.level}</span></div>
           <div class="party-hp-track"><div class="party-hp-fill" style="width:${ratio * 100}%;background:${col};"></div></div>
           <div class="pd-hp">${p.fainted ? "esausto" : Math.max(0, p.hp) + "/" + p.maxHp + " PS"} · PP ${ppTot}/${ppMax} ${held}</div>
@@ -9173,7 +9484,7 @@
       const held = Object.keys(p.held || {}).length ? `<span class="pd-held">🎒 ${heldSummary(p)}</span>` : "";
       const moves = p.moves.map(m => M[m.id].it).join(", ");
       return `<div class="pd-card ${p.fainted ? "ko" : ""}">
-          <div class="pd-top"><span class="pd-name">${miniIcon(p.dex, 1.1)}${p.shiny ? "✨" : ""}${p.name.replace("✨", "")}<span class="gen g-${p.gender}">${genderSymbol(p)}</span>${st}</span><span class="pd-lv">Lv.${p.level}</span></div>
+          <div class="pd-top"><span class="pd-name">${miniIcon(p.dex, 1.1)}${p.shiny ? cromStella(p.shinyVar) : ""}${p.name.replace("✨", "")}<span class="gen g-${p.gender}">${genderSymbol(p)}</span>${st}</span><span class="pd-lv">Lv.${p.level}</span></div>
           <div class="pd-types">${types} ${p.ability ? `<span class="pd-ab">${p.ability.it}</span>` : ""}${p.passiveAbility ? `<span class="pd-ab pd-pass">+${p.passiveAbility.it}</span>` : ""}${p.nature ? `<span class="pd-ab pd-nat">${natureLabel(p)}</span>` : ""} ${held}</div>
           <div class="party-hp-track"><div class="party-hp-fill" style="width:${ratio * 100}%;background:${col};"></div></div>
           <div class="pd-hp">${Math.max(0, p.hp)}/${p.maxHp} PS · <span class="pd-moves">${moves}</span></div>
@@ -9233,7 +9544,7 @@
     cancellaSlot(game.slot);      // run completata: lo slot torna libero (§26)
     clearTimeout(game.timer);
     hideTrainerPortrait();
-    const team = game.party.map(p => `${p.shiny ? "✨" : ""}${p.name} Lv.${p.level}`).join(" · ");
+    const team = game.party.map(p => `${p.name} Lv.${p.level}`).join(" · ");
     showMetaScreen(`
       <div class="meta-title" style="color:#ffcf4a">🏆 CAMPIONE!</div>
       <div class="meta-sub">Hai superato tutte le 200 ondate della modalità Classica.</div>
@@ -9479,7 +9790,7 @@
   /* ---------------------------------------------------------------------- */
   /*  AVVIO — carica i dati reali, poi comincia                             */
   /* ---------------------------------------------------------------------- */
-  const DATA_V = 20;   // versione dei dati: alzala a ogni rigenerazione
+  const DATA_V = 21;   // versione dei dati: alzala a ogni rigenerazione
   /* I dati arrivano dallo strato aggiornato se c'e' (vedi pokerogue-boot.js,
      §28), altrimenti dai file locali. `window.PR` esiste solo quando la pagina
      e' stata avviata dal guscio: aprendo i file a mano si ricade sul fetch. */
@@ -9496,11 +9807,17 @@
       loadJson("types"), loadJson("moves"), loadJson("species"),
       loadJson("learnsets"), loadJson("typechart"), loadJson("abilities"), loadJson("biomes"), loadJson("forms"), loadJson("icons"), loadJson("variants"),
       loadJson("tms"), loadJson("eggmoves"), loadJson("dialoghi"),
+      /* Le TERNE delle livree cromatiche: 47 KiB, servono a ogni tiro di
+         cromatico. Le tabelle colore (930 KiB) no: quelle arrivano solo
+         quando una rara va davvero disegnata. Se il file manca si resta
+         alla livrea comune, che è come il gioco si comportava prima. */
+      loadJson("cromatici").catch(() => null),
       // indice delle animazioni: solo l'elenco, i frame arrivano su richiesta
       loadJson("anims-index").catch(() => null),
-    ]).then(([types, moves, species, learnsets, chart, abilities, biomes, forms, icons, variants, tmdata, eggmoves, dialoghi, anims]) => {
+    ]).then(([types, moves, species, learnsets, chart, abilities, biomes, forms, icons, variants, tmdata, eggmoves, dialoghi, cromatici, anims]) => {
       T = types; M = moves; S = species; LEARN = learnsets; CHART = chart; ABIL = abilities; BIOMES = biomes; FORMS = forms; ICONS = icons; VARIANTS = variants;
       TMS = tmdata; EGGM = eggmoves; DIAL = dialoghi || {}; ANIMS = anims;
+      CROMSET = (cromatici && cromatici.set) || {};
       /* Il tipo ASTRALE non esiste in types.json (i tipi veri sono 18):
          lo si aggiunge a mano perche' Terapagos Stellare e l'Arceus Perfetto
          ce l'hanno, e ogni schermata che stampa un tipo fa `T[tipo].it`. */

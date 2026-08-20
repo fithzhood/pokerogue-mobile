@@ -2398,3 +2398,139 @@ pannello si ridisegna solo quando gira un turno — aprire e chiudere «Squadra�
 stessa trappola del §8 (*«le mie asserzioni sul DOM leggono elementi che il ridisegno ha
 staccato»*). **Prima di dare la colpa al codice, verifica che il DOM sia stato riscritto
 davvero** — un marcatore `dataset` sull'elemento lo dice in due righe.
+
+---
+
+## 33. Fortuna allineata all'originale e LIVREE cromatiche (2026-08-20)
+
+Domanda del proprietario: «abbiamo implementato la luck e il fatto che i cromatici
+l'aumentano?». Sì, ma male: c'era una fortuna fatta a occhio. Il confronto col
+sorgente ha trovato **tre difetti veri** e **una regola dell'originale che non
+conoscevamo**. Poi la richiesta è diventata: allinea, e aggiungi le varianti col
+tasso di scoperta giusto.
+
+### Com'è nell'originale (letto nel codice, non a memoria)
+
+| cosa | dove |
+|---|---|
+| punti del singolo | `pokemon.ts:445` — `(shiny ? variant+1 : 0) + (fusionShiny ? fusionVariant+1 : 0)` |
+| livrea estratta | `pokemon.ts:2965` — tiro 0-9: `>=4` → 0, `>=1` → 1, `0` → 2 (60/30/10) |
+| fortuna di squadra | `modifier-type.ts:2906` — somma dei **soli schierabili**, `clamp(0,14)` |
+| ranghi | `getLuckString`: D · C · C+ · B- · B · B+ · A- · A · A+ · A++ · S · S+ · SS · SS+ · SSS |
+| effetto | `modifier-type.ts:2795` — `upgradeOdds = floor(128/((fortuna+4)/4))`, promuove se `randSeedInt(odds) < 4`, **ripetuto finché fallisce** |
+
+Percentuali che ne escono: **3,13% a fortuna 0 · 14,29% a 14**, e la ripetizione
+permette (di rado) di salire di **due** tier in un colpo.
+
+🔴 **La regola che non conoscevamo — lo STARTER fa eccezione.**
+`select-starter-phase.ts:80` **sovrascrive** la fortuna dello starter con
+`getDexAttrLuck(caughtAttr)`: la livrea più alta mai catturata di quella specie,
+**anche se lo stai giocando in versione normale**. Sembra un errore e non lo è:
+è la ricompensa per aver trovato un'epica, e vale tutta la run.
+
+Effetto minore, non portato: la fortuna abbassa anche il tetto del tiro per la
+rarità delle specie selvatiche (`arena.ts:597`, `512 − 2×fortuna`). A fortuna 14
+sposta il tier raro dal 5,08% al 5,37%: non vale il codice che costa.
+
+### I tre difetti che c'erano
+
+1. 🔴 **Un evoluto perdeva la fortuna.** `runLuck()` leggeva
+   `meta.unlocked[p.speciesId]`, ma `evolve()` cambia `speciesId` e **non**
+   registra la nuova specie nel dex. Il tuo starter cromatico dava +1 da
+   Charmander e **0** da Charmeleon.
+2. **Un catturato NON cromatico dava fortuna lo stesso**, se quella specie aveva
+   il cromatico nel dex da una partita precedente. Nell'originale la regola del
+   dex vale **solo** per gli starter.
+3. **Gli esausti contavano.**
+
+Tutti e tre nascevano dalla stessa scelta: ricavare la fortuna dal dex a ogni
+chiamata. Ora i punti stanno **sul singolo Pokémon** (`f.luck`, assegnata in
+`makeFighter`), e i tre difetti spariscono insieme.
+
+### Le livree: come si disegnano
+
+`tools/extract-cromatici.mjs` porta qui i dati dell'originale e produce:
+
+| file | cos'è | peso |
+|---|---|---|
+| `data/cromatici.json` | le **terne** `[v0,v1,v2]` per 2210 sprite | 47 KiB, caricato all'avvio |
+| `data/cromatici-col.json` | le **tabelle colore** | 932 KiB, caricato **solo alla prima rara** |
+| `assets/pokemon/cromatico/…` | 247 PNG **dedicati** | 8,2 MiB, **solo nell'APK** |
+
+Cosa vuol dire ogni valore della terna (`pokemon-species.ts:410`):
+
+- **0** → lo sprite della cartella `shiny/`, quello che usiamo da sempre
+- **1** → si prende lo sprite **NORMALE** e lo si **ricolora** con una tabella
+  esadecimale (nell'originale è uno shader; qui è un canvas, fatto una volta e
+  tenuto in cache come `blob:`)
+- **2** → esiste un file dedicato `<nome>_<v+1>.png`
+
+⚠️ **La variante 0 non si tocca.** Tutte e 99 le specie che avrebbero
+`terna[0] != 0` hanno comunque lo sprite in `shiny/` (verificato): tenerlo
+com'era costa zero e non rischia regressioni su niente di funzionante.
+
+⚠️ **340 specie su 1084 non hanno livree** (Pidgey, Growlithe, Sandshrew…). Non è
+una nostra mancanza: nell'originale `generateShinyVariant` torna 0 se manca la
+voce nel masterlist. Quelle specie danno sempre e solo 1 punto.
+
+### Trappole trovate strada facendo
+
+- 🔴 **`data/variants.json` esisteva già e vuol dire le FORME** (Unown, Rotom).
+  Il file nuovo si chiama `cromatici.json`, e nel codice il campo è `shinyVar`
+  mentre `variant` resta la forma. Due cose diverse con nomi vicini.
+- 🔴 **`ensureSprites` cercava `"assets/pokemon"` nel `background-image`** per
+  decidere se lo sprite era già dipinto. Una livrea ricolorata è un `blob:`, che
+  di percorso non ne ha: il controllo diceva «non dipinto» a ogni giro e si
+  ridisegnava all'infinito. Ora confronta con `f.spr.sheet`. (Misurato dopo la
+  correzione con un `MutationObserver`: **0 riscritture in 3 secondi**.)
+- ⚠️ **Mi sono ingannato da solo con la mia stessa sonda.** `__items.premi(l)`
+  fissa la fortuna per misurare e la ripristina alla fine — ma il ripristino era
+  **fuori da un `finally`**, e `rollReward` lanciato fuori da una run lasciava la
+  fortuna **bloccata**. Per un giro la sonda diceva «fortuna 0» mentre la squadra
+  aveva 2 punti, e sembrava un difetto del gioco. È la stessa lezione del §32:
+  prima di dare la colpa al codice, controlla lo strumento con cui lo guardi.
+- Se il ricolore non trova **nessun** pixel da cambiare si ripiega apposta sulla
+  cromatica classica: meglio quella che un «cromatico» coi colori normali.
+
+### Le tinte
+
+Le tre livree hanno colori diversi anche nell'originale (`getVariantTint`):
+**oro** `#f8c020` · **ciano** `#20f8f0` · **cremisi** `#e81048`. Sono state
+portate su scintille e alone (`--crom-tinta` in CSS) e sulle stelline accanto al
+nome, che sono le icone vere dell'originale (`shiny_small*.png`, 8×8).
+⚠️ Prima la livrea comune era azzurra: ora è oro, perché l'azzurro serve a
+distinguere la **rara**. Fra una comune e una rara la livrea in sé può cambiare
+pochissimo — senza un segnale di colore non ti accorgeresti mai di quale hai preso.
+
+### Sonde nuove
+
+| comando | cosa fa |
+|---|---|
+| `__items.fortuna()` | da dove viene la fortuna, membro per membro, col rango e le percentuali |
+| `__items.premi(fortuna, prove)` | che premi escono a una data fortuna (la forza per la durata della prova) |
+| `__items.livree(specie, prove)` | il tiro 60/30/10, e se quella specie ha livree |
+| `__items.cromatico(specie, livrea, lato)` | come viene disegnata: file dedicato, ricolore o ripiego, con quanti pixel ha cambiato |
+| `__items.daiLivrea(i, livrea)` | rende cromatico un membro: l'unico modo di vedere un'epica senza un incontro su 10.240 |
+
+### Verificato (browser, 2026-08-20)
+
+- tiro livree su 20.000 prove: **60,0% / 30,0% / 10,0%**; Pidgey (senza livree) **100% comune**
+- ricolore reale: Pikachu rara **11 colori, 41.715 pixel**; epica **13 colori, 41.886**; Bulbasaur retro **8 colori, 12.352**
+- file dedicati: Charizard rara → `cromatico/front/6_2.png`, epica → `6_3.png`
+- **evoluzione**: Pikachu rara (2 punti) → Raichu, **punti ancora 2** (prima erano 0)
+- **catturato non cromatico**: Poochyena con `unlocked=2` e `shinyVar=2` nel dex → **0 punti**
+- **esausto**: Pikachu epica messa KO da un boss → resta a 3 punti suoi, ma la squadra passa da **fortuna 3 a 0**, rango da B- a D
+- **starter dal dex**: Bulbasaur con rara sbloccata → parte rara, **fortuna 2, rango C+, odds 85 (4,71%)**
+- cascata premi su 40.000 tiri per livello: COMMON **48,4% → 42,3%**, ROGUE **3,44% → 4,83%**, MASTER **0,57% → 1,24%** da fortuna 0 a 14
+- salvataggio: `shinyVar` e `luck` finiscono nello slot e tornano indietro
+- HUD: `🍀 B-` col colore del tier corrispondente
+
+### Cosa resta
+
+**Serve un APK nuovo** per gli 8,2 MiB di sprite dedicati: fino ad allora, sul
+telefono, le ~250 livree che hanno un file proprio **ripiegano sulla cromatica
+classica** (il gioco non si rompe, la fortuna resta giusta). Le altre 4173 —
+quelle che si ottengono ricolorando — funzionano subito, perché passano solo dai
+`data/*.json` e dagli sprite normali che nell'APK ci sono già.
+
+---

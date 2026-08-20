@@ -1200,17 +1200,36 @@ button.pd-card:not(:disabled):active { background: rgba(255,255,255,.14); }
    normale, e davanti al Pokémon non si capisce. Palette FREDDA, per non
    confonderlo con l'aura dorata delle fasi dei boss finali (`.stelle`).
    ========================================================================== */
-.sprite.cromatico { position: relative; filter: drop-shadow(0 0 6px rgba(150, 220, 255, .75)); }
+/* Le TRE livree cromatiche (§33) hanno tinte diverse anche nell'originale
+   (`getVariantTint`: oro 0xf8c020 · ciano 0x20f8f0 · cremisi 0xe81048). Serve:
+   fra una comune e una rara la livrea in sé può cambiare pochissimo, e senza
+   un segnale di colore non ti accorgeresti mai di aver preso quella che vale
+   il doppio di fortuna. Il colore sta in due variabili, così la regola delle
+   scintille resta una sola. */
+.sprite.cromatico {
+  position: relative;
+  --crom-tinta: 248, 192, 32;      /* oro: livrea comune */
+  --crom-brillo: #ffe9b0;
+  filter: drop-shadow(0 0 6px rgba(var(--crom-tinta), .75));
+}
+.sprite.cromatico.crom-1 { --crom-tinta: 32, 248, 240; --crom-brillo: #bfe9ff; }
+.sprite.cromatico.crom-2 { --crom-tinta: 232, 16, 72;  --crom-brillo: #ffb3c6; }
 .sprite.cromatico::before, .sprite.cromatico::after {
   content: ""; position: absolute; inset: -18%;
   pointer-events: none; border-radius: 50%;
   background:
     radial-gradient(circle at 16% 18%, #fff 0 1.6px, transparent 2.2px),
-    radial-gradient(circle at 78% 24%, #bfe9ff 0 2px, transparent 2.6px),
+    radial-gradient(circle at 78% 24%, var(--crom-brillo) 0 2px, transparent 2.6px),
     radial-gradient(circle at 30% 80%, #fff 0 1.4px, transparent 2px),
-    radial-gradient(circle at 88% 66%, #d9f3ff 0 1.8px, transparent 2.4px),
+    radial-gradient(circle at 88% 66%, var(--crom-brillo) 0 1.8px, transparent 2.4px),
     radial-gradient(circle at 52% 6%, #fff 0 1.6px, transparent 2.2px);
   animation: cromaScintilla 2.6s ease-in-out infinite;
+}
+/* Stellina accanto al nome nelle schede: sono le icone vere dell'originale
+   (`shiny_small*.png`, 8x8), una per livrea. Vanno tenute a pixel interi. */
+.crom-stella {
+  width: 10px; height: 9px; image-rendering: pixelated;
+  vertical-align: -1px; margin-right: 2px;
 }
 .sprite.cromatico::after { animation-duration: 3.7s; animation-direction: reverse; opacity: .7; }
 @keyframes cromaScintilla {
