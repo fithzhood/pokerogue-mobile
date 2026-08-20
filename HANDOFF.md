@@ -2534,3 +2534,40 @@ quelle che si ottengono ricolorando — funzionano subito, perché passano solo 
 `data/*.json` e dagli sprite normali che nell'APK ci sono già.
 
 ---
+
+### Coda del §33 — due cose trovate solo guardando il telefono vero
+
+**1. 🔴 Le micro-icone nuove non arrivano sul telefono.** Avevo messo le stelline
+in `assets/ui/shiny_*.png`: sul telefono **404**, riquadro vuoto accanto a ogni
+nome cromatico, e sarebbe rimasto così fino al prossimo APK. Gli asset viaggiano
+solo con l'APK, mai con l'aggiornamento a caldo (§28). La regola era **già
+scritta** nel CSS di `.dex-owned` dal §32 — «vale come regola per qualunque
+micro-icona nuova» — e non l'ho letta. Ora sono data URI dentro il CSS.
+👉 Prima di aggiungere un file in `assets/`, chiediti se serve **subito**: se sì e
+pesa meno di ~1 KB, va incorporato.
+
+**2. Le stelline dell'originale sono BIANCHE.** Le ho guardate ingrandite 4× e
+non c'era né oro né ciano: sono maschere, la tinta la mette il motore
+(`getVariantTint`). Adesso il PNG fa da `mask` e il colore lo mette
+`background-color` — stessa forma per tutte e tre, tinta diversa, che è
+esattamente la semantica dell'originale. Il cremisi è stato schiarito da
+`#e81048` a `#ff2d5e`: quello vero, su fondo scuro, spariva.
+
+⚠️ Misura presa sul telefono vero (384 CSS px, font_scale 1,3): lì il nome è
+**19 px**, e la stellina da 10 px con cui era nata non si vedeva. Ora il riquadro
+è 18×16, raddoppio esatto della sorgente, quindi i pixel restano netti.
+
+### La fortuna si deve VEDERE (richiesta del proprietario)
+
+Prima compariva solo come una sigla nella riga dei comandi, e **solo se maggiore
+di zero** — cioè quasi mai. Adesso:
+
+- **riga dei comandi**: sempre, anche a fortuna 0 (`🍀 D`), col colore del tier
+- **schermata Squadra**: una pastiglia `🍀 C+ · fortuna 2/14 · premi migliori 4,7%`,
+  e su ogni scheda i punti che quel membro porta (`🍀+2`), **sbarrati se è esausto**
+- **schermata dei premi**: la stessa pastiglia, perché è lì che la fortuna agisce
+
+La percentuale mostrata è quella vera del passo di promozione, `4/floor(512/(f+4))`,
+non un'etichetta decorativa.
+
+---

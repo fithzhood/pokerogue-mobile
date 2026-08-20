@@ -2025,8 +2025,10 @@
     return r >= 4 ? 0 : r >= 1 ? 1 : 2;      // 6/10 · 3/10 · 1/10
   }
   const CROM_IT = ["cromatico", "cromatico RARO", "cromatico EPICO"];
-  // stellina della livrea giusta (sono le icone vere dell'originale, 8x8)
-  const cromStella = v => `<img class="crom-stella" src="assets/ui/shiny_${v || 0}.png" alt="✨">`;
+  /* Stellina della livrea giusta. ⚠️ Uno `<span>` con l'immagine incorporata nel
+     CSS, non un `<img src="assets/…">`: gli asset non viaggiano con
+     l'aggiornamento a caldo e sul telefono darebbero 404 (§33). */
+  const cromStella = v => `<span class="crom-stella v${v || 0}"></span>`;
 
   /* --- FORTUNA ---------------------------------------------------------
      `getPartyLuckValue` (modifier-type.ts:2906): somma dei punti dei membri
@@ -2058,6 +2060,15 @@
   }
   /* Ranghi e colori dell'originale (`getLuckString` / `getLuckTextTint`). */
   const LUCK_RANK = ["D", "C", "C+", "B-", "B", "B+", "A-", "A", "A+", "A++", "S", "S+", "SS", "SS+", "SSS"];
+  /* Quanto vale la fortuna, detto in modo utile: la percentuale è quella che
+     conta davvero (probabilità che un premio salga di tier a ogni passo). */
+  function luckPct(l) { return (4 / Math.floor(512 / (l + 4)) * 100).toFixed(1).replace(".", ","); }
+  // pastiglia da mettere nelle schermate meta (Squadra, premi)
+  function luckBar() {
+    const l = runLuck();
+    return `<div class="luck-bar">🍀 <span class="lb-rango" style="color:${luckColor(l)}">${LUCK_RANK[l]}</span>`
+      + `<span class="lb-nota">fortuna ${l}/14 · premi migliori ${luckPct(l)}%</span></div>`;
+  }
   function luckColor(l) {
     if (l >= 14) return "#ffd05c";                 // il massimo: nell'originale è arcobaleno
     return l > 11 ? "#e07a2a" : l > 9 ? TIER_COL.MASTER : l > 5 ? TIER_COL.ROGUE
@@ -6335,7 +6346,7 @@
     const tfRow = tf
       ? `<div class="back-row"><button class="btn transform-btn" data-act="transform">${tf === "mega" ? "✨ MEGAEVOLVI" : "🔴 GIGAMAXIZZA"}</button></div>` : "";
     cmd().innerHTML = `
-      <div class="prompt-line">Cosa deve fare ${(chi || game.player).name}?${game.double ? ` <b>(${game.chooser === 1 ? "2°" : "1°"})</b>` : ""} <span class="hud">· ${alive}/${game.party.length} · 🔴${totalBalls()}${game.theftballs ? " 🕶" + game.theftballs : ""} · ₽${game.money}${runLuck() ? ` · 🍀<b style="color:${luckColor(runLuck())}">${LUCK_RANK[runLuck()]}</b>` : ""}</span></div>
+      <div class="prompt-line">Cosa deve fare ${(chi || game.player).name}?${game.double ? ` <b>(${game.chooser === 1 ? "2°" : "1°"})</b>` : ""} <span class="hud">· ${alive}/${game.party.length} · 🔴${totalBalls()}${game.theftballs ? " 🕶" + game.theftballs : ""} · ₽${game.money} · 🍀<b style="color:${luckColor(runLuck())}">${LUCK_RANK[runLuck()]}</b></span></div>
       <div class="grid2">
         <button class="btn main-fight" data-act="fight">Lotta</button>
         <button class="btn main-bag"   data-act="ball">Ball</button>
@@ -6389,8 +6400,11 @@
         const mv = M[m.id];
         return `<span class="pd-move${m.pp === 0 ? " vuota" : ""}"><span class="ticon t-${mv.type}"></span>${mv.it} <b>${m.pp}/${m.maxPp}</b></span>`;
       }).join("");
+      /* Quanto porta alla fortuna di squadra. Sbarrato se è esausto: gli
+         esausti non contano, ed è la domanda che uno si fa guardando qui. */
+      const lk = p.luck ? `<span class="pd-luck">🍀+${p.luck}</span>` : "";
       return `<button class="pd-card sceglibile ${p.fainted ? "ko" : ""}" data-i="${i}" ${selectable ? "" : "disabled"}>
-          <div class="pd-top"><span class="pd-name">${miniIcon(p.dex, 1.1)}${p.shiny ? cromStella(p.shinyVar) : ""}${p.name.replace("✨", "")}<span class="gen g-${p.gender}">${genderSymbol(p)}</span>${st}</span><span class="pd-lv">Lv.${p.level} ${tag}</span></div>
+          <div class="pd-top"><span class="pd-name">${miniIcon(p.dex, 1.1)}${p.shiny ? cromStella(p.shinyVar) : ""}${p.name.replace("✨", "")}<span class="gen g-${p.gender}">${genderSymbol(p)}</span>${st}${lk}</span><span class="pd-lv">Lv.${p.level} ${tag}</span></div>
           <div class="pd-types">${types} ${p.ability ? `<span class="pd-ab">${p.ability.it}</span>` : ""}${p.passiveAbility ? `<span class="pd-ab pd-pass">+${p.passiveAbility.it}</span>` : ""} ${held}</div>
           <div class="party-hp-track"><div class="party-hp-fill" style="width:${ratio * 100}%;background:${col};"></div></div>
           <div class="pd-hp">${Math.max(0, p.hp)}/${p.maxHp} PS · <span class="pd-exp">Lv.${p.level}${expEtichetta(p)}</span></div>
@@ -6407,6 +6421,7 @@
     showMetaScreen(`
       <div class="meta-title" style="font-size:clamp(19px,5.6vw,30px)">${title}</div>
       <div class="meta-sub">${sub}</div>
+      ${luckBar()}
       <div class="pd-list">${cards}</div>${boxLine}${backRow}`);
     metaEl().querySelectorAll(".pd-card[data-i]").forEach(b => b.onclick = () => {
       if (b.disabled) return;
@@ -9441,6 +9456,7 @@
       </div>
       <div class="meta-stats"><span>₽ ${game.money}</span><span>🔴 ${totalBalls()}</span><span>squadra ${aliveParty().length}/${game.party.length}</span></div>
       <div class="shopfull">
+        ${luckBar()}
         <div class="meta-sub">Scegli un premio</div>
         <div class="shop-cards">${cards}
           <button class="shop-card" data-act="reroll" style="background:#3a4250;" ${game.money < rerollCost ? "disabled" : ""}>
