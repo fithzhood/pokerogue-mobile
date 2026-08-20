@@ -1228,8 +1228,16 @@ button.pd-card:not(:disabled):active { background: rgba(255,255,255,.14); }
 /* Stellina accanto al nome nelle schede: sono le icone vere dell'originale
    (`shiny_small*.png`, 8x8), una per livrea. Vanno tenute a pixel interi. */
 .crom-stella {
-  width: 10px; height: 9px; image-rendering: pixelated;
-  vertical-align: -1px; margin-right: 2px;
+  /* Altezza 16px = raddoppio ESATTO della sorgente (8 px): a scala intera i
+     pixel restano netti, a scala 1,9x si sbaverebbero. Misurata sul telefono
+     vero (384 CSS px, font_scale 1,3): li' il nome e' 19 px, e la stellina da
+     10 px con cui era nata si perdeva del tutto. */
+  /* ⚠️ Riquadro FISSO 18x16, non width:auto: prima che il PNG sia decodificato
+     la larghezza automatica vale 0 e il nome scatta di lato quando arriva.
+     18x16 e' il doppio esatto sia della stellina 9x8 (rara/epica) sia della
+     8x8 (comune), che ci sta dentro centrata: nessuna delle tre si sbava. */
+  height: 16px; width: 18px; object-fit: contain; image-rendering: pixelated;
+  vertical-align: -3px; margin-right: 3px;
 }
 .sprite.cromatico::after { animation-duration: 3.7s; animation-direction: reverse; opacity: .7; }
 @keyframes cromaScintilla {
