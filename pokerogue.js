@@ -203,6 +203,8 @@
       // (0 = comune, 1 = rara, 2 = epica). È da qui che lo starter prende i
       // suoi punti di fortuna, come `getDexAttrLuck` nell'originale.
       shinyVar: {},
+      // sessi incontrati per specie: { SPECIE: 1|2|3 } (1 maschio, 2 femmina)
+      genders: {},
     };
   }
 
@@ -481,6 +483,52 @@
     return (Math.random() * 100 <= sp.malePercent) ? "MALE" : "FEMALE";
   }
   const genderSymbol = f => f && f.gender === "MALE" ? "♂" : f && f.gender === "FEMALE" ? "♀" : "";
+
+  /* ======================================================================
+     SESSO SBLOCCATO (dex) — §34
+
+     Come abilità e nature: nella scheda starter si sceglie il sesso, ma solo
+     fra quelli che hai già incontrato. Conta perché per certe specie il sesso
+     cambia tutto — un Combee femmina evolve in Vespiquen, uno maschio no — e
+     per 98 specie cambia anche lo sprite.
+
+     Il sesso COMUNE è sempre disponibile, quello raro va trovato: senza questa
+     regola una specie mai catturata non sarebbe schierabile affatto. «Comune»
+     vuol dire quello che esce più spesso (`malePercent >= 50`): per Combee,
+     87,5% maschi, di partenza puoi schierare solo il maschio — la femmina si
+     sblocca trovandone una, **o trovando una sua evoluzione** (Vespiquen è
+     femmina al 100%), perché la registrazione va sul CAPOSTIPITE come per le
+     abilità.
+     ====================================================================== */
+  const SESSO_M = 1, SESSO_F = 2;
+  /* Quali sessi ESISTONO per quella specie. */
+  function sessiPossibili(k) {
+    const mp = S[k] && S[k].malePercent;
+    if (mp == null) return ["GENDERLESS"];
+    if (mp <= 0) return ["FEMALE"];
+    if (mp >= 100) return ["MALE"];
+    return ["MALE", "FEMALE"];
+  }
+  const sessoComune = k => ((S[k] && S[k].malePercent) >= 50 ? "MALE" : "FEMALE");
+  function registraSesso(speciesId, gender) {
+    if (!gender || gender === "GENDERLESS") return null;
+    meta.genders = meta.genders || {};
+    const bit = gender === "MALE" ? SESSO_M : SESSO_F;
+    const prima = meta.genders[speciesId] || 0;
+    if (prima & bit) return null;                 // già visto: niente da dire
+    meta.genders[speciesId] = prima | bit;
+    /* Vale la pena annunciarlo solo se apre davvero una scelta nuova: per una
+       specie a sesso unico non hai guadagnato niente. */
+    return sessiPossibili(speciesId).length > 1 ? (gender === "MALE" ? "maschio" : "femmina") : null;
+  }
+  /* Quelli che puoi SCEGLIERE per quella specie nella schermata starter. */
+  function sessiSbloccati(k) {
+    const poss = sessiPossibili(k);
+    if (poss.length < 2) return poss;
+    const mask = (meta.genders && meta.genders[k]) || 0;
+    const comune = sessoComune(k);
+    return poss.filter(g => g === comune || (mask & (g === "MALE" ? SESSO_M : SESSO_F)));
+  }
   const rollNature = () => NATURE_KEYS[Math.floor(Math.random() * NATURE_KEYS.length)];
   // Moltiplicatore della natura su una statistica (i PS non sono mai toccati)
   function natureMult(f, stat) {
@@ -1931,7 +1979,7 @@
       // la natura scelta nella scheda vale da subito: `makeFighter` la usa nel
       // calcolo delle statistiche, non basta assegnarla dopo
       const mon = makeFighter(e.k, START_LEVEL, { shiny: e.shiny, nature: e.nature,
-                                                 shinyVar: (meta.shinyVar && meta.shinyVar[e.k]) || 0,
+                                                 shinyVar: e.shinyVar || 0, gender: e.gender,
                                                  ivs: bestIVsFor(e.k) || rollIVs(), ignoreArena: true });
       mon.luck = dexLuck(e.k);       // starter: fortuna dal DEX (§33)
       if (e.ability && ABIL[e.ability]) {
@@ -1959,7 +2007,8 @@
     // lo starter esce con la livrea migliore che hai sbloccato per quella specie
     const shinyVar = opts.shinyVar != null ? opts.shinyVar
       : (meta.shinyVar && meta.shinyVar[speciesId]) || 0;
-    const mon = makeFighter(speciesId, START_LEVEL, { shiny, shinyVar, ignoreArena: true });
+    const gender = opts.gender || sessiSbloccati(speciesId)[0];
+    const mon = makeFighter(speciesId, START_LEVEL, { shiny, shinyVar, gender, ignoreArena: true });
     mon.luck = dexLuck(speciesId);   // dal DEX, non dalla livrea a schermo (§33)
     if (opts.ability) mon.ability = opts.ability;
     if (opts.moves && opts.moves.length) {
@@ -3909,9 +3958,9 @@
       const caught = rollCapture(m, 2, 1);
       const msgs = [`Lanci una Theft Ball su ${m.name}…`];
       if (caught) {
-        const mon = makeFighter(m.speciesId, m.level, { shiny: m.shiny, shinyVar: m.shinyVar, ivs: m.ivs, variant: m.variant, abilIndex: m.abilIndex });
+        const mon = makeFighter(m.speciesId, m.level, { shiny: m.shiny, shinyVar: m.shinyVar, ivs: m.ivs, variant: m.variant, abilIndex: m.abilIndex, gender: m.gender });
         accogliPokemon(mon, msgs, "🕶 Rubato!");
-        registerCaught(m.speciesId, m.shiny, m.ivs, msgs, m.variant, m.abilIndex, m.nature, m.shinyVar);
+        registerCaught(m.speciesId, m.shiny, m.ivs, msgs, m.variant, m.abilIndex, m.nature, m.shinyVar, m.gender);
       } else msgs.push(`${m.name} è sfuggito alla Theft Ball!`);
       renderScene();
       queueMessages(msgs, () => chiediPostoInSquadra(() => openShop()));
@@ -3981,7 +4030,7 @@
   // Registra una specie catturata nel meta: starter sbloccato, caramella, IV migliori.
   /* ⚠️ `variant` qui è la FORMA (Unown-B, Rotom Lavaggio…), `shinyVar` è la
      LIVREA cromatica. Due cose diverse con nomi vicini: attenzione. */
-  function registerCaught(speciesId, shiny, ivs, messages, variant, abilIndex, nature, shinyVar) {
+  function registerCaught(speciesId, shiny, ivs, messages, variant, abilIndex, nature, shinyVar, gender) {
     if (variant && registerForm(S[speciesId].dex, variant) && messages) {
       const tot = collectableForms(speciesId);
       const got = Object.keys(meta.formsSeen[S[speciesId].dex]).length;
@@ -4042,6 +4091,13 @@
     if (natNuova && messages) {
       stessoMomento(messages, `🌱 Nuova natura sbloccata per ${S[rootOf(speciesId)].it}: ${natNuova}`);
     }
+    /* E il SESSO. Anche questo sul capostipite: prendere una Vespiquen (femmina
+       al 100%) è il modo di sbloccare la Combee femmina, che è l'unica che poi
+       ci evolve. */
+    const sesNuovo = registraSesso(rootOf(speciesId), gender);
+    if (sesNuovo && messages) {
+      stessoMomento(messages, `${gender === "MALE" ? "♂" : "♀"} Ora puoi schierare ${S[rootOf(speciesId)].it} ${sesNuovo}`);
+    }
     saveMeta();
   }
 
@@ -4078,10 +4134,10 @@
   function risolviUltimaBall(enemy, caught) {
     const messages = [];
     if (caught) {
-      const mon = makeFighter(enemy.speciesId, enemy.level, { shiny: enemy.shiny, shinyVar: enemy.shinyVar, ivs: enemy.ivs, variant: enemy.variant, abilIndex: enemy.abilIndex }); // fresco, HP/PP pieni
+      const mon = makeFighter(enemy.speciesId, enemy.level, { shiny: enemy.shiny, shinyVar: enemy.shinyVar, ivs: enemy.ivs, variant: enemy.variant, abilIndex: enemy.abilIndex, gender: enemy.gender }); // fresco, HP/PP pieni
       accogliPokemon(mon, messages, "Preso!");
       // meta-progressione: starter sbloccato + caramella + IV migliori
-      registerCaught(enemy.speciesId, enemy.shiny, enemy.ivs, messages, enemy.variant, enemy.abilIndex, enemy.nature, enemy.shinyVar);
+      registerCaught(enemy.speciesId, enemy.shiny, enemy.ivs, messages, enemy.variant, enemy.abilIndex, enemy.nature, enemy.shinyVar, enemy.gender);
     } else {
       messages.push(`Oh no! ${enemy.name} si è liberato!`);
     }
@@ -6528,10 +6584,10 @@
     const log = makeLog();
 
     if (caught) {
-      const mon = makeFighter(enemy.speciesId, enemy.level, { shiny: enemy.shiny, shinyVar: enemy.shinyVar, ivs: enemy.ivs, variant: enemy.variant, abilIndex: enemy.abilIndex });
+      const mon = makeFighter(enemy.speciesId, enemy.level, { shiny: enemy.shiny, shinyVar: enemy.shinyVar, ivs: enemy.ivs, variant: enemy.variant, abilIndex: enemy.abilIndex, gender: enemy.gender });
       const stolen = !!enemy.trainer;
       accogliPokemon(mon, log, stolen ? "🕶 Rubato!" : "Preso!");
-      registerCaught(enemy.speciesId, enemy.shiny, enemy.ivs, log, enemy.variant, enemy.abilIndex, enemy.nature, enemy.shinyVar);
+      registerCaught(enemy.speciesId, enemy.shiny, enemy.ivs, log, enemy.variant, enemy.abilIndex, enemy.nature, enemy.shinyVar, enemy.gender);
       enemy.fainted = true;                        // esce dal campo
       game.capturedThisWave = true;                // niente seconda offerta a fine lotta
       if (stolen) {
@@ -7272,6 +7328,10 @@
            è l'altra via per riempire la scheda, oltre alle catture. */
         const natNata = registraNatura(rootOf(sp), rollNature());
         if (natNata) stessoMomento(extra, `🌱 È nato di natura ${natNata}: sbloccata per ${S[sp].it}!`);
+        /* Anche il SESSO del nato entra nel dex: è l'altra via per sbloccare
+           quello raro, oltre a catturarlo. */
+        const sesNato = registraSesso(rootOf(sp), rollGender(S[sp]));
+        if (sesNato) stessoMomento(extra, `${sesNato === "maschio" ? "♂" : "♀"} È nato ${sesNato}: ora puoi schierare ${S[sp].it} ${sesNato}`);
         /* Ogni schiusa sblocca UNA mossa da uovo della specie nata: e' l'unico
            modo di ottenerle, ed e' cio' che fa crescere le mosse iniziali
            selezionabili nel menu di partenza. Il gacha MOSSE rende molto piu'
@@ -8242,22 +8302,57 @@
   let starterTeam = [];     // [{k, ability, nature, moves, shiny, pkrs}]
 
   // Costo effettivo: base meno le riduzioni comprate con le caramelle (min 1).
+  const baseCost = k => (S[k] && S[k].starterCost) ? S[k].starterCost : 3;
+  /* ======================================================================
+     PREZZI IN CARAMELLE — la tabella vera dell'originale
+     (`allStarterCandyCosts`, data/balance/starters.ts), indicizzata dal costo
+     in punti dello starter.
+
+     🔴 Va nel verso OPPOSTO a quello che avevamo. Noi facevamo
+     `passiva = 10 × costo` e `riduzione = 5 × costo × (fatte+1)`, cioè più il
+     Pokémon è pregiato più costa. L'originale fa il contrario: la passiva
+     costa **40** caramelle per uno starter da 1-2 punti e **10** per uno da
+     8-10. Ha senso, ed è il motivo per cui è così: un Pokémon comune lo
+     incontri di continuo e le caramelle si accumulano da sole, un leggendario
+     lo vedi una volta ogni tanto. Col nostro conto la passiva di un comune
+     costava 20 invece di 40 (metà prezzo) e quella di un leggendario 100
+     invece di 10 (dieci volte tanto): il progresso era storto in entrambe le
+     direzioni.
+     ====================================================================== */
+  const CANDY_COSTS = [
+    { passive: 40, cut: [25, 60] },   // costo 1
+    { passive: 40, cut: [25, 60] },   // 2
+    { passive: 35, cut: [20, 50] },   // 3
+    { passive: 30, cut: [15, 40] },   // 4
+    { passive: 25, cut: [12, 35] },   // 5
+    { passive: 20, cut: [10, 30] },   // 6
+    { passive: 15, cut: [8, 20] },    // 7
+    { passive: 10, cut: [5, 15] },    // 8
+    { passive: 10, cut: [5, 15] },    // 9
+    { passive: 10, cut: [5, 15] },    // 10
+  ];
+  const CUT_MAX = 2;                  // `valueReductionMax` dell'originale
+  const candyRow = k => CANDY_COSTS[Math.min(10, Math.max(1, baseCost(k))) - 1];
+  /* Ogni riduzione toglie 1 punto, e sotto l'1 DIMEZZA
+     (`getSpeciesStarterValue`): un costo 1 diventa 0,5 e poi 0,25. È così che
+     a gioco avanzato ci stanno sei Pokémon buoni dentro i 10 punti.
+     ⚠️ Le riduzioni sono al massimo DUE, non infinite come prima. */
   function starterCost(k) {
-    const base = S[k] && S[k].starterCost ? S[k].starterCost : 3;
-    const cut = (meta.costCut && meta.costCut[k]) || 0;
-    return Math.max(1, base - cut);
+    let v = baseCost(k);
+    const cut = Math.min(CUT_MAX, (meta.costCut && meta.costCut[k]) || 0);
+    for (let i = 0; i < cut; i++) v = v > 1 ? v - 1 : v / 2;
+    return v;
   }
+  // numeri come li scrive un italiano: 2 · 1,5 · 0,25
+  const costoIt = v => String(Math.round(v * 100) / 100).replace(".", ",");
   function candyOf(k) { return (meta.candy && meta.candy[k]) || 0; }
-  // Prezzi in caramelle (come PokeRogue: più il Pokemon è costoso, più caramelle serve)
+  /* null quando le due riduzioni sono già state prese: non c'è più niente da
+     comprare, e il pulsante lo dice invece di restare acceso a vuoto. */
   function costCutPrice(k) {
-    const base = S[k] && S[k].starterCost ? S[k].starterCost : 3;
     const done = (meta.costCut && meta.costCut[k]) || 0;
-    return 5 * base * (done + 1);
+    return done >= CUT_MAX ? null : candyRow(k).cut[done];
   }
-  function passivePrice(k) {
-    const base = S[k] && S[k].starterCost ? S[k].starterCost : 3;
-    return 10 * base;
-  }
+  function passivePrice(k) { return candyRow(k).passive; }
   function teamCost() { return starterTeam.reduce((s, e) => s + starterCost(e.k), 0); }
   function budgetLeft() { return STARTER_BUDGET - teamCost(); }
 
@@ -8382,7 +8477,7 @@
         ${candyOf(k) ? `<span class="sc-candy">🍬${candyOf(k)}</span>` : ""}</button>`;
     }).join("");
     const teamRow = starterTeam.length
-      ? starterTeam.map((e, i) => `<button class="team-slot" data-rm="${i}">${miniIcon(S[e.k].dex, 1.1)}<span>${S[e.k].it}</span><span class="ts-cost">${starterCost(e.k)}</span></button>`).join("")
+      ? starterTeam.map((e, i) => `<button class="team-slot" data-rm="${i}">${miniIcon(S[e.k].dex, 1.1)}<span>${S[e.k].it}</span><span class="ts-cost">${costoIt(starterCost(e.k))}</span></button>`).join("")
       : `<div class="meta-sub" style="margin:0">Nessun Pokémon scelto — toccane uno sotto</div>`;
     // conteggio del dex, il numero che interessa davvero a chi colleziona
     // conta gli SBLOCCATI, non i catturati: i 27 di partenza sono giocabili
@@ -8392,7 +8487,7 @@
     const opt = (v, cur, label) => `<option value="${v}"${v == cur ? " selected" : ""}>${label}</option>`;
     showMetaScreen(`
       <div class="meta-title" style="font-size:clamp(19px,5.6vw,29px)">Componi la Squadra</div>
-      <div class="budget-bar"><span>Punti: <b>${teamCost()}</b> / ${STARTER_BUDGET}</span>
+      <div class="budget-bar"><span>Punti: <b>${costoIt(teamCost())}</b> / ${STARTER_BUDGET}</span>
         <span class="budget-left">${left} disponibili</span></div>
       <div class="starter-team">${teamRow}</div>
       <div class="filter-bar">
@@ -8459,8 +8554,20 @@
     const abilPool = abilitaSbloccate(k);
     const abilTutte = [...(sp.abilities.normal || []), ...(sp.abilities.hidden ? [sp.abilities.hidden] : [])];
     const natPool = natureSbloccate(k);
+    /* SESSO e LIVREA sono scelte come le altre: si parte da quella di default
+       (il sesso comune, la livrea più alta che hai) e si cambia dalla scheda. */
+    const sessoPool = sessiSbloccati(k);
+    /* ⚠️ Il tetto non e' solo quello che hai sbloccato: 340 specie non hanno
+       livree rare nell'originale (Combee fra queste), e offrire una "rara" che
+       poi si disegna identica alla comune sarebbe una bugia. */
+    const haLivree = !!cromTerna("front", S[k].dex, null);
+    const livreaMax = haLivree ? ((meta.shinyVar && meta.shinyVar[k]) || 0) : 0;
     starterCfg = {
       k, shiny, pkrs,
+      gender: sessoPool[0],
+      sessoPool,
+      shinyVar: livreaMax,
+      livreaMax,
       ability: abilPool[0],
       nature: natPool[0],
       natPool,
@@ -8512,7 +8619,13 @@
 
   function renderStarterDetail() {
     const c = starterCfg, sp = S[c.k];
-    const bs = sp.baseStats;
+    /* Per Meowstic, Indeedee, Basculegion e Oinkologne il sesso È una forma
+       diversa, con tipi e statistiche sue: la scheda deve mostrare quelle
+       dell'esemplare che schiererai, non quelle del maschio per tutti. */
+    const forma = FORM_BY_GENDER.has(c.k) ? formAt(c.k, c.gender === "FEMALE" ? 1 : 0) : null;
+    const cutPrice = costCutPrice(c.k);
+    const bs = (forma && forma.baseStats) ? forma.baseStats : sp.baseStats;
+    const tipi = (forma && forma.types) ? forma.types : sp.types;
     const statBar = (lab, v) => `<div class="stat-row"><span class="stat-lab">${lab}</span><div class="stat-track"><div class="stat-fill" style="width:${Math.min(100, v / STAT_MAX * 100)}%"></div></div><span class="stat-val">${v}</span></div>`;
     /* Tutte e tre le abilità sono in elenco, ma quelle non ancora sbloccate
        sono chiuse col lucchetto: si vede cosa c'è da conquistare. */
@@ -8562,22 +8675,55 @@
     const eggNote = eggTot
       ? `<div class="sd-eggnote">🥚 Mosse da uovo: <b>${c.eggPool.length}/${eggTot}</b> sbloccate${c.eggPool.length < eggTot ? " · si sbloccano facendo schiudere le uova" : ""}</div>`
       : "";
+    /* SESSO — si vedono tutti quelli che la specie può avere, chiuso col
+       lucchetto quello che non hai ancora trovato. Per le specie a sesso unico
+       (Vespiquen) e per quelle senza sesso la riga non ha scelte da offrire:
+       si mostra come semplice etichetta, non come pulsantiera finta. */
+    const sessiTutti = sessiPossibili(c.k);
+    const sessoRiga = sessiTutti[0] === "GENDERLESS"
+      ? `<span class="sd-fisso">⚲ senza sesso</span>`
+      : sessiTutti.length === 1
+        ? `<span class="sd-fisso">${sessiTutti[0] === "MALE" ? "♂ solo maschio" : "♀ solo femmina"}</span>`
+        : sessiTutti.map(g => {
+            const libera = c.sessoPool.includes(g);
+            const m = g === "MALE";
+            return `<button class="chip sesso-chip ${m ? "m" : "f"} ${c.gender === g ? "on" : ""} ${libera ? "" : "chiusa"}"
+              data-sex="${g}" ${libera ? "" : "disabled"}
+              title="${libera ? "" : "trovane uno per sbloccarlo"}">${libera ? "" : "🔒 "}${m ? "♂ maschio" : "♀ femmina"}</button>`;
+          }).join("")
+          + (c.sessoPool.length < 2 ? `<span class="sd-nota">l'altro si sblocca trovandolo (anche una sua evoluzione)</span>` : "");
+    /* LIVREA — appare solo se di quella specie hai un cromatico. La fortuna NON
+       dipende da quale scegli: viene dal dex (§33), quindi giocarlo normale non
+       ti costa niente. Va detto, o sembra un difetto. */
+    const livreaRiga = c.livreaMax != null && meta.unlocked[c.k] === 2
+      ? `<button class="chip liv-chip ${!c.shiny ? "on" : ""}" data-liv="-1">normale</button>`
+        + [0, 1, 2].filter(v => v <= c.livreaMax).map(v =>
+            `<button class="chip liv-chip ${c.shiny && c.shinyVar === v ? "on" : ""}" data-liv="${v}">${cromStella(v)}${["comune", "rara", "epica"][v]}</button>`).join("")
+        + `<span class="sd-nota">la fortuna resta ${dexLuck(c.k)}: viene dal dex, non da come lo giochi</span>`
+      : "";
     showMetaScreen(`
       <div class="sd-head">
-        <span class="sd-sprite" id="sdSprite"></span>
-        <div class="sd-info">
-          <div class="sd-name">${c.shiny ? cromStella((meta.shinyVar && meta.shinyVar[c.k]) || 0) : ""}${sp.it} ${c.pkrs ? '<span class="sb-pkrs">💜</span>' : ""} ${hasRibbon(c.k) ? "🎀" : ""}</div>
-          <div class="sd-types">${sp.types.map(t => `<span class="ticon t-${t}"></span>`).join("")}</div>
-          <div class="sd-abrow">Abilità: ${abils}</div>
-          ${c.info && c.info.tipo === "ab" ? snippetAbilita(c.info.id) : ""}
-          <div class="sd-abrow">Natura: ${nature}</div>
-          <div class="sd-passive">Passiva: <b>${(ABIL[sp.passive] || {}).it || "—"}</b>${meta.passiveOn && meta.passiveOn[c.k] ? " ✅" : " 🔒"} · Costo: <b>${starterCost(c.k)}</b> punti</div>
-          <div class="sd-candy">🍬 ${candyOf(c.k)} caramelle
-            <button class="chip candy-btn" data-cc="1" ${candyOf(c.k) >= costCutPrice(c.k) && starterCost(c.k) > 1 ? "" : "disabled"}>−1 costo (${costCutPrice(c.k)})</button>
-            <button class="chip candy-btn" data-cp="1" ${!(meta.passiveOn && meta.passiveOn[c.k]) && candyOf(c.k) >= passivePrice(c.k) ? "" : "disabled"}>Sblocca passiva (${passivePrice(c.k)})</button>
-          </div>
+        <div class="sd-sprite-box"><span class="sd-sprite" id="sdSprite"></span></div>
+        <div class="sd-id">
+          <div class="sd-name">${c.shiny ? cromStella(c.shinyVar) : ""}${sp.it}${genderSymbol({ gender: c.gender })} ${c.pkrs ? '<span class="sb-pkrs">💜</span>' : ""} ${hasRibbon(c.k) ? "🎀" : ""}</div>
+          <div class="sd-types">${tipi.map(t => `<span class="ticon t-${t}"></span>`).join("")}</div>
+          <div class="sd-passive">Passiva: <b>${(ABIL[sp.passive] || {}).it || "—"}</b>${meta.passiveOn && meta.passiveOn[c.k] ? " ✅" : " 🔒"}</div>
+          <div class="sd-passive">Occupa <b>${costoIt(starterCost(c.k))}</b> dei ${STARTER_BUDGET} punti squadra</div>
         </div>
       </div>
+      <div class="sd-riga"><span class="sd-lab">🍬 ${candyOf(c.k)}</span><span class="sd-chips">
+        ${cutPrice == null
+          ? `<span class="sd-nota">costo già al minimo</span>`
+          : `<button class="chip candy-btn" data-cc="1" ${candyOf(c.k) >= cutPrice ? "" : "disabled"}>−1 costo · 🍬${cutPrice}</button>`}
+        ${meta.passiveOn && meta.passiveOn[c.k]
+          ? `<span class="sd-nota">passiva già sbloccata</span>`
+          : `<button class="chip candy-btn" data-cp="1" ${candyOf(c.k) >= passivePrice(c.k) ? "" : "disabled"}>Sblocca passiva · 🍬${passivePrice(c.k)}</button>`}
+      </span></div>
+      <div class="sd-riga"><span class="sd-lab">Sesso</span><span class="sd-chips">${sessoRiga}</span></div>
+      ${livreaRiga ? `<div class="sd-riga"><span class="sd-lab">Livrea</span><span class="sd-chips">${livreaRiga}</span></div>` : ""}
+      <div class="sd-riga"><span class="sd-lab">Abilità</span><span class="sd-chips">${abils}</span></div>
+      ${c.info && c.info.tipo === "ab" ? snippetAbilita(c.info.id) : ""}
+      <div class="sd-riga"><span class="sd-lab">Natura</span><span class="sd-chips">${nature}</span></div>
       <div class="sd-stats">
         ${statBar("PS", bs.hp)}${statBar("Att", bs.atk)}${statBar("Dif", bs.def)}
         ${statBar("A.Sp", bs.spatk)}${statBar("D.Sp", bs.spdef)}${statBar("Vel", bs.spd)}
@@ -8586,22 +8732,27 @@
       <div class="move-chips">${moves}</div>
       ${c.info && c.info.tipo === "mv" ? snippetMossa(c.info.id) : ""}
       ${eggNote}
-      <div class="meta-actions two-col">
+      <div class="meta-actions two-col sd-azioni">
         <button class="meta-btn ghost" data-act="back">Indietro</button>
         <button class="meta-btn primary" data-act="go" ${c.moves.length ? "" : "disabled"}>➕ Aggiungi ${sp.it}</button>
       </div>`);
-    // sprite grande
-    loadSprite(sp.dex, "front", c.shiny, false, (meta.shinyVar && meta.shinyVar[c.k]) || 0).then(s => {
-      const el = document.getElementById("sdSprite"); if (!el || !s) return;
-      const k = Math.min(1.4, 88 / s.frame.h, 88 / s.frame.w);
-      el.style.width = s.frame.w * k + "px"; el.style.height = s.frame.h * k + "px";
-      el.style.background = `url("${s.sheet}") -${s.frame.x * k}px -${s.frame.y * k}px / ${s.sheet_w * k}px ${s.sheet_h * k}px no-repeat`;
-      el.style.imageRendering = "pixelated";
-    });
+    /* Anteprima: è l'esemplare che schiererai davvero, sesso e livrea comprese.
+       Si passa da `loadFighterSprite` e non da `loadSprite` perché per Meowstic
+       e compagnia il sesso È una forma, e per le 98 specie con `genderDiffs` la
+       femmina ha il suo file. */
+    loadFighterSprite({ dex: sp.dex, speciesId: c.k, shiny: c.shiny, shinyVar: c.shinyVar,
+                        gender: c.gender, formKey: forma ? forma.key : null, variant: null }, "front")
+      .then(s => {
+        const el = document.getElementById("sdSprite"); if (!el || !s) return;
+        const k = Math.min(1.7, 104 / s.frame.h, 104 / s.frame.w);
+        el.style.width = s.frame.w * k + "px"; el.style.height = s.frame.h * k + "px";
+        el.style.background = `url("${s.sheet}") -${s.frame.x * k}px -${s.frame.y * k}px / ${s.sheet_w * k}px ${s.sheet_h * k}px no-repeat`;
+        el.style.imageRendering = "pixelated";
+      });
     const ccBtn = metaEl().querySelector("[data-cc]");
     if (ccBtn) ccBtn.onclick = () => {
       const price = costCutPrice(c.k);
-      if (candyOf(c.k) < price || starterCost(c.k) <= 1) return;
+      if (price == null || candyOf(c.k) < price) return;
       meta.candy[c.k] -= price;
       meta.costCut = meta.costCut || {};
       meta.costCut[c.k] = (meta.costCut[c.k] || 0) + 1;
@@ -8616,6 +8767,12 @@
       meta.passiveOn[c.k] = true;
       saveMeta(); renderStarterDetail();
     };
+    metaEl().querySelectorAll("[data-sex]").forEach(b => b.onclick = () => { c.gender = b.dataset.sex; renderStarterDetail(); });
+    metaEl().querySelectorAll("[data-liv]").forEach(b => b.onclick = () => {
+      const v = parseInt(b.dataset.liv, 10);
+      c.shiny = v >= 0; c.shinyVar = v >= 0 ? v : 0;
+      renderStarterDetail();
+    });
     metaEl().querySelectorAll("[data-ab]").forEach(b => b.onclick = () => { c.ability = b.dataset.ab; renderStarterDetail(); });
     metaEl().querySelectorAll("[data-nat]").forEach(b => b.onclick = () => { c.nature = b.dataset.nat; renderStarterDetail(); });
     const natPiu = metaEl().querySelector("[data-nat-tutte]");
@@ -8632,7 +8789,8 @@
     metaEl().querySelector('[data-act="back"]').onclick = renderStarterSelect;
     metaEl().querySelector('[data-act="go"]').onclick = () => {
       // aggiunge alla squadra iniziale (sistema a punti), poi torna alla scelta
-      starterTeam.push({ k: c.k, ability: c.ability, nature: c.nature, moves: c.moves.slice(), shiny: c.shiny, pkrs: c.pkrs });
+      starterTeam.push({ k: c.k, ability: c.ability, nature: c.nature, moves: c.moves.slice(),
+                         shiny: c.shiny, shinyVar: c.shinyVar, gender: c.gender, pkrs: c.pkrs });
       renderStarterSelect();
     };
   }

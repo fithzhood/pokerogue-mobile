@@ -2605,3 +2605,122 @@ Verificato sul telefono dopo l'installazione:
   e le tre tinte si distinguono a occhio)
 
 ---
+
+## 34. La scheda starter rifatta: sesso, livrea, e i prezzi in caramelle (2026-08-20)
+
+Il proprietario, guardando la scheda di Combee sul telefono: «lo sprite occupa
+troppo spazio che rimane vuoto, alcune mosse non si vedono e manca la possibilità
+di selezionare il sesso». Poi: «qualora avessi la versione shiny dovrei poterla
+selezionare da qui». E infine: «la passiva dice che costa punti, che punti?
+caramelle? ed è corretto che costi solo 2?».
+
+Quattro segnalazioni, quattro cose diverse. La terza e la quarta erano difetti
+veri che non c'entravano col layout.
+
+### Cosa non andava, misurato (384×832)
+
+| | |
+|---|---|
+| `.sd-head` | 347×**273** px, ma lo sprite dentro è **88×50** → ~220 px di colonna vuota |
+| `.sd-info` | tutte le pulsantiere schiacciate in **245 px** di larghezza, a capo il doppio del necessario |
+| `.move-chips` | riquadro da **74 px** con **99 px** di contenuto → quarta mossa tagliata a metà |
+
+Il riquadro delle mosse aveva `overflow-y: auto`, quindi tecnicamente scorreva —
+ma su un telefono, senza barra di scorrimento e dentro una pagina che a sua volta
+scorre, questo è indistinguibile da «rotto».
+
+### Com'è adesso
+
+- testa compatta: sprite in un riquadro suo di **104 px**, accanto nome, tipi,
+  passiva e costo. Da 273 px a 104.
+- tutte le pulsantiere a **tutta larghezza**, ognuna con la sua etichetta a
+  sinistra (Sesso · Livrea · Abilità · Natura), incolonnate
+- 🔴 **niente più scorrimenti annidati**: le mosse prendono l'altezza che serve e
+  scorre la pagina. I due tasti sono `sticky` in fondo, così «Aggiungi» è sempre
+  a portata senza scorrere
+- ⚠️ La barra appiccicata ha il fondo **pieno**, non sfumato: con la sfumatura la
+  nota delle uova si leggeva in trasparenza sotto i tasti (visto a schermo).
+
+### Il SESSO come voce del dex
+
+Richiesta precisa: «se non ho mai trovato un combee femmina (o la sua evoluzione)
+potrò scegliere come starter solo la versione maschile».
+
+Fatto come abilità e nature: `meta.genders[SPECIE]` è una maschera (1 maschio,
+2 femmina), si riempie catturando e facendo schiudere, e si registra **sul
+CAPOSTIPITE** — è questo che fa funzionare il caso Combee: Vespiquen è femmina al
+100%, quindi prenderne una sblocca la Combee femmina, che è l'unica che poi ci si
+evolve.
+
+**Il sesso COMUNE è sempre disponibile**, quello raro va trovato. «Comune» vuol
+dire `malePercent >= 50`: per Combee (87,5% maschi) parti col maschio. Senza
+questa regola una specie mai catturata non sarebbe schierabile affatto.
+
+Le specie a sesso unico e quelle senza sesso mostrano un'etichetta, non una
+pulsantiera finta: `⚲ senza sesso` (Magnemite), `♂ solo maschio` (Tauros).
+
+⚠️ Il sesso non è cosmetico: per **Meowstic, Indeedee, Basculegion e Oinkologne**
+è una FORMA diversa, con tipi e statistiche sue — la scheda ora mostra quelle
+dell'esemplare che schiererai davvero, non quelle del maschio per tutti. E per 98
+specie cambia lo sprite (`genderDiffs`). Il gate sulle evoluzioni c'era già
+(`evoConditionOk`, riga «sesso»): non l'ho toccato, ora è solo raggiungibile.
+
+### La LIVREA scegliibile
+
+Se di quella specie hai un cromatico, una riga permette di scegliere fra
+`normale` e le livree sbloccate. Due paletti:
+
+- il tetto **non** è solo `meta.shinyVar[k]`: 340 specie non hanno livree rare
+  nell'originale (Combee fra queste), e offrire una «rara» che poi si disegna
+  identica alla comune sarebbe una bugia. Si guarda anche `cromTerna`.
+- la riga dice esplicitamente **«la fortuna resta N: viene dal dex, non da come
+  lo giochi»**. Senza quella frase, giocare la versione normale sembrerebbe far
+  perdere punti — e invece è la regola dell'originale (§33).
+
+### 🔴 I prezzi in caramelle erano INVERTITI
+
+«Costo: 2 punti» sulla riga della passiva era il costo in **punti squadra**, non
+il prezzo della passiva: due numeri diversi appiccicati nella stessa frase. Ora
+sono due righe separate, e i pulsanti dicono `Sblocca passiva · 🍬40`.
+
+Ma controllando il prezzo è saltato fuori di peggio. La tabella vera
+(`allStarterCandyCosts`, data/balance/starters.ts) va nel verso **opposto** al
+nostro:
+
+| costo in punti | passiva (originale) | passiva (nostra, prima) |
+|---|---|---|
+| 1-2 | **40** | 10-20 |
+| 5 | 25 | 50 |
+| 8-10 | **10** | 80-100 |
+
+L'originale fa pagare **di più** la passiva degli starter economici e **di meno**
+quella dei costosi — e ha senso: un Pokémon comune lo incontri di continuo e le
+caramelle si accumulano da sole, un leggendario no. Noi facevamo `10 × costo`,
+cioè il contrario: metà prezzo sul caso comune, **dieci volte tanto** su un
+leggendario. Stessa cosa per le riduzioni di costo (`5 × base × (fatte+1)` invece
+della tabella `[25, 60]` / `[5, 15]`).
+
+Corrette due altre cose trovate lì:
+
+- le riduzioni di costo sono al massimo **DUE** (`valueReductionMax`), non
+  infinite come da noi
+- ogni riduzione toglie 1 punto, e **sotto l'1 dimezza**
+  (`getSpeciesStarterValue`): un costo 1 diventa 0,5 e poi 0,25. È così che a
+  gioco avanzato ci stanno sei Pokémon buoni dentro i 10 punti. Noi ci fermavamo
+  a 1. I costi frazionari si scrivono all'italiana (`costoIt`: 0,5 non 0.5).
+
+### Verificato (browser a 384×832)
+
+- la scheda di Combee ci sta tutta: tutte e quattro le mosse visibili, niente
+  tagliato, 891 px di contenuto in 832 di schermo con i tasti sempre raggiungibili
+- sesso bloccato → `🔒 ♀ femmina` non cliccabile, con la nota su come sbloccarla
+- sbloccato → si sceglie, il nome diventa `Combee♀` e lo sprite passa a
+  `assets/pokemon/femmina/shiny/front/415.png` (Combee ha `genderDiffs`)
+- la scelta arriva davvero in partita: in campo esce **✨Combee♀**
+- livrea: per Combee (senza livree rare) restano solo `normale` e `comune`
+- fortuna 2 con livrea `comune` scelta a mano → conferma che viene dal dex
+- casi limite: Magnemite `⚲ senza sesso`, Tauros `♂ solo maschio`
+- prezzi: Combee (costo 2) mostra `−1 costo · 🍬25` e `Sblocca passiva · 🍬40`,
+  che sono i numeri della tabella originale
+
+---

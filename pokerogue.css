@@ -273,6 +273,23 @@ html, body {
 .pd-luck { font-size: .78em; color: var(--muted, #9aa4b4); margin-left: 4px; white-space: nowrap; }
 .pd-card.ko .pd-luck { text-decoration: line-through; opacity: .6; }
 
+/* I due tasti della scheda starter restano appiccicati in fondo: la scheda
+   adesso può essere più alta dello schermo, e «Aggiungi» non deve costringerti
+   a scorrere per trovarlo. Lo sfondo è pieno, o le pulsantiere ci passerebbero
+   sotto in trasparenza. */
+.meta-actions.sd-azioni {
+  position: sticky; bottom: 0; z-index: 2;
+  margin-top: 6px; padding: 8px 0 4px;
+  /* ⚠️ Fondo PIENO, non un velo sfumato. Una barra appiccicata in fondo, per
+     come funziona `sticky`, si solleva sopra il contenuto quando la pagina non
+     e' ancora scorsa: col velo la nota delle uova si leggeva IN TRASPARENZA
+     sotto i due tasti (visto a schermo). Con il fondo pieno resta semplicemente
+     coperta, e scorrendo di un dito ricompare sopra la barra.
+     #0c0f18 e' il fondo del gradiente di #meta. */
+  background: #0c0f18;
+  box-shadow: 0 -12px 14px -8px #0c0f18;
+}
+
 /* Dondolio: due oscillazioni per scossa, come nei giochi.
    Ampiezza e durata arrivano dal JS (`--dondolo-amp` / `--dondolo-dur`) perché
    ogni scossa dev'essere più larga e più lenta della precedente: è quello che
@@ -804,11 +821,47 @@ html, body {
 .sb-shiny { right: 5px; } .sb-ribbon { right: 22px; } .sb-pkrs { left: 5px; }
 
 /* dettaglio starter */
-.sd-head { display: flex; gap: 14px; align-items: center; margin: 1.5vh 0; }
+/* ======================================================================
+   SCHEDA STARTER (§34) — rifatta perché non ci stava.
+
+   Misurato sul telefono vero (384×832): lo sprite era 88×50 dentro una
+   colonna alta **273 px** — 220 px di vuoto — e le pulsantiere di abilità e
+   natura stavano schiacciate nei 245 px rimasti, andando a capo il doppio
+   delle volte del necessario. Alle mosse restava un riquadro da 74 px con
+   99 px di contenuto: la quarta mossa tagliata a metà, e nessun modo di
+   accorgersi che quel riquadro scorreva.
+
+   Adesso: testa compatta (sprite in un riquadro suo di 104 px, accanto
+   nome/tipi/costo), e tutte le pulsantiere a TUTTA LARGHEZZA sotto.
+   ⚠️ Niente più scorrimenti annidati: scorre la pagina. Un riquadro che
+   scorre dentro una pagina che scorre, su un telefono, vuol dire che ti si
+   muove la cosa sbagliata sotto il dito.
+   ====================================================================== */
+.sd-head { display: flex; gap: 12px; align-items: center; margin: 1vh 0 1.2vh; }
+.sd-sprite-box {
+  flex: 0 0 auto; width: 104px; height: 104px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 12px; background: #ffffff08; border: 1px solid #ffffff12;
+}
 .sd-sprite { flex: 0 0 auto; }
-.sd-info { flex: 1; min-width: 0; }
+.sd-id { flex: 1; min-width: 0; }
 .sd-name { font-size: clamp(18px, 5vw, 26px); font-weight: 800; }
 .sd-types { display: flex; gap: 5px; margin: 5px 0; }
+/* Una riga = un'etichetta stretta a sinistra e le sue pulsantiere a destra.
+   L'etichetta ha larghezza fissa così le righe si incolonnano. */
+.sd-riga {
+  display: flex; align-items: baseline; gap: 8px;
+  margin: 0 0 6px; font-size: clamp(11px, 3vw, 14px);
+}
+.sd-lab { flex: 0 0 auto; min-width: 54px; opacity: .75; }
+.sd-chips { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+/* per le specie che una scelta non ce l'hanno: si dice, non si finge */
+.sd-fisso { opacity: .8; }
+.sd-nota { font-size: .82em; opacity: .6; flex-basis: 100%; }
+/* sesso: colori convenzionali, così si riconoscono senza leggere */
+.sesso-chip.m.on { background: #2f5fa8; border-color: #4d86dd; }
+.sesso-chip.f.on { background: #a83f6e; border-color: #e06a9c; }
+.liv-chip .crom-stella { vertical-align: -3px; margin-right: 2px; }
 .sd-abrow { font-size: clamp(11px, 3vw, 14px); opacity: .9; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .chip {
   border: none; border-radius: 999px; background: rgba(255,255,255,.12); color: var(--ink);
@@ -870,7 +923,7 @@ html, body {
 .nat-eff { font-size: .82em; opacity: .75; font-variant-numeric: tabular-nums; }
 .nat-chip.on .nat-eff { opacity: .95; }
 .nat-chip.nat-piu { border-style: dashed; opacity: .8; }
-.move-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 1vh 0 2vh; overflow-y: auto; }
+.move-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 1vh 0 1.5vh; }
 .move-chip { font-size: clamp(10px, 2.8vw, 13px); }
 /* mosse da UOVO: si sbloccano solo con le schiuse, quindi si vedono diverse
    dalle mosse di livello. La rara (4o slot) ha il bordo dorato. */
