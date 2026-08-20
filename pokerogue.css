@@ -1018,7 +1018,10 @@ button.pd-card:not(:disabled):active { background: rgba(255,255,255,.14); }
 /* Un pallino per mossa, del colore del suo tipo. Vuoto = PP finiti. */
 .pc-pip {
   width: 8px; height: 8px; border-radius: 50%;
-  box-shadow: inset 0 0 0 1px rgba(0,0,0,.45);
+  /* ⚠️ Anello CHIARO all esterno, non scuro all interno. Visto sul telefono:
+     i tipi scuri (Buio, Veleno, Spettro) su fondo scuro sparivano, e un
+     pallino che non si vede non dice niente sulla copertura. */
+  box-shadow: 0 0 0 1px rgba(255,255,255,.28);
 }
 .pc-pip.vuota { background: transparent !important; box-shadow: inset 0 0 0 1px rgba(255,255,255,.35); }
 .pd-card.compatta .party-hp-track { height: 5px; }
