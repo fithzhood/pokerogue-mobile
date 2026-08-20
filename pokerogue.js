@@ -8724,14 +8724,21 @@
       <div class="sd-riga"><span class="sd-lab">Abilità</span><span class="sd-chips">${abils}</span></div>
       ${c.info && c.info.tipo === "ab" ? snippetAbilita(c.info.id) : ""}
       <div class="sd-riga"><span class="sd-lab">Natura</span><span class="sd-chips">${nature}</span></div>
-      <div class="sd-stats">
-        ${statBar("PS", bs.hp)}${statBar("Att", bs.atk)}${statBar("Dif", bs.def)}
-        ${statBar("A.Sp", bs.spatk)}${statBar("D.Sp", bs.spdef)}${statBar("Vel", bs.spd)}
-      </div>
       <div class="meta-sub">Mosse iniziali (max 4 · scelte ${c.moves.length}/4)</div>
       <div class="move-chips">${moves}</div>
       ${c.info && c.info.tipo === "mv" ? snippetMossa(c.info.id) : ""}
       ${eggNote}
+      <!-- ⚠️ Le statistiche vanno DOPO le mosse, non prima. Su questa schermata
+           si SCEGLIE (sesso, livrea, abilità, natura, mosse) e si LEGGE (le
+           barre delle statistiche). Sul telefono vero la scheda è più alta
+           dello schermo, quindi qualcosa finisce sotto la barra dei due tasti:
+           deve essere la roba da leggere, mai quella da toccare. Con l'ordine
+           di prima le mosse restavano coperte per metà — cioè esattamente il
+           difetto segnalato, spostato di dieci pixel. -->
+      <div class="sd-stats">
+        ${statBar("PS", bs.hp)}${statBar("Att", bs.atk)}${statBar("Dif", bs.def)}
+        ${statBar("A.Sp", bs.spatk)}${statBar("D.Sp", bs.spdef)}${statBar("Vel", bs.spd)}
+      </div>
       <div class="meta-actions two-col sd-azioni">
         <button class="meta-btn ghost" data-act="back">Indietro</button>
         <button class="meta-btn primary" data-act="go" ${c.moves.length ? "" : "disabled"}>➕ Aggiungi ${sp.it}</button>

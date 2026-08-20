@@ -2724,3 +2724,30 @@ Corrette due altre cose trovate lì:
   che sono i numeri della tabella originale
 
 ---
+
+### Coda del §34 — la prova sul telefono ha bocciato la prima versione
+
+Nel browser a 384×832 la scheda ci stava (891 px in 832, poco fuori). **Sul
+telefono vero no**: con `font_scale 1,3` il contenuto diventa **994 px**, e la
+barra dei due tasti — 102 px, appiccicata in fondo — copriva **81 dei 99 px**
+delle mosse. Cioè: esattamente il difetto segnalato dal proprietario, spostato di
+dieci pixel più in basso.
+
+È la lezione già scritta in [[telefono-metriche-reali]], ricascata: **il banco a
+384 px del browser non basta, perché non riproduce la scala del carattere**.
+Misurare sul telefono, sempre, prima di dire che una schermata ci sta.
+
+Due correzioni:
+
+1. 🔴 **Le statistiche vanno DOPO le mosse.** Su questa schermata si SCEGLIE
+   (sesso, livrea, abilità, natura, mosse) e si LEGGE (le barre). La scheda è
+   più alta dello schermo per forza, quindi qualcosa finirà sempre sotto la
+   barra dei tasti: deve essere la roba da leggere, mai quella da toccare.
+2. I due tasti qui sono più bassi che nelle altre schermate meta: da 102 a
+   **76 px**. Sono «indietro» e «conferma», non l'azione principale della
+   schermata — altrove va bene che siano grossi, qui rubavano un terzo di scheda.
+
+Dopo: mosse **520→619**, nota delle uova **636→667**, barra dei tasti a **731**.
+Tutto ciò che si tocca è sopra la piega; sotto scorrono solo le statistiche.
+
+---
