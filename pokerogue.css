@@ -1073,6 +1073,9 @@ button.pd-card:not(:disabled):active { background: rgba(255,255,255,.14); }
   font-size: clamp(9px, 2.4vw, 11px);
 }
 .pd-card.compatta .pc-r2 .status-badge { margin-left: auto; }
+/* Bersaglio dalla PROPRIA parte (§39): si distingue a colpo d occhio, o si
+   tira una fiammata sul compagno per sbaglio. */
+.tgt-btn.alleato { border-color: rgba(200,150,255,.55) !important; }
 /* quanti oggetti tiene, mostrato al posto del tag nello spostamento */
 .pc-conta { margin-left: auto; white-space: nowrap; font-size: clamp(9px, 2.4vw, 11px); }
 .pc-conta.vuoto { opacity: .5; }

@@ -170,6 +170,16 @@ function extractMoves() {
       chance = num(args[4]); priority = num(args[5]); gen = num(args[6]);
     }
 
+    /* BERSAGLIO (`MoveTarget`). Serve alle lotte in DOPPIO: senza, non si sa
+       quali mosse possono puntare l'alleato — le cure, i potenziamenti a due
+       (Nettaraiuto, Cuordanzante), Aiutamico. Nell'originale sta nel
+       costruttore per difetto e viene sovrascritto da `.target(...)`:
+         AttackMove / StatusMove → NEAR_OTHER   ·   SelfStatusMove → USER
+       Solo 201 mosse su 953 lo dichiarano esplicitamente. */
+    const tm = /\.target\(MoveTarget\.([A-Z_]+)\)/.exec(chunk);
+    const target = tm ? tm[1]
+      : (cls === "SelfStatusMove" || cls === "ChargingSelfStatusMove") ? "USER" : "NEAR_OTHER";
+
     // "mattoncini": tutti i .attr(...) del blocco, normalizzati
     const attrs = [];
     const attrRe = /\.attr\(/g;
@@ -188,6 +198,7 @@ function extractMoves() {
       priority: priority || 0,
       charging: cls === "ChargingAttackMove" || cls === "ChargingSelfStatusMove",
       contact: category === "PHYSICAL",   // euristica: il fisico fa contatto
+      target,                             // MoveTarget dell'originale (§39)
       gen,
       attrs,
       effect: itMoveEff(id),

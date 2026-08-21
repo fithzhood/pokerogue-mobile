@@ -6427,9 +6427,13 @@
     const btns = bersagli.map((f, i) => {
       const ratio = Math.max(0, f.hp / f.maxHp);
       const col = ratio > 0.5 ? "var(--hp-green)" : ratio > 0.2 ? "var(--hp-yellow)" : "var(--hp-red)";
-      return `<button class="btn move-btn tgt-btn" data-i="${i}" style="background:#2c3444;">
+      /* ⚠️ Il bersaglio dalla TUA parte va segnalato: adesso che si può
+         scegliere, un tocco sbagliato vuol dire tirare una fiammata sul proprio
+         compagno. Fondo diverso e la parola «alleato» scritta. */
+      const mio = !isEnemySide(f);
+      return `<button class="btn move-btn tgt-btn${mio ? " alleato" : ""}" data-i="${i}" style="background:${mio ? "#3a2f4d" : "#2c3444"};">
           <span class="move-name">${miniIcon(f.dex, 1)} ${f.name}</span>
-          <span class="move-meta"><span>Lv.${f.level}</span>
+          <span class="move-meta"><span>${mio ? "alleato · " : ""}Lv.${f.level}</span>
             <span class="tgt-hp"><span style="width:${ratio * 100}%;background:${col}"></span></span></span>
         </button>`;
     }).join("");
@@ -6984,10 +6988,50 @@
     cmd().querySelector('[data-act="back"]').onclick = showMainMenu;
   }
 
+  /* ======================================================================
+     CHI PUO' ESSERE BERSAGLIO DI UNA MOSSA (§39)
+
+     In doppio non si colpiscono solo i nemici: l'ALLEATO è un bersaglio valido
+     per parecchie mosse, e per alcune è l'unico. Nell'originale lo dice il campo
+     `MoveTarget` di ogni mossa (`getMoveTargets` in data/moves/move-utils.ts);
+     ora ce l'abbiamo anche noi in `data/moves.json`, estratto da lì.
+
+       NEAR_OTHER · OTHER · ALL_NEAR_OTHERS · ALL_OTHERS
+           «chiunque non sia te»: nemici **e alleato**. Sono 677 mosse su 953,
+           cioè quasi tutte quelle che fanno danno. Sì, nei giochi veri puoi
+           tirare una fiammata sul tuo compagno.
+       NEAR_ALLY · ALLY        solo l'alleato (Altruismo, Nebularoma, Coaching…)
+       USER_OR_NEAR_ALLY       te o l'alleato (Acupressione)
+       USER · PARTY · USER_SIDE · USER_AND_ALLIES
+           nessuna scelta: agisce su di te o sulla tua squadra
+       tutto il resto           i nemici
+
+     ⚠️ Prima l'elenco era `enemiesOnField()` e basta: le mosse che curano o
+     potenziano il compagno non avevano modo di raggiungerlo. */
+  const BERSAGLIO_ALTRI = new Set(["NEAR_OTHER", "OTHER", "ALL_NEAR_OTHERS", "ALL_OTHERS"]);
+  const BERSAGLIO_SENZA_SCELTA = new Set(["USER", "PARTY", "USER_SIDE", "USER_AND_ALLIES"]);
+  function bersagliDiMossa(mv, chi) {
+    const nemici = enemiesOnField();
+    const alleato = game.double
+      ? alliesOnField().find(f => f !== chi) || null
+      : null;
+    const t = (mv && mv.target) || "NEAR_OTHER";
+    if (BERSAGLIO_SENZA_SCELTA.has(t)) return [];
+    if (t === "NEAR_ALLY" || t === "ALLY") return alleato ? [alleato] : [];
+    if (t === "USER_OR_NEAR_ALLY") return alleato ? [chi, alleato] : [];
+    if (BERSAGLIO_ALTRI.has(t) && alleato) return nemici.concat([alleato]);
+    return nemici;
+  }
+
   /* Lancia la mossa scelta (in doppio passa prima dalla scelta del bersaglio). */
   function usaMossa(i) {
-    const bersagli = enemiesOnField();
+    const chi = currentChooser();
+    const mv = chi && chi.moves[i] ? M[chi.moves[i].id] : null;
+    const bersagli = bersagliDiMossa(mv, chi);
+    /* Una sola scelta possibile non è una scelta: si tira e via. Vale anche per
+       le mosse che puntano solo l'alleato quando l'alleato è uno solo. */
     if (game.double && bersagli.length > 1) showTargetMenu(i, bersagli);
+    else if (game.double && bersagli.length === 1) playerChooseMove(i, bersagli[0]);
     else playerChooseMove(i);
   }
 
@@ -10350,7 +10394,7 @@
   /* ---------------------------------------------------------------------- */
   /*  AVVIO — carica i dati reali, poi comincia                             */
   /* ---------------------------------------------------------------------- */
-  const DATA_V = 21;   // versione dei dati: alzala a ogni rigenerazione
+  const DATA_V = 22;   // versione dei dati: alzala a ogni rigenerazione
   /* I dati arrivano dallo strato aggiornato se c'e' (vedi pokerogue-boot.js,
      §28), altrimenti dai file locali. `window.PR` esiste solo quando la pagina
      e' stata avviata dal guscio: aprendo i file a mano si ricade sul fetch. */

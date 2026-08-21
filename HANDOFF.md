@@ -3079,3 +3079,62 @@ per accorgersene è il log del dispositivo — vale la pena guardarlo ogni volta
 si è collegati.
 
 ---
+
+## 39. In doppio si può puntare anche l'alleato (2026-08-21)
+
+Segnalazione: «nelle lotte in doppio si può selezionare anche l'alleato come
+bersaglio di una mossa (ci sono mosse curative o combo che lo richiedono)».
+Vero: l'elenco dei bersagli era `enemiesOnField()` e basta.
+
+### Il dato che mancava
+
+Le nostre mosse **non avevano il bersaglio**: 953 su 953 con `target: undefined`.
+Nell'originale è `MoveTarget`, e sta nel costruttore di ogni mossa. Ora
+`tools/extract-data.mjs` lo estrae (`DATA_V` alzata a 22):
+
+- il difetto viene dalla CLASSE: `AttackMove` e `StatusMove` → `NEAR_OTHER`,
+  `SelfStatusMove` → `USER`
+- solo **201 mosse su 953** lo dichiarano con `.target(...)`
+
+Distribuzione estratta: `NEAR_OTHER` 657 · `ALL_NEAR_ENEMIES` 94 · `USER` 99 ·
+`NEAR_ENEMY` 20 · `ALL_NEAR_OTHERS` 20 · `BOTH_SIDES` 17 · `USER_SIDE` 12 ·
+`USER_AND_ALLIES` 6 · `RANDOM_NEAR_ENEMY` 6 · `ENEMY_SIDE` 5 · **`NEAR_ALLY` 5** ·
+`ALL` 4 · `ATTACKER` 4 · `PARTY` 2 · `CURSE` 1 · **`USER_OR_NEAR_ALLY` 1**.
+
+### La regola, come `getMoveTargets` dell'originale
+
+| bersaglio | chi si può scegliere |
+|---|---|
+| `NEAR_OTHER` · `OTHER` · `ALL_NEAR_OTHERS` · `ALL_OTHERS` | nemici **e alleato** |
+| `NEAR_ALLY` · `ALLY` | solo l'alleato (Altruismo, Nebularoma, Coaching, Mano nella mano, Grido del Drago) |
+| `USER_OR_NEAR_ALLY` | te o l'alleato (Acupressione) |
+| `USER` · `PARTY` · `USER_SIDE` · `USER_AND_ALLIES` | **nessuna scelta** |
+| tutto il resto | i nemici |
+
+🔴 Sì, «chiunque non sia te» comprende il compagno: sono **677 mosse su 953**,
+cioè quasi tutte quelle che fanno danno. Nei giochi veri puoi tirare una fiammata
+sul tuo alleato, ed è una cosa che si fa apposta (Cambiafuoco, Grancollera).
+
+⚠️ Proprio per questo il bersaglio dalla PROPRIA parte è segnalato: fondo diverso
+e la parola «alleato» scritta nel pulsante. Adesso che si può scegliere, un tocco
+sbagliato non è più impossibile — è un colpo sul compagno.
+
+⚠️ Guadagno collaterale: le mosse su di sé **non chiedono più il bersaglio**.
+Prima anche Danzaspada apriva l'elenco dei nemici, che non voleva dire niente.
+
+⚠️ Approssimazione consapevole: `ALL_NEAR_ENEMIES` e `ALL_NEAR_OTHERS` nei giochi
+veri colpiscono **tutti** senza scelta, ma il nostro motore è a bersaglio singolo.
+Restano una scelta fra i bersagli possibili: è la resa meno sbagliata finché il
+motore non sa colpire più di uno.
+
+### Verificato (browser, doppio vero)
+
+- attacco `NEAR_OTHER`: l'elenco offre **due nemici + l'alleato**, e solo
+  quest'ultimo ha la classe `alleato` e la scritta «alleato · Lv.27»
+- `USER` (Ricciolscudo): **nessun menu**, si passa direttamente al comando del
+  secondo Pokémon
+- ⚠️ `NEAR_ALLY` e `USER_OR_NEAR_ALLY` NON sono stati provati dal vivo: sono 6
+  mosse in tutto e nessun membro della squadra di prova ne conosceva una.
+  Passano per lo stesso `switch` delle altre.
+
+---
