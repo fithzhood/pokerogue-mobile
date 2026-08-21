@@ -7142,6 +7142,15 @@
     const o = {};
     for (const k in p) {
       if (k === "spr") continue;
+      /* 🔴 `dannoSubitoTurno.da` tiene un RIFERIMENTO all'attaccante. In doppio
+         due Pokémon che si colpiscono a vicenda formano un anello
+         (A.da → B, B.da → A) e `JSON.stringify` LANCIA: il salvataggio falliva
+         e l'unico segno era un `console.warn` che il giocatore non vede mai.
+         Trovato leggendo i log del telefono mentre lavoravo su altro — la run
+         del proprietario stava girando senza salvare da chissà quando.
+         È roba del TURNO (serve a Contatore, Specchiovelo, Vendetta): dopo una
+         ripresa non vuol dire più niente, quindi non va salvata affatto. */
+      if (k === "dannoSubitoTurno") continue;
       if (k === "ability" || k === "passiveAbility") { o[k] = p[k] ? p[k].id : null; continue; }
       o[k] = p[k];
     }
@@ -7161,7 +7170,25 @@
                 party: game.party.map(monSalva), box: (game.box || []).map(monSalva) };
     for (const k of CAMPI_RUN) d[k] = game[k];
     try { localStorage.setItem(SLOT_KEY(game.slot), JSON.stringify(d)); }
-    catch (e) { console.warn("[salvataggio] non riuscito:", e.message); }
+    catch (e) {
+      /* Rete di sicurezza: se un giorno un ALTRO campo dovesse tenere un
+         riferimento circolare, il salvataggio non deve sparire in silenzio —
+         si riprova buttando via i cicli, così la partita si salva comunque e
+         l'anomalia resta scritta nel log. */
+      console.warn("[salvataggio] primo tentativo fallito:", e.message);
+      try {
+        const visti = new WeakSet();
+        const testo = JSON.stringify(d, (k, v) => {
+          if (v && typeof v === "object") {
+            if (visti.has(v)) return undefined;
+            visti.add(v);
+          }
+          return v;
+        });
+        localStorage.setItem(SLOT_KEY(game.slot), testo);
+        console.warn("[salvataggio] riuscito togliendo i riferimenti circolari");
+      } catch (e2) { console.error("[salvataggio] NON RIUSCITO:", e2.message); }
+    }
   }
   function leggiSlot(n) {
     try {

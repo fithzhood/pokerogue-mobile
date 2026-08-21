@@ -3044,3 +3044,38 @@ sovrapposizioni rimaste sono fra i due alleati (95×14)**, nessuna fra riquadri 
 Pokémon. Castform, prima invisibile, si vede tutto.
 
 ---
+
+### 🔴 Coda del §38 — trovato per caso: il salvataggio non salvava
+
+Mentre misuravo il doppio, nei log del telefono comparivano in continuazione:
+
+```
+[salvataggio] non riuscito: Converting circular structure to JSON
+  --> property 'da' -> property 'dannoSubitoTurno' -> property 'da' ...
+```
+
+`segnaDannoSubito` scrive `d.da = attaccante`, cioè un **riferimento
+all'oggetto** del Pokémon che ha colpito. In doppio due che si colpiscono a
+vicenda formano un anello — `A.dannoSubitoTurno.da → B` e
+`B.dannoSubitoTurno.da → A` — e `JSON.stringify` lancia. `monSalva` copiava tutti
+i campi tranne tre, quindi l'anello finiva dritto nel salvataggio.
+
+**Conseguenza: la partita non si salvava più.** E l'unico segno era un
+`console.warn`, che chi gioca non vede: la run del proprietario stava girando da
+chissà quanto senza rete.
+
+Due correzioni:
+1. `monSalva` salta `dannoSubitoTurno`. È roba del **turno** (serve a Contatore,
+   Specchiovelo, Vendetta, Rivincita): dopo una ripresa non vuol dire più niente.
+2. Rete di sicurezza in `salvaRun`: se lo `stringify` fallisce lo stesso, si
+   riprova con un replacer che scarta i riferimenti già visti. La partita si
+   salva comunque, e l'anomalia resta scritta nel log.
+
+⚠️ **Lezione di metodo.** Questo difetto non l'ha trovato nessun collaudo: è
+uscito dai **log della partita vera**, letti mentre facevo altro. Un errore
+scritto solo in `console.warn` durante una partita su telefono è, in pratica,
+invisibile. Quando qualcosa di importante fallisce in silenzio, il posto giusto
+per accorgersene è il log del dispositivo — vale la pena guardarlo ogni volta che
+si è collegati.
+
+---
