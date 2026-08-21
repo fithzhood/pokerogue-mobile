@@ -68,6 +68,12 @@ html, body {
 
 /* Ogni combattente: slot che posiziona pannello HP + sprite. I combattenti
    sono avvicinati verso il centro per non lasciare troppo cielo vuoto. */
+/* 🔴 Tutti e quattro gli slot stanno allo STESSO z-index: a parita' di
+   z-index decide l ordine nel DOM, quindi la profondita' della scena e'
+   scritta li' (vedi il commento in pokerogue-app.html). Dal piu' lontano al
+   piu' vicino: enemy2 → enemy → ally → ally2. Non si puo' risolvere con
+   z-index diversi senza rinumerare anche riquadri PS (5), oggetti tenuti (6) e
+   velatura ambientale (7). */
 .battler-slot { position: absolute; display: flex; flex-direction: column; align-items: center; z-index: 4; }
 /* ⚠️ Serve davvero: `slot2()` nasconde i secondi slot con l'attributo `hidden`,
    ma `[hidden]{display:none}` dello user-agent PERDE contro la regola di classe
@@ -99,12 +105,26 @@ html, body {
    è lo stesso per tutti: `bottom` più piccolo = più in basso.
      nemici   → enemy2 a sinistra e più in alto, enemy a destra e più in basso
      alleati  → ally a sinistra e più in alto, ally2 a destra e più in basso */
-.battler-slot.enemy2 { bottom: 60%; top: auto; right: 44%; }   /* sinistra, più in alto  */
-#game.double .battler-slot.enemy { bottom: 53%; top: auto; right: 6%; }   /* destra, più in basso */
-#game.double .battler-slot.ally  { bottom: 19%; left: 4%; } /* sinistra, più in alto  */
-/* 34% e non di più: la coppia di alleati deve restare nella metà sinistra,
-   come nei giochi veri, o finisce sotto i riquadri PS in basso a destra */
-.battler-slot.ally2  { bottom: 3%; left: 34%; }   /* destra, più in basso */
+/* 🔴 LE POSIZIONI SONO CALCOLATE, NON SCELTE A OCCHIO (§38).
+   Ogni slot è ancorato a un BORDO, quindi uno sprite grande cresce verso il
+   CENTRO — cioè proprio verso la colonna dei riquadri PS dall'altra parte. Con
+   `right: 44%` un nemico largo finiva mezzo sotto il riquadro, e il caso non è
+   teorico: misurato sul telefono, il riquadro del nemico (200 px, largo quanto
+   il nome ci mette) copriva **48 dei 49 px** del secondo nemico.
+
+   Il conto, su una scena da 384 px:
+     larghezza massima sprite = maxW × DOUBLE_SHRINK × 384
+       alleato  0,62 × 0,62 × 384 = 148 px
+       nemico   0,52 × 0,62 × 384 = 124 px
+     riquadri in doppio: 36% = 138 px, quindi occupano 0-146 a sinistra
+       (nemici) e 238-376 a destra (alleati)
+     nemico più a sinistra:  384×(1−0,28) − 124 = 152 > 146 ✓
+     alleato più a destra:   384×0,22 + 148    = 232 < 238 ✓
+   Se si tocca uno di questi cinque numeri vanno rifatti tutti e due i conti. */
+.battler-slot.enemy2 { bottom: 60%; top: auto; right: 28%; }   /* sinistra, più in alto  */
+#game.double .battler-slot.enemy { bottom: 53%; top: auto; right: 3%; }   /* destra, più in basso */
+#game.double .battler-slot.ally  { bottom: 19%; left: 2%; } /* sinistra, più in alto  */
+.battler-slot.ally2  { bottom: 3%; left: 22%; }   /* destra, più in basso */
 #game.double .battler-slot .sprite { transform-origin: bottom center; }
 /* ============================================================================
    AMBIENTE — ora del giorno e meteo si vedono in scena
@@ -338,7 +358,16 @@ html, body {
   0%, 100% { box-shadow: 0 0 0 2px rgba(255,214,74,.55), 0 0 10px rgba(255,214,74,.35); }
   50%      { box-shadow: 0 0 0 4px rgba(255,214,74,.95), 0 0 18px rgba(255,214,74,.6); }
 }
-#game.double .hp-panel { font-size: 10px; padding: 3px 6px; }
+/* ⚠️ `max-width` va ristretto in doppio, o il riquadro si allarga quanto il
+   nome (fino al 52% dello schermo) e va a coprire il Pokémon dall'altra parte.
+   36% = 138 px: il conto sta nel commento delle posizioni degli slot. Il nome
+   ha già `text-overflow: ellipsis`, quindi si tronca invece di sfondare. */
+#game.double .hp-panel { font-size: 10px; padding: 3px 6px; max-width: 36%; min-width: 92px; }
+/* In doppio il riquadro è stretto e ogni pixel serve al NOME, che è l'unica
+   cosa che identifica: il prefisso «Lv.» sparisce e resta il numero. Recupera
+   ~18 px, cioè due caratteri di nome — misurato: «Pikac…» torna «Pikachu». */
+#game.double .hp-panel .lvpfx { display: none; }
+#game.double .hp-panel .row1 { gap: 5px; }
 /* Le pedane hanno larghezza/altezza INLINE (le imposta setPlatform ritagliando
    l'arte del bioma), quindi qui non servirebbe a niente ridichiararle: si
    rimpicciolisce con una trasformazione, che l'inline non può sovrascrivere. */

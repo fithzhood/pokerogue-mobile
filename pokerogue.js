@@ -6148,7 +6148,11 @@
   /* In doppio nella stessa scena ci stanno QUATTRO Pokémon invece di due:
      con i tetti del singolo i due alleati si accavallavano. Si stringe tutto
      della stessa frazione, così le proporzioni fra i combattenti restano. */
-  const DOUBLE_SHRINK = 0.72;
+  /* ⚠️ 0,62 e non 0,72: col vecchio valore l'alleato più largo arrivava a
+     171 px su 384 di scena (misurato: Guzzlord), e due così affiancati non ci
+     stanno insieme ai riquadri PS. Il numero è legato alle posizioni degli
+     slot in pokerogue.css — se si cambia qui, va rifatto il conto là. */
+  const DOUBLE_SHRINK = 0.62;
   /* L'ULTIMA forma del boss finale si ingrandisce: deve fare impressione.
      ⚠️ Va moltiplicata DOPO il restringimento del doppio, altrimenti si
      annullano a vicenda — la lotta finale e' sempre in doppio. Con 1.55 il
@@ -6259,7 +6263,7 @@
     el.innerHTML = `
       <div class="row1">
         <span class="name">${iconaDex(fighter)}${fighter.name}<span class="gen g-${fighter.gender}">${genderSymbol(fighter)}</span>${badge}</span>
-        <span class="lvl">Lv.${fighter.level}</span>
+        <span class="lvl"><span class="lvpfx">Lv.</span>${fighter.level}</span>
       </div>
       <div class="hp-bar-track">
         <div class="hp-bar-fill" style="width:${ratio * 100}%; background:${color};"></div>

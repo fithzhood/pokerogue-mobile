@@ -2973,3 +2973,74 @@ esattamente il motivo per cui il vicolo cieco è arrivato fino al giocatore.
 - «Interrompi» chiude e **non** fa partire la trasformazione
 
 ---
+
+## 38. La lotta in doppio, rifatta col righello (2026-08-21)
+
+Segnalazione: «dobbiamo ripensare la lotta in doppio, i Pokémon sono coperti
+male. Inoltre il piede di Guzzlord copre la punta della fiamma di Charmander,
+cosa che non ha senso visto che Guzzlord è più in profondità».
+
+### 🔴 Difetto 1 — l'ordine di disegno era l'ordine nel DOM
+
+Tutti e quattro gli slot stanno a `z-index: 4`. A parità di z-index vince **chi
+viene dopo nel DOM**, e l'ordine era `enemy2, ally2, enemy, ally`: il secondo
+ALLEATO — che è il più vicino di tutti — veniva disegnato **prima dei nemici** e
+ci finiva sotto. Da qui il piede del nemico sulla fiamma dell'alleato davanti.
+
+Ora l'ordine nel DOM è la profondità della scena, dal più lontano al più vicino:
+`enemy2 (bottom 60%) → enemy (53%) → ally (19%) → ally2 (3%)`. Scritto in grande
+nel commento dell'HTML, perché è una proprietà **invisibile nel codice**: niente
+in `pokerogue.css` fa capire che spostare un `<div>` cambia chi copre chi.
+
+### 🔴 Difetto 2 — i riquadri PS coprivano i Pokémon
+
+Misurato sul telefono, nel doppio vero del proprietario:
+
+| | |
+|---|---|
+| `#enemy2-sprite` ∩ `#enemy-hp-panel` | **48×66 px** — Castform è largo 49: era coperto quasi tutto |
+| `#player2-sprite` ∩ `#player2-hp-panel` | 21×83 px |
+
+**Causa.** Ogni slot è ancorato a un BORDO, quindi uno sprite grande cresce verso
+il **centro** — cioè verso la colonna dei riquadri dall'altra parte. E il riquadro
+si allarga quanto il nome: `max-width: 52%` = **200 px** su 384, con
+«Pikachu (Cosplay…)» dentro.
+
+### Le posizioni ora sono un CONTO, non una scelta a occhio
+
+Su una scena da 384 px:
+
+```
+larghezza massima sprite = maxW × DOUBLE_SHRINK × 384
+  alleato  0,62 × 0,62 × 384 = 148 px
+  nemico   0,52 × 0,62 × 384 = 124 px
+riquadri in doppio: 36% = 138 px → occupano 0-152 (nemici) e 230-376 (alleati)
+  nemico più a sinistra:  384×(1−0,28) − 124 = 152  ✓ non entra nei riquadri
+  alleato più a destra:   384×0,22    + 148 = 232  ✓ (riquadri da 230… stretto)
+```
+
+⚠️ `DOUBLE_SHRINK` è passato da **0,72 a 0,62**: col vecchio valore l'alleato più
+largo arrivava a **171 px** su 384 di scena (misurato su Guzzlord), e due così
+affiancati non ci stanno insieme ai riquadri. **I cinque numeri — i due tetti
+degli sprite, la larghezza dei riquadri e le due posizioni — vanno letti
+insieme: se se ne tocca uno, il conto va rifatto.**
+
+⚠️ Stringere il riquadro costa il NOME, che è l'unica cosa che identifica il
+Pokémon lì dentro. Per recuperare due caratteri senza allargare, in doppio
+sparisce il prefisso «Lv.» e resta il numero: «Pikac…» torna «Pikachu».
+
+### Cosa resta sovrapposto, e va bene così
+
+I due alleati si toccano per **~70×14 px**. Non è un difetto: sono a profondità
+diverse (bottom 19% e 3%), e con l'ordine di disegno corretto quello davanti
+copre quello dietro — che è esattamente come si legge la profondità in un doppio
+vero. Il difetto era il contrario: quello DIETRO che copriva quello davanti.
+
+### Verificato (telefono, doppio vero, 384×563 di scena)
+
+Prima: `enemy2 ∩ enemy·PS = 48×66`, `player2 ∩ player2·PS = 21×83`.
+Dopo, iniettando le regole nuove nella partita in corso: **le uniche
+sovrapposizioni rimaste sono fra i due alleati (95×14)**, nessuna fra riquadri e
+Pokémon. Castform, prima invisibile, si vede tutto.
+
+---

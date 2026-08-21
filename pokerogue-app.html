@@ -16,21 +16,24 @@
         <div id="held-ally" class="held-bar"></div>
         <div id="held-enemy" class="held-bar enemy"></div>
 
-        <!-- SECONDI slot: usati solo nelle lotte in doppio -->
+        <!-- 🔴 L'ORDINE DI QUESTI QUATTRO BLOCCHI E' LA PROFONDITA' DELLA SCENA.
+             Tutti e quattro gli slot stanno a `z-index: 4`, quindi a parita' di
+             z-index vince CHI VIENE DOPO nel DOM. Vanno scritti dal piu'
+             LONTANO al piu' VICINO, cosi' chi e' davanti copre chi e' dietro —
+             la regola del pittore.
+               enemy2 (bottom 60%) → enemy (53%) → ally (19%) → ally2 (3%)
+             ⚠️ Prima l'ordine era enemy2, ally2, enemy, ally: il secondo
+             ALLEATO, che e' il piu' vicino di tutti, veniva disegnato PRIMA dei
+             nemici e ci finiva sotto. In pratica il piede di un nemico grosso
+             copriva la fiamma della coda dell'alleato davanti a lui. -->
         <div class="battler-slot enemy2" hidden>
           <div class="battler" id="enemy2-battler">
             <div class="platform"></div>
             <div class="idle idle-enemy"><div class="sprite" id="enemy2-sprite"></div></div>
           </div>
         </div>
-        <div class="battler-slot ally2" hidden>
-          <div class="battler" id="player2-battler">
-            <div class="platform"></div>
-            <div class="idle idle-ally"><div class="sprite" id="player2-sprite"></div></div>
-          </div>
-        </div>
 
-        <!-- Nemico: in alto a destra -->
+        <!-- Nemico principale: piu' vicino del secondo nemico -->
         <div class="battler-slot enemy">
           <div class="battler" id="enemy-battler">
             <div class="platform"></div>
@@ -38,11 +41,19 @@
           </div>
         </div>
 
-        <!-- Alleato: in basso a sinistra -->
+        <!-- Alleato principale: davanti a entrambi i nemici -->
         <div class="battler-slot ally">
           <div class="battler" id="player-battler">
             <div class="platform"></div>
             <div class="idle idle-ally"><div class="sprite" id="player-sprite"></div></div>
+          </div>
+        </div>
+
+        <!-- Secondo alleato: il piu' VICINO di tutti, quindi per ultimo -->
+        <div class="battler-slot ally2" hidden>
+          <div class="battler" id="player2-battler">
+            <div class="platform"></div>
+            <div class="idle idle-ally"><div class="sprite" id="player2-sprite"></div></div>
           </div>
         </div>
 
