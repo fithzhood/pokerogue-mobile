@@ -438,18 +438,40 @@ html, body {
    Uno per ogni statistica alterata, sotto la riga dell'abilita'. Piccoli ma
    toccabili: 22px di altezza con l'area del dito allargata dal padding.
    ========================================================================== */
-.stat-badges { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
-.stat-badge {
-  display: inline-flex; align-items: center; gap: 2px;
-  font: 700 9px/1 "Trebuchet MS", system-ui, sans-serif;
-  letter-spacing: .3px;
-  padding: 4px 5px; min-height: 20px;
-  border: 1px solid transparent; border-radius: 5px;
-  color: #0c1018; cursor: pointer;
+/* Una riga sola, mai a capo: e' il riquadro PS a non potersi allungare.
+   La riga intera e' il bersaglio del tocco (i chip sono troppo piccoli). */
+.stat-badges {
+  display: flex; flex-wrap: nowrap; gap: 3px;
+  margin-top: 3px; padding: 2px 0;    /* area del dito un po' piu' alta */
+  cursor: pointer;
 }
-.stat-badge i { font-style: normal; font-size: 8px; letter-spacing: -1px; }
-.stat-badge.su   { background: #6ed07a; border-color: #9ff0a8; }
-.stat-badge.giu  { background: #e2726d; border-color: #ffa9a4; }
+.stat-badge {
+  display: inline-flex; align-items: center; gap: 1px;
+  font: 700 8px/1 "Trebuchet MS", system-ui, sans-serif;
+  letter-spacing: .2px;
+  padding: 3px 4px; min-height: 16px;
+  border: 1px solid transparent; border-radius: 4px;
+  color: #0c1018; white-space: nowrap;
+}
+.stat-badge i { font-style: normal; font-size: 7px; letter-spacing: -1.5px; }
+/* 🔴 ROSSO in su, BLU in giu': non e' una scelta di gusto, e' la convenzione
+   dei giochi ufficiali, ed e' anche quella di PokeRogue — i numeri degli stadi
+   nel suo `pbinfo_stat_numbers.png` sono esattamente #FF3232 (da +1 a +6) e
+   #5B6EE1 (da -1 a -6). Prima erano verde/rosso: leggibile, ma diceva
+   "buono/cattivo" invece di "su/giu", e su un debuff alla difesa del NEMICO
+   il verde voleva dire il contrario di quello che sembrava. */
+.stat-badge.su    { background: #ff4d4d; border-color: #ff8f8f; color: #1a0505; }
+.stat-badge.giu   { background: #6d80e8; border-color: #a3b0f5; color: #050a1a; }
+.stat-badge.altri { background: rgba(255,255,255,.16); color: #f4f6fb; }
+
+/* Efficacia della mossa, sul pulsante. Sta su fondi di ogni colore (il
+   pulsante e' tinto col tipo), quindi porta con se' un contorno scuro. */
+.eff-chip {
+  padding: 1px 6px; border-radius: 999px;
+  font-size: clamp(9px, 2.6vw, 13px); font-weight: 800; letter-spacing: .2px;
+  color: #0c1018; white-space: nowrap;
+  box-shadow: 0 0 0 1.5px rgba(0,0,0,.45);
+}
 
 /* Elenco completo, aperto toccando un badge. Si chiude toccandolo di nuovo. */
 #stat-pop {
@@ -469,8 +491,8 @@ html, body {
   border-top: 1px solid rgba(255,255,255,.07);
   color: rgba(244,246,251,.55);
 }
-#stat-pop .sp-riga.su  { color: #8fe39a; }
-#stat-pop .sp-riga.giu { color: #ff9a95; }
+#stat-pop .sp-riga.su  { color: #ff8080; }
+#stat-pop .sp-riga.giu { color: #9aa8ff; }
 #stat-pop .sp-stadio { font-weight: 700; min-width: 22px; text-align: right; }
 #stat-pop .sp-molt { font-variant-numeric: tabular-nums; min-width: 44px; text-align: right; }
 #stat-pop .sp-nota {

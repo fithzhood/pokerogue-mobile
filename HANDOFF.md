@@ -1,7 +1,7 @@
 # HANDOFF — PokéRogue Mobile
 
 Documento per una **nuova sessione di Claude Code**. Leggilo tutto prima di toccare il codice.
-Aggiornato: 2026-09-02 · Stato: **rev 78 pubblicata, 0 errori console**. Ultimo giro: **§40**.
+Aggiornato: 2026-09-02 · Stato: **rev 81 pubblicata, 0 errori console**. Ultimo giro: **§40-41**.
 
 ## 🔴 Leggi questo prima di tutto
 
@@ -3295,3 +3295,67 @@ Charmander scottato con +3 Attacco rientra → Attacco a 0, scottatura ancora l�
 ⚠️ **Resta in piedi il richiamo davanti agli ALLENATORI** (§30.1), che cura
 anche lo stato. Il proprietario non l'ha nominato in questo giro: prima di
 toglierlo, chiedere.
+
+
+## 41. Sbalzi coi colori giusti ed efficacia sul pulsante (2026-09-02, secondo giro)
+
+Richiesta: «guarda come vengono gestiti i badge di modifica statistiche nel
+gioco originale ma anche nei Pokemon ufficiali come Spada e Scudo o quelli di
+generazione 9. Poi metti anche un'indicazione se le mosse sono superefficaci o
+poco efficaci come nelle ultime generazioni».
+
+### 41.1 I colori non erano una questione di gusto
+
+I badge del §40.8 erano **verdi in su e rossi in giù**. Sbagliato due volte:
+dice «buono/cattivo» invece di «su/giù» — e su un debuff alla difesa del NEMICO
+il verde voleva dire il contrario di quello che sembrava.
+
+🔴 **La risposta sta dentro gli asset dell'originale**, non serve indovinarla:
+`../PokeRogue/assets/images/ui/pbinfo_stat_numbers.png` è il foglio dei numeri
+degli stadi, e leggendone i pixel per fotogramma si vede che da **+1 a +6** sono
+`#FF3232` (rosso) e da **−1 a −6** sono `#5B6EE1` (blu). È anche la convenzione
+dei giochi ufficiali (freccia arancio in su, blu in giù). Ora i chip sono
+`#ff4d4d` / `#6d80e8` con testo scuro, e le righe di `#stat-pop` seguono.
+
+⚠️ Metodo da riusare: quando serve sapere «come lo fa l'originale» per una
+cosa VISIVA, spesso la risposta è nei PNG, non nel codice. Contare i colori di
+uno sprite costa dieci righe di Pillow.
+
+### 41.2 Efficacia scritta sul pulsante della mossa
+
+Dai giochi di sesta generazione in poi il menu delle mosse dice se una mossa è
+superefficace o poco efficace; in Scarlatto/Violetto è un segno accanto al nome
+(riferimento guardato: le schermate del mod «Remove Effectiveness Indicator» su
+gamebanana, che mostrano proprio quella riga). PokeRogue fa lo stesso tingendo
+il nome della mossa (`getMoveColor`, fight-ui-handler.ts:373).
+
+Da noi è un chip nella riga meta del pulsante: `▲ ×2` verde, `▼ ×0,5`
+arancio, `✕ nulla` grigio. **I colori sono quelli dell'originale**
+(`getTypeDamageMultiplierColor`, lato offensivo): ×2 `#4AA500`, ×4 `#4BB400`,
+×0,5 `#FE8E00`, ×0,25 `#FF7400`, ×0 `#929292`.
+
+Regole prese dall'originale:
+- con due avversari in campo vale il **migliore** dei due;
+- le mosse di **stato** non dicono niente, tranne quando non hanno effetto (×0);
+- a **×1 non si scrive nulla**, come nei giochi.
+
+⚠️ Si guardano **solo i tipi**: le immunità da abilità (Levitazione,
+Assorbivolt, Parafulmine) non entrano. L'originale le include *solo se
+l'abilità è già stata rivelata* (`!opponent.waveData.abilityRevealed`); da noi
+le abilità non hanno quel flag, e dirlo prima sarebbe raccontare un segreto.
+
+⚠️ Il chip è anche sui pulsanti della **scelta bersaglio** in doppio, e non è
+un doppione: sul pulsante della mossa si vede il migliore dei due, ma se i due
+avversari hanno tipi diversi è proprio quella scelta a decidere. Verificato:
+Braciere contro Erba e Acqua dà `▲ ×2` su uno e `▼ ×0,5` sull'altro — e
+`▼ ×0,5` anche sull'alleato Fuoco, che è l'avviso più utile dei tre.
+
+### 41.3 Quanti badge ci stanno davvero
+
+Misurato a **384 px** (la larghezza vera del Galaxy A25, vedi la memoria sulle
+metriche del telefono): il riquadro PS ha **122 px utili**. Tre chip ci stanno
+(116 px), tre PIÙ il «+N» no (138 px). Quindi la regola è: o **tre** chip, o
+**due più il «+N»** — mai a capo, o in doppio i quattro riquadri si allungano
+fino a coprire i Pokemon (successo davvero: primo tentativo con `flex-wrap`).
+Le frecce ripetute (▲▲▲) sono diventate **freccia + numero** (▲3): meno larghe
+e non c'è da contarle.

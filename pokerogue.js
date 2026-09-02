@@ -6410,19 +6410,31 @@
                        spd: "VEL", acc: "PRE", eva: "ELU" };
   // moltiplicatore vero di uno stadio: le due scale sono diverse
   const moltStadio = (k, n) => (k === "acc" || k === "eva" ? accMult(n) : stageMult(n));
-  const frecce = n => (n > 0 ? "▲" : "▼").repeat(Math.min(3, Math.abs(n)))
-                      + (Math.abs(n) > 3 ? Math.abs(n) : "");
+  // una freccia e il numero ("▲3"): le frecce ripetute erano da contare e
+  // soprattutto larghe, e il riquadro PS di larghezza non ne ha
+  const frecce = n => (n > 0 ? "▲" : "▼") + Math.abs(n);
 
+  /* ⚠️ UNA riga sola, e deve starci: misurato a 384 px (la larghezza vera del
+     telefono) il riquadro PS ha 122 px utili. Con tutti e sette gli stadi
+     alterati su quattro combattenti, andando a capo i riquadri si allungavano
+     fino a coprire i Pokemon.
+     Tre chip ci stanno (116 px), tre PIU' il "+N" no (138): quindi o tre, o due
+     con il "+N". Si mostrano gli sbalzi piu' GROSSI; il resto e' a un tocco. */
+  const BADGE_MAX = 3;
   function badgeStadi(f, stages) {
     const st = stages || (f && f.stages);
     if (!f || !st) return "";
-    const attivi = STAT_ORDINE.filter(k => (st[k] || 0) !== 0);
+    const attivi = STAT_ORDINE.filter(k => (st[k] || 0) !== 0)
+      .sort((a, b) => Math.abs(st[b]) - Math.abs(st[a])
+                   || STAT_ORDINE.indexOf(a) - STAT_ORDINE.indexOf(b));
     if (!attivi.length) return "";
-    return `<div class="stat-badges">` + attivi.map(k => {
+    const mostrati = attivi.slice(0, attivi.length > BADGE_MAX ? BADGE_MAX - 1 : BADGE_MAX);
+    const resto = attivi.length - mostrati.length;
+    return `<div class="stat-badges">` + mostrati.map(k => {
       const n = st[k];
-      return `<button class="stat-badge ${n > 0 ? "su" : "giu"}" data-stat="${k}"
-        >${STAT_SIGLA[k]}<i>${frecce(n)}</i></button>`;
-    }).join("") + `</div>`;
+      return `<span class="stat-badge ${n > 0 ? "su" : "giu"}"
+        >${STAT_SIGLA[k]}<i>${frecce(n)}</i></span>`;
+    }).join("") + (resto ? `<span class="stat-badge altri">+${resto}</span>` : "") + `</div>`;
   }
 
   /* Elenco completo degli stadi di UN combattente. Si chiude toccando ovunque. */
@@ -6474,10 +6486,13 @@
       ${barraExp(fighter)}
       ${fighter.ability ? `<div class="ability-line">${fighter.ability.it}</div>` : ""}
       ${badgeStadi(fighter, ov && ov.stages)}`;
-    el.querySelectorAll(".stat-badge").forEach(b => b.onclick = (e) => {
+    /* Il bersaglio del dito e' la RIGA intera, non il singolo chip: i chip
+       sono alti 18 px e da soli non si prendono. */
+    const riga = el.querySelector(".stat-badges");
+    if (riga) riga.onclick = (e) => {
       e.stopPropagation();            // non far avanzare anche la narrazione
       apriStadi(fighter);
-    });
+    };
   }
 
   /* Barra dell'ESPERIENZA — solo per i TUOI Pokemon, come nei giochi veri.
@@ -6630,6 +6645,10 @@
 
   function showTargetMenu(moveIndex, bersagli) {
     bersagli = ordineSchermo(bersagli);
+    /* L'efficacia si ripete QUI su ogni bersaglio, e non e' un doppione: sul
+       pulsante della mossa si vede il migliore dei due, ma se i due avversari
+       hanno tipi diversi e' proprio la scelta del bersaglio a decidere. */
+    const mvSel = M[(currentChooser() || game.player).moves[moveIndex].id];
     const btns = bersagli.map((f, i) => {
       const ratio = Math.max(0, f.hp / f.maxHp);
       const col = ratio > 0.5 ? "var(--hp-green)" : ratio > 0.2 ? "var(--hp-yellow)" : "var(--hp-red)";
@@ -6640,6 +6659,7 @@
       return `<button class="btn move-btn tgt-btn${mio ? " alleato" : ""}" data-i="${i}" style="background:${mio ? "#3a2f4d" : "#2c3444"};">
           <span class="move-name">${miniIcon(f.dex, 1)} ${f.name}</span>
           <span class="move-meta"><span>${mio ? "alleato · " : ""}Lv.${f.level}</span>
+            ${chipEfficacia(mvSel, [f])}
             <span class="tgt-hp"><span style="width:${ratio * 100}%;background:${col}"></span></span></span>
         </button>`;
     }).join("");
@@ -7162,6 +7182,46 @@
     playEvents(log.events, afterTurn);
   }
 
+  /* ======================================================================
+     EFFICACIA SCRITTA SUL PULSANTE DELLA MOSSA
+
+     Dai giochi ufficiali di sesta generazione in poi il menu delle mosse dice
+     se una mossa e' superefficace o poco efficace contro chi hai davanti; in
+     Scarlatto/Violetto e' un segno accanto al nome. PokeRogue fa lo stesso
+     tingendo il nome della mossa (`getMoveColor` in fight-ui-handler.ts) e i
+     colori qui sotto sono i suoi (`getTypeDamageMultiplierColor`, lato
+     offensivo).
+
+     Le regole sono quelle dell'originale:
+       · con piu' avversari in campo vale il MIGLIORE dei due;
+       · le mosse di STATO non mostrano niente, tranne quando non hanno
+         effetto per il tipo (×0);
+       · a ×1 non si scrive nulla, come nei giochi.
+     ⚠️ Si guardano solo i TIPI: le immunita' da abilita' (Levitazione,
+     Assorbivolt...) non entrano nel conto. L'originale le include quando
+     l'abilita' e' gia' stata rivelata; da noi le abilita' non hanno quel
+     "rivelata", quindi dirlo prima sarebbe raccontare un segreto. */
+  const EFF_COL = { 0: "#929292", 0.25: "#FF7400", 0.5: "#FE8E00",
+                    2: "#4AA500", 4: "#4BB400", 8: "#52C200" };
+  const effNumero = m => String(m).replace(".", ",");
+  function efficaciaMossa(mv, contro) {
+    const nemici = (contro || enemiesOnField()).filter(Boolean);
+    if (!nemici.length || !mv) return null;
+    const m = Math.max(...nemici.map(f => typeMultiplier(mv.type, f.types)));
+    if (mv.category === "STATUS" && m !== 0) return null;
+    if (m === 1) return null;
+    return m;
+  }
+  /* Il segno da mettere sul pulsante (vuoto se non c'e' niente da dire). */
+  function chipEfficacia(mv, contro) {
+    const m = efficaciaMossa(mv, contro);
+    if (m === null) return "";
+    const col = EFF_COL[m] || (m > 1 ? EFF_COL[2] : EFF_COL[0.5]);
+    const segno = m === 0 ? "✕" : m > 1 ? "▲" : "▼";
+    const testo = m === 0 ? "nulla" : "×" + effNumero(m);
+    return `<span class="eff-chip" style="background:${col}">${segno} ${testo}</span>`;
+  }
+
   function showMoves() {
     const chi = currentChooser() || game.player;
     const buttons = chi.moves.map((mi, i) => {
@@ -7176,6 +7236,7 @@
             <span class="ticon t-${mv.type}"></span>
             <span class="cicon c-${mv.category}"></span>
             <span class="move-pp">${mv.power ? "P" + mv.power + " · " : ""}PP ${mi.pp}/${mi.maxPp}</span>
+            ${chipEfficacia(mv)}
           </span>
         </button>`;
     }).join("");

@@ -80,8 +80,13 @@
         <div class="hp-panel side-ally" id="player-hp-panel"></div>
         <div class="hp-panel side-ally second" id="player2-hp-panel" hidden></div>
 
-        <!-- Animazioni delle mosse: disegnate sopra tutto, non intercettano il tocco -->
+        <!-- Animazioni delle mosse. DUE canvas, non uno: nel dato originale ogni
+             grafica porta una `priority` che dice se sta davanti o dietro ai
+             Pokemon (97% davanti). Con un canvas solo o coprivano tutto o
+             stavano tutte dietro: qui sotto quello di dietro, poi i
+             combattenti, poi quello davanti. Nessuno dei due prende il tocco. -->
         <canvas id="anim-canvas"></canvas>
+        <canvas id="anim-canvas-front"></canvas>
 
         <!-- AMBIENTE: tinta dell'ora del giorno + effetto del meteo in corso.
              Copre sfondo, pedane e Pokemon, ma NON i riquadri PS (che stanno
