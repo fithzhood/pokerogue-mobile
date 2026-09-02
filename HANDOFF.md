@@ -3482,7 +3482,7 @@ cortesia. Con la vecchia frase restava «Cosa deve far…» e il nome spariva �
 proprio in doppio, dove sapere chi sta scegliendo è l'unica cosa che conta.
 
 ⚠️ E dalla riga è sparito il contatore delle **Theft Ball** (🕶N), che c'era
-da prima. Non era solo ingombro:  somma **anche** le Theft Ball,
+da prima. Non era solo ingombro: `totalBalls()` somma **anche** le Theft Ball,
 quindi «🔴8 🕶3» faceva credere che fossero 3 in più delle 8, e invece sono 3
 delle 8. Il numero si vede dove serve — nel menu delle ball e nella schermata
 del furto — e li è giusto.
