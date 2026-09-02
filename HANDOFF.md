@@ -1,7 +1,7 @@
 # HANDOFF — PokéRogue Mobile
 
 Documento per una **nuova sessione di Claude Code**. Leggilo tutto prima di toccare il codice.
-Aggiornato: 2026-09-03 · Stato: **rev 118 pubblicata, 0 errori console**. Ultimo giro: **§40-46**.
+Aggiornato: 2026-09-03 · Stato: **rev 120 pubblicata, 0 errori console**. Ultimo giro: **§40-46**.
 
 ## 🔴 Leggi questo prima di tutto
 
@@ -3928,3 +3928,32 @@ Era un vicolo cieco: o tiravi o lasciavi stare. Ora quella schermata ha
 
 Verificato: Snorlax a terra con `PS★ A.SP★ ATT▲`, Squadra → Indietro → si
 ritorna a «Ultima ball!» con la ball ancora in mano.
+
+### 46.5 🔴 Maledizione non faceva assolutamente niente
+
+Segnalazione: «controlla la mossa maledizione, sembra non funzionare
+correttamente». Non funzionava per niente: nei dati estratti ha **`attrs: []`**.
+
+Nell'originale Maledizione non e' fatta di mattoncini, e' una **classe a sé**
+(`CurseAttr`), e l'estrattore non sa tradurla. Il paradosso e' che nel motore
+c'era già tutto il resto — il volatile `curse` e il rosicchio di 1/4 a fine
+turno — ma nessuna mossa glielo passava.
+
+Sono **due mosse in una**, come nei giochi veri:
+
+| chi la usa | cosa fa |
+|---|---|
+| tipo **Spettro** | sacrifica **metà** dei PS massimi e maledice il bersaglio: 1/4 dei PS massimi di quello a ogni fine turno |
+| chiunque altro | **+1 Attacco, +1 Difesa, −1 Velocità a sé stesso** |
+
+Verificato tutti e due i rami: da Fuoco lascia gli stadi a +1/+1/−1 e non tocca
+i PS; da Spettro il lanciatore passa da 400 a 200 e il bersaglio perde 50 dei
+suoi 200 a fine turno.
+
+⚠️ Anche l'ANIMAZIONE segue il ramo: `move.target` vale `"CURSE"`, che non sta
+in nessun gruppo, quindi da sola si sarebbe ancorata sempre all'avversario.
+Nella versione non-spettro e' un buff su di sé e va ancorata a chi la usa.
+
+⚠️ **Da guardare, prima o poi**: quante altre mosse hanno `attrs: []` pur non
+essendo mosse «vuote»? Sono tutte candidate a non fare niente in silenzio, come
+questa. Il modo per trovarle e' interrogare `data/moves.json`, non giocarci.

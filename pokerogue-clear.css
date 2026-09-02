@@ -208,6 +208,9 @@ html, body {
    sotto. `flex: 0 0 auto` o in colonna si schiaccia e sparisce (§29). */
 #evo-overlay .evo-stop { flex: 0 0 auto; width: min(340px, 78vw); margin-top: 4vh; }
 #evo-overlay .evo-sprite { flex: 0 0 auto; }
+/* La cornice dell'evoluzione: misura fissa, sprite centrato dentro. E' lei che
+   impedisce a scritta e pulsanti di ballare mentre la forma alterna. */
+.evo-box { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; }
 @keyframes evoEntra { from { opacity: 0; } to { opacity: 1; } }
 .evo-sprite {
   background-repeat: no-repeat; image-rendering: pixelated;
@@ -482,6 +485,12 @@ html, body {
 /* Scanner IV: una riga discreta sul riquadro dell'AVVERSARIO. Deve farsi
    notare quando c'e' qualcosa di buono e sparire fra le righe quando non c'e'
    — per questo "niente di meglio" e' grigio e senza fondo pieno. */
+/* Gli IV nella schermata dell'ultima ball: piu' grandi che sul riquadro PS,
+   perche' li' sono un promemoria e qui sono la ragione per cui stai decidendo. */
+.cap-iv { display: flex; justify-content: center; margin: .4vh 0 1vh; }
+.cap-iv .iv-badges { justify-content: center; }
+.cap-iv .iv-chip { font-size: 11px; padding: 4px 7px; }
+
 .iv-badges {
   display: flex; flex-wrap: nowrap; align-items: center; gap: 3px;
   margin-top: 2px; padding: 1px 0; cursor: pointer;
