@@ -3127,6 +3127,14 @@
     entraInCampo(game.player);
     clearTimeout(game.timer); game.events = []; game.eventIndex = 0; game.afterEvents = null;
     game.enemyQueue = [];
+    /* 🔴 Il SECONDO alleato esce dal campo qui: la doppia è finita e lui
+       rientra nella ball. Va richiamato per davvero, o si porta dietro gli
+       sbalzi — era la segnalazione «il mio secondo Pokemon è rientrato
+       automaticamente ma i suoi debuff sono rimasti».
+       ⚠️ Il PRIMO invece NON si richiama: lui in campo ci resta, ondata dopo
+       ondata, ed è tutto il senso del modello (vedi il riquadro sopra
+       `entraInCampo`). La differenza fra i due non è una svista. */
+    richiamaNellaBall(game.player2);
     game.double = false; game.enemy2 = null; game.player2 = null;   // si riaccende sotto
     game.chooser = 0; game.queued = null;   // comandi del doppio
 
@@ -5247,6 +5255,7 @@
       // il secondo alleato caduto viene rimpiazzato, se c'e' una riserva
       if (game.player2 && game.player2.fainted) {
         const riserva = game.party.find(p => !p.fainted && p !== game.player && p !== game.player2);
+        richiamaNellaBall(game.player2);   // esce dal campo: via gli sbalzi
         game.player2 = riserva || null;
         if (game.player2) { entraInCampo(game.player2); loadFighterSprite(game.player2, "back").then(s => { game.player2.spr = s; redrawScene(); }); }
       }

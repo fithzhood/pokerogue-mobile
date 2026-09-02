@@ -1,7 +1,7 @@
 # HANDOFF — PokéRogue Mobile
 
 Documento per una **nuova sessione di Claude Code**. Leggilo tutto prima di toccare il codice.
-Aggiornato: 2026-09-02 · Stato: **rev 90 pubblicata, 0 errori console**. Ultimo giro: **§40-42**.
+Aggiornato: 2026-09-03 · Stato: **rev 94 pubblicata, 0 errori console**. Ultimo giro: **§40-44**.
 
 ## 🔴 Leggi questo prima di tutto
 
@@ -3515,3 +3515,161 @@ suo +2 Attacco.
 ⚠️ Il terzo posto in cui `player2` diventa `null` è la **promozione** (il primo
 cade e il secondo prende il suo posto): lì NON va richiamato, perché in campo ci
 resta. Sono tre casi che si somigliano e vogliono cose diverse.
+
+
+## 43. 🔴 IL VERSO DELLE ANIMAZIONI — lo studio che mancava (2026-09-03)
+
+Segnalazione: «il Turbosabbia nemico va in direzione sbagliata. È l'ennesima
+volta che trovo attacchi in verso sbagliato». Aveva ragione, ed erano **due**
+meccanismi mancanti, non uno. Questa sezione è la mappa completa: chi tocca le
+animazioni la legga prima.
+
+### 43.1 Come l'originale decide il verso (battle-anims.ts)
+
+Tre cose, in quest'ordine:
+
+**a) Quale set di fotogrammi.** Una mossa può avere DUE animazioni:
+`moveAnims.get(move)[isPlayer ? 0 : 1]`. La seconda è la nostra `.o`.
+**307 animazioni su 913 ce l'hanno**; le altre 606 no.
+
+**b) 🔴 `isOppAnim` SCAMBIA utente e bersaglio** — ed è il pezzo che ci mancava:
+
+```ts
+isOppAnim() { return !user.isPlayer() && Array.isArray(moveAnims.get(move)); }
+const user   = isOppAnim ? this.target : this.user;
+const target = isOppAnim ? this.user   : this.target;
+```
+
+Vale **solo** quando la variante `.o` esiste. Il motivo: quella variante è
+disegnata sullo stesso schema dell'altra (chi usa la mossa in basso a sinistra),
+quindi per farla partire dall'avversario bisogna scambiare gli ancoraggi. Lo
+scambio riguarda anche gli SPRITE mossi dall'animazione
+(`userSpriteToShow = isOppAnim ? targetSprite : userSprite`).
+
+Noi cambiavamo i fotogrammi e basta: **da qui gli «attacchi in verso
+sbagliato»**, Turbosabbia compreso.
+
+**c) 🔴 `isReversed` SPECCHIA le grafiche sulla linea** — l'altro pezzo mancante:
+
+```ts
+if (frame.target === GRAPHIC && isReversed(srcLine[0], srcLine[2], dstLine[0], dstLine[2]))
+  scaleX *= -1;
+```
+
+`isReversed` confronta il verso orizzontale della linea con cui l'animazione è
+stata DISEGNATA (`src`, sempre 106→234, cioè verso destra) con quello della
+linea vera sullo schermo (`dst`). Quando attacca l'avversario **senza** variante
+`.o`, `dst` va da destra a sinistra: la figura va specchiata. Riguarda solo le
+grafiche con **focus 3** (`USER_TARGET`) — sono quelle ancorate alla linea, e
+sono tante: Turbosabbia ne ha 43, il Raggio Infinito 464.
+
+### 43.2 La regola completa, come sta adesso nel nostro codice
+
+```
+animOpp = (chi attacca sta dalla parte nemica) E (la mossa ha `.o`)
+anim    = animOpp ? data.o : data
+U       = ancora di (animOpp ? il bersaglio : chi attacca)
+Tg      = ancora di (animOpp ? chi attacca  : il bersaglio)
+src     = [106, 116, 234, 52]        // fisso: com'e' disegnata
+dst     = [U.x, U.y, Tg.x, Tg.y]     // com'e' sullo schermo
+invertita = lineaInvertita(src, dst)
+per ogni sprite del frame:
+  focus 1 (bersaglio)  -> ancora Tg
+  focus 2 (utente)     -> ancora U
+  focus 3 (linea)      -> transform src->dst; se GRAFICA e invertita: specchia
+  focus 4 (schermo)    -> coordinate di schermo (riscalate in altezza, vedi kY)
+```
+
+Le funzioni: `lineaInvertita`, `animPos(..., invertita)`, e in `playMoveAnim`
+`animOpp` con lo scambio di `uId`/`tId`.
+
+⚠️ **Come si collauda un verso**: `?fast` NON serve (accelera la narrazione, non
+l'animazione), e a occhio non si prende. Il modo che funziona è **congelare**:
+si sostituisce `window.setTimeout` con una funzione vuota dopo N ms, l'animazione
+resta ferma sullo schermo e la si fotografa con calma.
+
+```js
+const realST = window.setTimeout.bind(window);
+realST(() => { window.setTimeout = () => 0; }, 380);   // congela a 380 ms
+document.querySelector('.move-btn').click();
+```
+
+Verificato così su due casi opposti: **Turbosabbia** (ha `.o`) tirato dal
+giocatore e poi dal nemico — la sabbia arriva dalla parte giusta in entrambi; e
+**Raggio Infinito** (senza `.o`) tirato dal nemico — il raggio scende verso il
+giocatore invece di puntare all'indietro.
+
+## 44. Il resto del giro del 3 settembre
+
+### 44.1 🔴 Gridodilotta alzava l'Attacco all'AVVERSARIO
+
+E non era un errore di estrazione. Nell'originale l'attributo di Gridodilotta
+**non** dichiara `selfTarget`:
+
+```ts
+new StatusMove(MoveId.HOWL, ...).attr(StatStageChangeAttr, [Stat.ATK], 1)
+  .target(MoveTarget.USER_AND_ALLIES)
+```
+
+La direzione viene dal **bersaglio della mossa**, non dal flag: l'originale
+risolve prima i bersagli e poi applica. Noi guardavamo solo `a.self`, quindi il
+buff finiva dall'altra parte del campo.
+
+Ora c'è `statSuDiSe(mv, a)`: vale se `a.self` **oppure** la mossa punta la
+propria parte (`USER`, `USER_AND_ALLIES`, `USER_SIDE`, `PARTY`). Erano **cinque
+mosse**: Gridodilotta, Nebularoma, Controllo Polare, Marciainpiù, Coaching.
+
+⚠️ `ALLY` / `NEAR_ALLY` / `USER_OR_NEAR_ALLY` restano fuori di proposito: lì il
+bersaglio lo SCEGLI (§39) ed è già l'alleato giusto. Anche la descrizione
+(«alza … a sé / al bersaglio») usa la stessa funzione, o direbbe la stessa
+bugia.
+
+### 44.2 «Sbloccato come starter» per Pokémon che avevi già
+
+Il controllo guardava solo `meta.unlocked`, ma **i 27 di partenza lì dentro non
+ci sono** (stanno in `DEFAULT_STARTER_SET`): far schiudere o catturare uno di
+loro annunciava uno sblocco che non esisteva. E per un cromatico su una specie
+già disponibile diceva ancora «sbloccato come starter», mentre di nuovo c'è solo
+la **livrea**.
+
+Ora c'è `giaStarter(k)` e lo usano tutte e due le strade — cattura
+(`registerCaught`) e schiusa (`tickEggs`). Verificato catturando Chimchar con
+il registro azzerato: nessun annuncio di sblocco, solo caramella, IV, abilità e
+natura.
+
+### 44.3 L'«ultima ball» a schermo intero
+
+Stava ancora nella fascia comandi, alta un quarto di schermo: con cinque tipi di
+ball le ultime finivano sotto il bordo. È **lo stesso difetto già risolto per
+`showBallMenu`**, quindi la stessa cura: overlay a schermo intero, niente
+scorrimento da inventare. La lotta è finita, dietro non c'è nulla da guardare.
+
+### 44.4 Nella scheda di un Pokémon si legge cosa fanno le cose
+
+Mosse, abilità (e passiva) e oggetti tenuti hanno un **ⓘ**: si tocca e la
+spiegazione si apre lì sotto, a fisarmonica (una sola alla volta). Le macchine
+c'erano già — `snippetMossa`, `snippetAbilita` — usate finora solo nella scelta
+starter; per gli oggetti c'è `snippetTenuto`, che pesca dalle descrizioni dei
+premi (togliendo il prefisso «held: »), da `BERRY_DATA` e da `SPECIE_BOOST`.
+
+⚠️ Tre trappole prese in faccia, tutte e tre da ricordare:
+- un `<button>` si porta dietro **fondo grigio e bordo outset**: se la classe
+  non li spegne, il chip diventa una pillola bianca illeggibile;
+- le mosse erano su **due colonne** e il nome si riduceva a «Br…» (misurato:
+  29 px su 185 di riga). Ora una colonna sola — e serviva comunque, perché la
+  spiegazione che si apre è un altro elemento della griglia e in due colonne
+  finiva **accanto** alla mossa invece che sotto;
+- l'abilità si identifica con `.id`, non `.k`.
+
+### 44.5 I tag di stato non allargano più il riquadro PS
+
+Segnalazione: «le tag di veleno, paralisi e gli altri stati allargano
+fastidiosamente le finestre riassuntive». Vero: `.hp-panel` aveva
+`min-width: 108px; max-width: 52%`, quindi al comparire di un VEL o di un PAR il
+riquadro si allargava di colpo e la scena sembrava muoversi da sola.
+
+Nell'originale quel riquadro è **un'immagine di misura fissa** e il nome, se non
+ci sta, viene tagliato. Ora è `width: 42%` fisso (misurato: 171 px con e senza
+stato, identici) e `.name` ha già i puntini di sospensione.
+
+### 44.6 Il secondo alleato e il richiamo — vedi §42.6
