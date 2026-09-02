@@ -1477,6 +1477,10 @@ button.pd-card:not(:disabled):active { background: rgba(255,255,255,.14); }
 .filter-bar {
   display: flex; flex-wrap: wrap; gap: 5px; margin: .6vh 0 0;
 }
+/* I due filtri a interruttore stanno nella stessa barra dei menù a tendina,
+   ma non devono allargarsi come loro: sono larghi quanto la scritta. */
+.filter-chip, .filtro-chip { flex: 0 0 auto; padding: 5px 9px; font-size: clamp(10px, 2.8vw, 13px); }
+
 .filter-sel, .filter-q {
   flex: 1 1 30%; min-width: 0;
   background: rgba(255,255,255,.08); color: var(--ink);

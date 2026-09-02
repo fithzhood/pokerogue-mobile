@@ -3673,3 +3673,19 @@ ci sta, viene tagliato. Ora è `width: 42%` fisso (misurato: 171 px con e senza
 stato, identici) e `.name` ha già i puntini di sospensione.
 
 ### 44.6 Il secondo alleato e il richiamo — vedi §42.6
+
+### 44.7 Due filtri per chi colleziona, nella composizione squadra
+
+Nella barra dei filtri di «Componi la Squadra» ci sono due interruttori:
+
+- **💜 solo Pokérus** — mostra solo le tre specie che hanno il Pokérus di
+  oggi (dura un giorno: risponde a «cosa conviene giocare ORA?»);
+- **🎀 senza fiocco** — nasconde chi il fiocco ce l'ha già, cioè chi hai già
+  portato all'ondata 30 (risponde a «chi non ho ancora fatto?»).
+
+⚠️  rifa' il conto a ogni chiamata: va tenuto FUORI dal ciclo
+del filtro, o si ricalcola per ognuna delle 571 specie.
+
+⚠️ Con «solo Pokérus» e lo stato su «Schierabili» il risultato è spesso VUOTO,
+e non è un difetto: le tre specie del giorno sono estratte fra tutte, non fra
+quelle che hai sbloccato. Mettendo lo stato su «Tutto» si vedono le tre sagome.

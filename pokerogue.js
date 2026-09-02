@@ -9423,17 +9423,27 @@
      su 544, quindi di norma si vuole vedere solo quelli — le sagome servono
      quando si ha voglia di guardare quanto manca, non ogni volta che si compone
      la squadra. Con "Tutto" tornano tutte e 544. */
-  const starterFilters = { gen: 0, type: "", stato: "libero", sort: "dex", q: "" };
+  const starterFilters = { gen: 0, type: "", stato: "libero", sort: "dex", q: "",
+                           soloPkrs: false, senzaFiocco: false };
   const SORT_IT = { dex: "Num. Dex", cost: "Costo", name: "Nome", candy: "Caramelle" };
   const STATO_IT = { libero: "Schierabili", tutto: "Tutto", visto: "Visti", ignoto: "Mancanti" };
   function starterFiltered() {
     const f = starterFilters;
     const q = f.q.trim().toLowerCase();
+    // ⚠️ fuori dal ciclo: `pokerusToday` rifa' il conto a ogni chiamata, e qui
+    // le chiamate sarebbero mille e passa
+    const pkrs = f.soloPkrs ? pokerusToday() : null;
     let list = starterDex().filter(k => {
       const sp = S[k];
       if (f.gen && sp.gen !== f.gen) return false;
       if (f.type && !sp.types.includes(f.type)) return false;
       if (f.stato !== "tutto" && starterState(k) !== f.stato) return false;
+      /* I due filtri di chi colleziona: il Pokerus del giorno dura un giorno
+         solo, e il fiocco dice «questo l'ho gia' portato all'ondata 30».
+         Servono a rispondere a due domande diverse: «cosa conviene giocare
+         OGGI?» e «chi non ho ancora fatto?». */
+      if (pkrs && !pkrs.includes(k)) return false;
+      if (f.senzaFiocco && hasRibbon(k)) return false;
       // La ricerca per nome vale solo su chi il nome ce l'ha scoperto: cercare
       // fra le sagome direbbe come si chiama un Pokémon che non hai ancora
       // incontrato, e la griglia il nome non lo mostra apposta.
@@ -9493,6 +9503,10 @@
         <select id="ftype" class="filter-sel">${opt("", f.type, "Tipo: tutti")}${Object.keys(CHART).map(t => opt(t, f.type, T[t].it)).join("")}</select>
         <select id="fstato" class="filter-sel">${Object.keys(STATO_IT).map(s => opt(s, f.stato, STATO_IT[s])).join("")}</select>
         <select id="fsort" class="filter-sel">${Object.keys(SORT_IT).map(s => opt(s, f.sort, "↕ " + SORT_IT[s])).join("")}</select>
+        <button class="chip filtro-chip${f.soloPkrs ? " on" : ""}" data-fx="soloPkrs"
+          title="mostra solo chi ha il Pokérus di oggi">💜 solo Pokérus</button>
+        <button class="chip filtro-chip${f.senzaFiocco ? " on" : ""}" data-fx="senzaFiocco"
+          title="nascondi quelli che hanno già il fiocco">🎀 senza fiocco</button>
       </div>
       <div class="meta-sub" style="margin:.4vh 0">Sbloccati ${presi}/${tot} · ${pool.length} mostrati · 💜 Pokérus · 🎀 fiocco · ● = costo</div>
       <div class="starter-dex">${cells || '<div class="meta-sub">Nessun Pokémon con questi filtri.</div>'}</div>
@@ -9505,6 +9519,10 @@
       const el = metaEl().querySelector("#" + id);
       if (el) el.onchange = () => { starterFilters[campo] = conv ? conv(el.value) : el.value; renderStarterSelect(); };
     };
+    metaEl().querySelectorAll("[data-fx]").forEach(b => b.onclick = () => {
+      starterFilters[b.dataset.fx] = !starterFilters[b.dataset.fx];
+      renderStarterSelect();
+    });
     bind("fgen", "gen", v => parseInt(v, 10));
     bind("ftype", "type");
     bind("fstato", "stato");
