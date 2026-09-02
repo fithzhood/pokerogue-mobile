@@ -6818,7 +6818,7 @@
     const tfRow = tf
       ? `<div class="back-row"><button class="btn transform-btn" data-act="transform">${tf === "mega" ? "✨ MEGAEVOLVI" : "🔴 GIGAMAXIZZA"}</button></div>` : "";
     cmd().innerHTML = `
-      <div class="prompt-line has-menu"><span class="pl-testo">Tocca a <b>${(chi || game.player).name}</b>${game.double ? ` (${game.chooser === 1 ? "2°" : "1°"})` : ""}</span><span class="hud">${alive}/${game.party.length} · 🔴${totalBalls()}${game.theftballs ? " 🕶" + game.theftballs : ""} · ₽${game.money} · 🍀<b style="color:${luckColor(runLuck())}">${LUCK_RANK[runLuck()]}</b></span><span class="pl-tasti">${bottoneLente()}<button class="menu-btn" data-act="menu" aria-label="Menu">☰</button></span></div>
+      <div class="prompt-line has-menu"><span class="pl-testo">Tocca a <b>${(chi || game.player).name}</b>${game.double ? ` (${game.chooser === 1 ? "2°" : "1°"})` : ""}</span><span class="hud">${alive}/${game.party.length} · 🔴${totalBalls()} · ₽${game.money} · 🍀<b style="color:${luckColor(runLuck())}">${LUCK_RANK[runLuck()]}</b></span><span class="pl-tasti">${bottoneLente()}<button class="menu-btn" data-act="menu" aria-label="Menu">☰</button></span></div>
       <div class="grid2">
         <button class="btn main-fight" data-act="fight">Lotta</button>
         <button class="btn main-bag"   data-act="ball">Ball</button>

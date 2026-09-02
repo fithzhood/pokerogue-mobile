@@ -473,6 +473,23 @@ html, body {
   box-shadow: 0 0 0 1.5px rgba(0,0,0,.45);
 }
 
+/* Scanner IV: una riga discreta sul riquadro dell'AVVERSARIO. Deve farsi
+   notare quando c'e' qualcosa di buono e sparire fra le righe quando non c'e'
+   — per questo "niente di meglio" e' grigio e senza fondo pieno. */
+.iv-badges {
+  display: flex; flex-wrap: nowrap; align-items: center; gap: 3px;
+  margin-top: 2px; padding: 1px 0; cursor: pointer;
+}
+.iv-chip {
+  font: 700 8px/1 "Trebuchet MS", system-ui, sans-serif;
+  padding: 3px 4px; border-radius: 4px; white-space: nowrap;
+}
+.iv-chip.perfetto { background: #f2c14b; color: #201400; }   /* 31: oro */
+.iv-chip.meglio   { background: #5cc46a; color: #04180a; }   /* meglio del tuo */
+.iv-chip.niente   { background: none; color: rgba(244,246,251,.4); font-weight: 600; padding-left: 1px; }
+
+#stat-pop .sp-riga.perfetto { color: #f2c14b; }
+
 /* Elenco completo, aperto toccando un badge. Si chiude toccandolo di nuovo. */
 #stat-pop {
   position: absolute; z-index: 12;
@@ -738,6 +755,62 @@ html, body {
 
 /* Titoletto contesto (es. "Cosa deve fare Charizard?") sopra la griglia */
 .prompt-line { text-align: center; font-size: clamp(13px, 3.6vw, 18px); opacity: .85; margin-bottom: var(--gap); }
+/* La riga della domanda ospita anche il pulsante MENU (uova, salva ed esci).
+   Il testo resta centrato sulla riga INTERA: il pulsante e' in posizione
+   assoluta, cosi' non sposta di mezzo pixel una scritta che c'e' sempre. */
+/* 🔴 RIGA DEI COMANDI — una riga sola, sempre, a qualunque larghezza.
+
+   Prima i due bottoni (lente e menu) stavano in posizione ASSOLUTA e la riga
+   aveva un padding a occhio: bastava un nome lungo o una cifra in piu' nei
+   soldi e la fortuna finiva a capo, mangiandosi una riga della fascia comandi.
+   Adesso e' un flex vero, e ognuno ha il suo compito:
+     · la DOMANDA è l'unica che si accorcia (puntini di sospensione): tanto il
+       nome del Pokemon sta gia' scritto sul suo riquadro;
+     · i CONTATORI (squadra, ball, soldi, fortuna) non si toccano mai;
+     · i BOTTONI stanno nel flusso, quindi non serve indovinare un padding. */
+.prompt-line.has-menu {
+  display: flex; align-items: center; gap: 7px;
+  white-space: nowrap; text-align: left;
+}
+.prompt-line.has-menu .pl-testo {
+  flex: 1 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.prompt-line.has-menu .hud { flex: 0 0 auto; }
+.pl-tasti { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; }
+.menu-btn {
+  width: 32px; height: 32px; padding: 0; flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 17px; line-height: 1; color: var(--ink);
+  background: rgba(255,255,255,.10);
+  border: 1px solid rgba(255,255,255,.18); border-radius: 9px;
+  cursor: pointer;
+}
+.menu-btn:active { background: rgba(255,255,255,.2); }
+
+/* LENTE = interruttore dello scanner IV. Accanto al menu, stessa misura. */
+.lente-btn {
+  width: 32px; height: 32px; padding: 0; flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px; line-height: 1;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.14); border-radius: 9px;
+  filter: grayscale(1) opacity(.5);          /* spenta: si vede che e' spenta */
+  cursor: pointer;
+}
+.lente-btn.on { filter: none; background: rgba(120,200,255,.16); border-color: rgba(120,200,255,.45); }
+/* Spenta ma c'e' qualcosa da vedere: bussa. Tre scosse e una pausa lunga —
+   un tremolio continuo su un telefono diventa fastidioso in dieci secondi. */
+.lente-btn.vibra { filter: grayscale(.2) opacity(.95); animation: lenteVibra 2.4s ease-in-out infinite; }
+@keyframes lenteVibra {
+  0%, 22%, 100% { transform: rotate(0deg); }
+  4%  { transform: rotate(-13deg); }
+  8%  { transform: rotate(11deg); }
+  12% { transform: rotate(-9deg); }
+  16% { transform: rotate(7deg); }
+  19% { transform: rotate(-4deg); }
+}
+@media (prefers-reduced-motion: reduce) { .lente-btn.vibra { animation: none; box-shadow: 0 0 0 2px #f2c14b; } }
 
 /* ============================================================================
    SCHERMATE META (home / gacha / uova) — overlay a schermo intero

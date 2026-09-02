@@ -3481,5 +3481,11 @@ _Nome_?»: se il taglio arriva, deve sopravvivere il **nome**, non la formula di
 cortesia. Con la vecchia frase restava «Cosa deve far…» e il nome spariva —
 proprio in doppio, dove sapere chi sta scegliendo è l'unica cosa che conta.
 
-Misurato a 384 px nel caso peggiore (nome da 12 lettere, ₽9.999.999, Theft
-Ball, lente e menu): **una riga sola**, 32 px, contatori interi.
+⚠️ E dalla riga è sparito il contatore delle **Theft Ball** (🕶N), che c'era
+da prima. Non era solo ingombro:  somma **anche** le Theft Ball,
+quindi «🔴8 🕶3» faceva credere che fossero 3 in più delle 8, e invece sono 3
+delle 8. Il numero si vede dove serve — nel menu delle ball e nella schermata
+del furto — e li è giusto.
+
+Misurato a 384 px nel caso peggiore (nome da 12 lettere, ₽9.999.999, lente e
+menu): **una riga sola**, 32 px, contatori interi.
