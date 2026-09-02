@@ -3348,7 +3348,7 @@
 
     const ov = document.createElement("div");
     ov.id = "evo-overlay";
-    ov.innerHTML = `<div class="evo-sprite" id="evoSprite"></div>
+    ov.innerHTML = `<div class="evo-box" id="evoBox"><div class="evo-sprite" id="evoSprite"></div></div>
                     <div class="evo-testo">${vecchio} si sta evolvendo…</div>
                     <div class="evo-prompt">tocca per continuare <span class="cont pronto">▸</span></div>
                     <button class="btn back evo-stop">✖ Interrompi</button>`;
@@ -3359,14 +3359,36 @@
        La misura la detta la FINESTRA, non un tetto fisso di 150 px: a pieno
        schermo quel tetto lasciava il Pokemon minuscolo in mezzo al nero. */
     const lim = Math.min(window.innerWidth * 0.66, window.innerHeight * 0.42);
-    const dipingi = (s) => {
-      if (!s || !el) return;
-      const f = s.frame, k = Math.min(4.5, lim / f.h, lim / f.w);
-      el.style.width = (f.w * k) + "px";
-      el.style.height = (f.h * k) + "px";
-      el.style.backgroundImage = `url("${s.sheet}")`;
-      el.style.backgroundPosition = `-${f.x * k}px -${f.y * k}px`;
-      el.style.backgroundSize = `${s.sheet_w * k}px ${s.sheet_h * k}px`;
+    const misura = (sp) => {
+      const f = sp.frame, k = Math.min(4.5, lim / f.h, lim / f.w);
+      return { k, w: f.w * k, h: f.h * k };
+    };
+    /* 🔴 La CORNICE non cambia mai misura.
+       Prima ogni fotogramma scriveva width/height dello sprite, e siccome la
+       forma vecchia e quella nuova hanno fotogrammi diversi, la colonna
+       centrata dell'overlay si riassestava tredici volte: la scritta e i
+       pulsanti ballavano sotto il dito. Ora la cornice si fissa una volta sola
+       sul piu' grande dei due, e l'immagine ci sta dentro CENTRATA — quello
+       che cambia e' solo il disegno, non lo spazio che occupa. */
+    /* 🔴 DUE elementi, e servono tutti e due:
+         · `.evo-box` e' la CORNICE, quadrata e grande quanto il limite. Si
+           fissa SUBITO, prima ancora che le immagini arrivino, e non cambia
+           mai: e' lei che tiene ferme la scritta e i pulsanti;
+         · `.evo-sprite` e' l'IMMAGINE, grande quanto il fotogramma. Deve
+           restare della sua misura, o dal foglio — che e' una griglia di
+           fotogrammi — spuntano quelli vicini. (Ci sono cascato: allargando
+           lo sprite alla cornice si vedevano mezzi Charmander di contorno.) */
+    const cornice = ov.querySelector("#evoBox");
+    cornice.style.width = lim + "px";
+    cornice.style.height = lim + "px";
+    const dipingi = (sp) => {
+      if (!sp || !el) return;
+      const f = sp.frame, m = misura(sp);
+      el.style.width = m.w + "px";
+      el.style.height = m.h + "px";
+      el.style.backgroundImage = `url("${sp.sheet}")`;
+      el.style.backgroundPosition = `-${f.x * m.k}px -${f.y * m.k}px`;
+      el.style.backgroundSize = `${sp.sheet_w * m.k}px ${sp.sheet_h * m.k}px`;
     };
 
     let annullato = false, tmr = null;
@@ -5501,7 +5523,9 @@
       // effetto visivo sul bersaglio: l'animazione vera della mossa se esiste,
       // altrimenti le particelle per tipo. Il prefetch parte ora, cosi' al
       // momento di mostrarla il file e' gia' in memoria.
-      if (landed && messages.fx) {
+      // ⚠️ Se i colpi sono stati separati l'animazione ce l'ha gia' ognuno:
+      // rimetterla sull'annuncio vorrebbe dire vederla una volta di troppo.
+      if (landed && messages.fx && !messages._colpiSeparati) {
         const key = animKeyForMove(move.id);   // la sua, o quella di ripiego
         prefetchAnim(key);
         segnaFx(messages, iAnnuncio, move.type, sideOf(foe), key, sideOf(actor));
@@ -5515,11 +5539,18 @@
         segnaFx(messages, iAnnuncio, move.type, sideOf(foe), key, sideOf(actor));
       }
     } else if (move.category === "STATUS" && messages.fx) {
-      // Anche le mosse di stato hanno la loro animazione: si ancora al bersaglio
-      // (che per le mosse su se' stessi e' chi la usa).
+      /* [ATTENZIONE] L animazione di una mossa di stato si ancora a CHI LA
+         SUBISCE, e per le mosse su di se quello e chi la usa. Il commento di
+         prima lo diceva, ma il codice passava sempre il nemico: Danzaspada,
+         Agilita e tutti i buff si vedevano scoppiare addosso all avversario.
+         E lo stesso equivoco di Gridodilotta (§44.1): la direzione la da il
+         BERSAGLIO DELLA MOSSA, non il parametro foe, che per le mosse senza
+         scelta resta l avversario di ufficio. */
+      const suDiSe = BERSAGLIO_SU_DI_SE.has(move.target);
+      const chiSubisce = suDiSe ? actor : foe;
       const key = animKeyForMove(move.id);
       prefetchAnim(key);
-      segnaFx(messages, iAnnuncio, move.type, sideOf(foe), key, sideOf(actor));
+      segnaFx(messages, iAnnuncio, move.type, sideOf(chiSubisce), key, sideOf(actor));
     }
 
     // 4-bis. mosse che cambiano il METEO (l'estrattore non le marca: sono poche
@@ -5895,6 +5926,10 @@
   // Applica il danno (gestisce OHKO, multi-colpo, critico, drain, contraccolpo).
   // Ritorna true se la mossa ha colpito (non immune).
   function doDamage(actor, foe, move, messages, potenza) {
+    /* [ATTENZIONE] Si azzera QUI, non alla fine: il contrassegno vale per la
+       singola mossa, ma il log e di tutto il turno. Lasciandolo acceso, dopo
+       una mossa multi-colpo la mossa SEGUENTE restava senza animazione. */
+    if (messages) messages._colpiSeparati = false;
     const attrs = move.attrs || [];
     const forceCrit = attrs.some(a => a.kind === "critOnly");
     const highCrit = attrs.some(a => a.kind === "highCrit");
@@ -5935,9 +5970,40 @@
       const res = computeDamage(actor, foe, move, { forceCrit, highCrit, critStage: critBonus, potenza });
       if (res.immune) { immune = true; break; }
       let raw = Math.max(1, Math.floor(res.damage * lensPenalty));
-      const dealt = bossClamp(foe, raw, messages);  // scudi del boss
+      /* Lo scudo lo rompe QUESTO colpo, quindi il messaggio dello scudo va
+         DOPO quello del colpo: bossClamp scrive in un foglietto a parte e lo
+         si svuota al momento giusto. Prima si leggeva «uno scudo si infrange»
+         e solo dopo «Colpo 1: 5 PS», cioe al contrario di come e successo. */
+      const scudoMsg = [];
+      const dealt = bossClamp(foe, raw, scudoMsg);  // scudi del boss
       total += dealt; lastEff = res.effectiveness; if (res.crit) anyCrit = true; done++;
       foe.hp = Math.max(0, foe.hp - dealt); foe._justHit = true;
+      /* 🔴 UN EVENTO PER COLPO, quando i colpi sono piu' d'uno.
+         Ogni colpo puo' essere critico per conto suo e ogni colpo puo'
+         rompere uno scudo del boss: riassumerli in un totale voleva dire
+         non far vedere ne' l'uno ne' l'altro. Adesso la barra cala un pezzo
+         alla volta e il messaggio dello scudo (che `bossClamp` ha appena
+         messo in coda) sta nel punto giusto della sequenza.
+         ⚠️ L'evento si crea DOPO aver tolto i PS: cosi' la sua
+         istantanea ha gia' il valore nuovo, e la barra scende su di lui. */
+      if (hits > 1) {
+        /* Un colpo puo fare ZERO danni e rompere lo scudo lo stesso: succede
+           quando i PS sono gia sul confine del segmento. Dirlo con un
+           "0 PS!" sembrerebbe un colpo a vuoto, e invece e il colpo che
+           rompe lo scudo. */
+        messages.push(dealt === 0 && scudoMsg.length
+          ? `Colpo ${done} di ${hits}: lo scudo assorbe tutto!`
+          : `Colpo ${done} di ${hits}: ${dealt} PS!`);
+        if (res.crit) stessoMomento(messages, "Colpo critico!");
+        // e ogni colpo si vede: l'animazione della mossa, di nuovo
+        if (messages.fx) {
+          const chiave = animKeyForMove(move.id);
+          prefetchAnim(chiave);
+          segnaFx(messages, messages.length - 1, move.type, sideOf(foe), chiave, sideOf(actor));
+        }
+        messages._colpiSeparati = true;
+      }
+      for (const t of scudoMsg) messages.push(t);
       if (foe.hp <= 0) {
         // Resistenza (Protect in versione "endure") e Bandana: si sopravvive con 1 PS
         if (foe.volatile.protect === "endure") {
@@ -5970,7 +6036,8 @@
        sua animazione) e non su quella dopo. */
     if (messages.snap) messages.snap();
 
-    if (anyCrit) stessoMomento(messages, "Colpo critico!");
+    // col colpo singolo il critico si dice qui; coi colpi separati e' gia' detto
+    if (anyCrit && !messages._colpiSeparati) stessoMomento(messages, "Colpo critico!");
     if (lastEff > 1) stessoMomento(messages, "È superefficace!");
     else if (lastEff > 0 && lastEff < 1) stessoMomento(messages, "Non è molto efficace...");
     if (done > 1) stessoMomento(messages, `Colpito ${done} volte!`);
@@ -7358,15 +7425,34 @@
         <span class="move-meta"><span>~${pct}%</span><span>· ×${game[b.key]}</span></span>
       </button>`;
     }).join("");
+    /* 🔴 Non e' un vicolo cieco: qui si DECIDE se spendere l'ultima ball, e
+       per decidere servono due cose — che roba è (gli IV, se hai lo scanner) e
+       che squadra hai (un posto libero? uno da sostituire?). Prima o tiravi o
+       lasciavi stare, senza poter guardare niente.
+       Gli IV stanno QUI dentro invece che dietro un pulsante: la scena è
+       coperta dall'overlay, quindi la riga sul riquadro PS non si vedrebbe. */
+    const ivRiga = scannerOn() && game.enemy.ivs
+      ? `<div class="cap-iv">${badgeIV(game.enemy) || ""}</div>` : "";
     showMetaScreen(`
       <div class="meta-title" style="font-size:clamp(19px,5.6vw,30px)">Ultima ball!</div>
       <div class="meta-sub">${game.enemy.name} è a terra: hai un solo tiro per prenderlo</div>
+      ${ivRiga}
       <div class="ball-list">${btns}</div>
-      <div class="meta-actions"><button class="meta-btn ghost" data-act="skip">Lascia stare</button></div>`);
+      <div class="meta-actions two-col">
+        <button class="meta-btn ghost" data-act="team">👥 Squadra</button>
+        <button class="meta-btn ghost" data-act="skip">Lascia stare</button>
+      </div>`);
     metaEl().querySelectorAll("[data-b]").forEach(b => b.onclick = () => {
       hideMeta();                       // il lancio si vede in scena, non qui
       attemptCapture(b.dataset.b);
     });
+    /* Il pannello squadra in modo «check»: si guardano le schede e si spostano
+       gli oggetti, non si schiera nessuno (la lotta è finita). E si TORNA qui,
+       non al negozio: `ritornoSquadra` è la strada già usata dal negozio. */
+    metaEl().querySelector('[data-act="team"]').onclick = () => {
+      ritornoSquadra = () => { game.phase = "CAPTURE"; renderCaptureScreen(); };
+      renderParty("check");
+    };
     metaEl().querySelector('[data-act="skip"]').onclick = () => { hideMeta(); openShop(); };
   }
 

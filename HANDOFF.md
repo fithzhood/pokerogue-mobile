@@ -1,7 +1,7 @@
 # HANDOFF — PokéRogue Mobile
 
 Documento per una **nuova sessione di Claude Code**. Leggilo tutto prima di toccare il codice.
-Aggiornato: 2026-09-03 · Stato: **rev 109 pubblicata, 0 errori console**. Ultimo giro: **§40-45**.
+Aggiornato: 2026-09-03 · Stato: **rev 118 pubblicata, 0 errori console**. Ultimo giro: **§40-46**.
 
 ## 🔴 Leggi questo prima di tutto
 
@@ -3837,3 +3837,94 @@ e XD), dove faceva esattamente questo mestiere. Nella stessa famiglia stanno il
 ⚠️ La chiave interna resta `theftballs` (e `pendingTheft`, e l'id premio
 `theft`): stanno dentro i salvataggi, rinominarle romperebbe le run in corso
 senza guadagnare niente. Cambia solo quello che si legge.
+
+
+## 46. Colpi multipli, evoluzione ferma, animazioni dei buff (2026-09-03, terzo giro)
+
+### 46.1 Ogni colpo di una mossa multipla è un evento suo
+
+Segnalazione: «le mosse multiple devono far vedere ogni hit, ognuno potrebbe
+essere un crit, è importante che siano separati. È importante anche per gli
+scudi».
+
+Prima il ciclo dei colpi accumulava tutto e alla fine diceva «Colpito 3 volte!»
+più un unico «Colpo critico!» se **almeno uno** era critico. Così non si vedeva
+quale colpo fosse andato a segno per bene, e soprattutto non si vedevano gli
+scudi del boss infrangersi uno per uno.
+
+Ora, se i colpi sono più d'uno, ognuno è un evento: `Colpo 2 di 4: 16 PS!`, il
+suo eventuale «Colpo critico!», la sua animazione, e la barra che cala un pezzo
+alla volta.
+
+⚠️ Tre dettagli che sono costati un giro ciascuno:
+- **L'ordine.** `bossClamp` scrive il messaggio dello scudo mentre calcola il
+  danno, quindi finiva PRIMA del colpo che lo aveva rotto. Adesso scrive in un
+  foglietto (`scudoMsg`) che si svuota dopo la riga del colpo.
+- **Il contrassegno va azzerato.** `messages._colpiSeparati` dice a
+  `resolveAction` di non rimettere l'animazione sull'annuncio (ce l'ha già ogni
+  colpo). Ma il log è di tutto il TURNO: senza azzerarlo all'inizio di
+  `doDamage`, la mossa successiva restava senza animazione.
+- **Zero danni non vuol dire colpo a vuoto.** Se i PS sono già sul confine di
+  un segmento, il colpo che rompe lo scudo fa 0: scriverlo come «0 PS!»
+  sembrava un colpo mancato. Ora dice «lo scudo assorbe tutto!».
+
+Verificato su un boss: 45 → 40 → 24 → 20 → 4, con i due «💠 Uno scudo si
+infrange!» ciascuno subito **dopo** il colpo che lo ha rotto. E vale anche per i
+multi-colpo dell'avversario (Doppiosmash si vede a due tempi).
+
+### 46.2 🔴 I buff su se stessi si vedevano sull'avversario
+
+Segnalazione: «le mosse di buff su se stessi sembrano essere animate
+sull'avversario invece che sul Pokémon che le usa».
+
+È lo **stesso equivoco di Gridodilotta** (§44.1), stavolta sul lato visivo: il
+codice ancorava l'animazione a `sideOf(foe)`, e il commento accanto diceva
+«per le mosse su sé stessi il bersaglio è chi la usa» — cosa vera per il
+significato della mossa, falsa per la variabile `foe`, che per le mosse senza
+scelta resta l'avversario d'ufficio. Danzaspada, Agilità e compagnia
+scoppiavano addosso al nemico.
+
+Ora l'ancora è `BERSAGLIO_SU_DI_SE.has(move.target) ? actor : foe`, la stessa
+tabella usata per applicare gli sbalzi. Verificato: le spade di Danzaspada
+compaiono su Charmander.
+
+### 46.3 L'evoluzione non fa più ballare scritta e pulsanti
+
+Segnalazione: «durante l'evoluzione le scritte e i pulsanti devono rimanere
+fermi».
+
+⚠️ **Non era la pulsazione.** `evoLampo` è una `transform: scale()`, e le
+transform non spostano il layout. Era lo **sprite** che cambiava misura tredici
+volte: la forma vecchia e quella nuova hanno fotogrammi di dimensioni diverse, e
+`#evo-overlay` è una colonna centrata, quindi ogni cambio riassestava tutto.
+
+La soluzione sono **due elementi**, e servono entrambi:
+- `.evo-box` — la **cornice**, quadrata e grande quanto il limite. Si fissa
+  subito, prima che le immagini arrivino (così non c'è nemmeno lo scatto quando
+  il caricamento finisce), e non cambia mai: è lei che tiene ferme scritta e
+  pulsanti.
+- `.evo-sprite` — l'**immagine**, grande quanto il fotogramma.
+
+🔴 Il primo tentativo era un elemento solo, allargato alla cornice: dal foglio
+degli sprite — che è una **griglia** di fotogrammi — spuntavano quelli vicini,
+mezzi Charmander di contorno. Cornice e ritaglio sono due mestieri diversi.
+
+Misurato durante un'evoluzione vera: cornice 269×269 dall'inizio alla fine,
+testo a 439 px e pulsante a 553 px che non si spostano mai.
+
+### 46.4 Dalla schermata dell'ultima ball si può guardare prima di tirare
+
+Segnalazione: «nella schermata ultima ball si deve poter tornare indietro per
+usare lo scanner o vedere la propria squadra, e poi tornare alla cattura».
+
+Era un vicolo cieco: o tiravi o lasciavi stare. Ora quella schermata ha
+- gli **IV dell'avversario** scritti dentro (se hai lo scanner acceso) — stanno
+  lì e non dietro un pulsante, perché l'overlay copre la scena e la riga sul
+  riquadro PS non si vedrebbe;
+- un pulsante **👥 Squadra**, che apre il pannello in modo «check» (si guardano
+  le schede e si spostano gli oggetti, non si schiera: la lotta è finita) e
+  **torna qui**, non al negozio — `ritornoSquadra`, la stessa strada già usata
+  dal negozio.
+
+Verificato: Snorlax a terra con `PS★ A.SP★ ATT▲`, Squadra → Indietro → si
+ritorna a «Ultima ball!» con la ball ancora in mano.
