@@ -3683,7 +3683,7 @@ Nella barra dei filtri di «Componi la Squadra» ci sono due interruttori:
 - **🎀 senza fiocco** — nasconde chi il fiocco ce l'ha già, cioè chi hai già
   portato all'ondata 30 (risponde a «chi non ho ancora fatto?»).
 
-⚠️  rifa' il conto a ogni chiamata: va tenuto FUORI dal ciclo
+⚠️ `pokerusToday()` rifa' il conto a ogni chiamata: va tenuto FUORI dal ciclo
 del filtro, o si ricalcola per ognuna delle 571 specie.
 
 ⚠️ Con «solo Pokérus» e lo stato su «Schierabili» il risultato è spesso VUOTO,
