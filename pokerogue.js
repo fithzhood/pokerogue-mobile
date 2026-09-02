@@ -7191,7 +7191,12 @@
     } else {
       const it = REWARD_POOL.find(x => x.id === voce.chiave);
       const d = it ? (typeof it.desc === "function" ? it.desc() : it.desc) : "";
-      testo = String(d || "").replace(/^held:\s*/, "");
+      testo = String(d || "");
+      // via il prefisso "held: " delle descrizioni dei premi.
+      // NIENTE espressione regolare qui: conterrebbe la coppia che chiude un
+      // commento a blocco, e il guardiano della versione clear la conta come
+      // tale (falso allarme, ma e' lui che protegge il file generato).
+      if (testo.slice(0, 5) === "held:") testo = testo.slice(5).trim();
       if (testo) testo = testo.charAt(0).toUpperCase() + testo.slice(1);
     }
     return `<div class="snippet">

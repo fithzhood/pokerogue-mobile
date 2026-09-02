@@ -418,6 +418,12 @@ html, body {
   border: 2px solid rgba(255,255,255,.18);
   border-radius: 10px;
   padding: 5px 9px 7px;
+  /* 🔴 LARGHEZZA FISSA. Con `min/max` il riquadro si allargava di colpo quando
+     compariva un tag di stato (VEL, PAR, SCT…) o un nome lungo, e la scena
+     sembrava muoversi da sola. Nell'originale il riquadro e' un'immagine di
+     misura fissa e il nome, se non ci sta, viene tagliato: qui si fa uguale,
+     `.name` ha gia' i puntini di sospensione. */
+  width: 42%;
   min-width: 108px;
   max-width: 52%;       /* non deborda mai dallo schermo superiore */
   overflow: hidden;
@@ -1067,6 +1073,22 @@ html, body {
 }
 .chip-i.on { background: #4a72d0; border-color: rgba(255,255,255,.5); }
 /* Riquadro con la descrizione: uno solo aperto per volta */
+/* Le voci della scheda che si possono TOCCARE per leggere cosa fanno: mosse,
+   abilita', oggetti tenuti. Il ⓘ dice che c'e' altro sotto. */
+.ms-mossa.aperta, .pd-ab.aperta, .pd-held.aperta { outline: 2px solid rgba(255,255,255,.35); outline-offset: -2px; }
+/* ⚠️ Un <button> si porta dietro fondo grigio, bordo "outset" e font suo: se
+   la classe non li spegne, il chip diventa una pillola bianca illeggibile. */
+button.ms-mossa { width: 100%; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+button.pd-ab, button.pd-held {
+  font: inherit; color: inherit; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 4px;
+  background: none; border: 0; padding: 0;
+}
+/* piccolo davvero: nella riga di una mossa ogni pixel se lo contendono il tipo,
+   il nome e i PP */
+.chip-i { opacity: .5; font-size: .78em; margin-left: 2px; flex: 0 0 auto; }
+.item-icon.tiny { width: 14px; height: 14px; image-rendering: pixelated; vertical-align: -2px; }
+
 .snippet {
   background: rgba(0,0,0,.35); border: 2px solid rgba(255,255,255,.16);
   border-radius: 10px; padding: 7px 10px; margin: 6px 0;
@@ -1238,7 +1260,11 @@ button.pd-card:not(:disabled):active { background: rgba(255,255,255,.14); }
 .ms-lv { font-size: clamp(11px, 3vw, 14px); opacity: .9; margin-top: 2px; }
 .ms-hp { margin: 4px 0 8px; }
 .ms-hp-num { font-size: clamp(11px, 3vw, 14px); opacity: .9; text-align: right; margin-top: 2px; }
-.ms-mosse { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin: 4px 0 8px; }
+/* 🔴 UNA colonna, non due. Due motivi: in mezza riga il nome della mossa si
+   riduceva a «Br…» (misurato: 29 px per il nome su 185 di riga), e la
+   spiegazione che si apre sotto e' un altro elemento della griglia, quindi in
+   due colonne finiva accanto alla mossa invece che sotto. */
+.ms-mosse { display: grid; grid-template-columns: 1fr; gap: 5px; margin: 4px 0 8px; }
 .ms-mossa {
   display: flex; align-items: center; gap: 4px; min-width: 0;
   background: rgba(255,255,255,.06); border-radius: 9px; padding: 5px 7px;

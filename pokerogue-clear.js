@@ -4206,11 +4206,18 @@
        cromatico. Senza questo, catturare un evoluto non darebbe più nulla
        (gli evoluti non sono schierabili). */
     const root = rootOf(speciesId);
+    const eraStarter = giaStarter(root);              // prima di scrivere!
+    const eraCromatico = (meta.unlocked[root] || 0) >= 2;
     if (val > (meta.unlocked[root] || 0)) {
       meta.unlocked[root] = val;
-      messages.push(root === speciesId
-        ? `📖 ${S[root].it}${shiny ? " ✨" : ""} registrato come starter!`
-        : `📖 ${S[speciesId].it}${shiny ? " ✨" : ""} nel dex — sbloccato ${S[root].it}${shiny ? " ✨" : ""} come starter!`);
+      if (!eraStarter) {
+        messages.push(root === speciesId
+          ? `📖 ${S[root].it}${shiny ? " ✨" : ""} sbloccato come starter!`
+          : `📖 ${S[speciesId].it}${shiny ? " ✨" : ""} nel dex — sbloccato ${S[root].it}${shiny ? " ✨" : ""} come starter!`);
+      } else if (shiny && !eraCromatico) {
+        // lo starter c'era gia': di nuovo c'e' solo la livrea
+        messages.push(`✨ Primo ${S[root].it} cromatico: ora lo puoi schierare così!`);
+      }
     } else if (specieNuova && root !== speciesId) {
       // il capostipite c'era già, ma questa forma evoluta no: vale dirlo
       messages.push(`📖 ${S[speciesId].it}${shiny ? " ✨" : ""} registrato nel dex!`);
@@ -4737,13 +4744,29 @@
     return [dst[0] + tx * (dst[2] - dst[0]), dst[1] + ty * (dst[3] - dst[1])];
   }
 
+  /* La linea utente->bersaglio va nel verso OPPOSTO a quella con cui
+     l'animazione e' stata disegnata? (`isReversed` dell'originale,
+     battle-anims.ts:715). Succede ogni volta che attacca l'avversario con
+     un'animazione senza variante `.o`: i dati sono disegnati da sinistra a
+     destra, ma sullo schermo il colpo parte da destra. */
+  function lineaInvertita(src, dst) {
+    if (src[0] === src[2]) return false;
+    return src[0] < src[2] ? dst[0] > dst[2] : dst[0] < dst[2];
+  }
+
   /* Posizione di uno sprite del frame, nello spazio-animazione.
      `kY` = quanto è più alto il nostro campo rispetto ai 180 dell'originale. */
-  function animPos(f, U, Tg, src, dst, kY) {
+  function animPos(f, U, Tg, src, dst, kY, invertita) {
     let x = f.x + UF_X, y = f.y + UF_Y;
     if (f.focus === 1)      { x += Tg.x - TF_X; y += Tg.y - TF_Y; }  // bersaglio
     else if (f.focus === 2) { x += U.x - UF_X;  y += U.y - UF_Y;  }  // chi attacca
-    else if (f.focus === 3) { const p = animTransform(src, dst, x, y); x = p[0]; y = p[1]; }
+    else if (f.focus === 3) {
+      const p = animTransform(src, dst, x, y); x = p[0]; y = p[1];
+      /* 🔴 IL VERSO. Solo le GRAFICHE (target 2) e solo su questo focus: se la
+         linea e' invertita, la figura va specchiata, o la sabbia, il raggio o
+         l'artiglio puntano dalla parte sbagliata. Era il pezzo che mancava. */
+      if (f.target === 2 && invertita) return { x, y, flip: (f.mirror ? -1 : 1) * -1 };
+    }
     else {
       /* focus 4 = ANCORATO ALLO SCHERMO. Nell'originale il campo è alto 180 e
          queste grafiche cadono a metà scena; il nostro è verticale e alto ~470
@@ -4801,8 +4824,16 @@
     };
     if (!data || !canvas || !scene) return fallback();
 
-    // se attacca l'avversario e il file ha la seconda variante, si usa quella
-    const anim = (slotNemico(userSide) && data.o) ? data.o : data;
+    /* 🔴 ANIMAZIONE "DELL'AVVERSARIO" (`isOppAnim` dell'originale).
+       Vale solo se attacca l'avversario E la mossa ha una seconda variante
+       (307 su 913). In quel caso l'originale non si limita a cambiare i
+       fotogrammi: SCAMBIA anche utente e bersaglio, perche' quella variante e'
+       disegnata sullo stesso schema dell'altra (chi usa la mossa in basso a
+       sinistra), e sullo schermo l'avversario sta dall'altra parte.
+       ⚠️ Noi cambiavamo i fotogrammi e basta: da li' "gli attacchi in verso
+       sbagliato" — Turbosabbia nemico e le altre 306. */
+    const animOpp = slotNemico(userSide) && !!data.o;
+    const anim = animOpp ? data.o : data;
     const frames = anim.f;
     if (!frames || !frames.length) return fallback();
 
@@ -4810,8 +4841,8 @@
 
     const rect = scene.getBoundingClientRect();
     const scale = rect.width / ANIM_SPACE_W;
-    const uId = slotSpriteId(userSide);
-    const tId = slotSpriteId(targetSide);
+    const uId = slotSpriteId(animOpp ? targetSide : userSide);
+    const tId = slotSpriteId(animOpp ? userSide : targetSide);
     const U = animAnchor(uId, rect, scale), Tg = animAnchor(tId, rect, scale);
     if (!U || !Tg) return fallback();
 
@@ -4830,6 +4861,7 @@
     const cols = shMeta.c || 1;
     const cells = shMeta.k || 1;
     const src = [UF_X, UF_Y, TF_X, TF_Y], dst = [U.x, U.y, Tg.x, Tg.y];
+    const invertita = lineaInvertita(src, dst);
     /* Il campo dell'originale e' 320x180; il nostro e' verticale e in unita'
        di animazione risulta molto piu' alto. Serve alle grafiche ancorate
        allo SCHERMO (focus 4), che se no restano nel quarto in alto. */
@@ -4882,7 +4914,7 @@
       // gli sprite del frame, in ordine di priorita'
       const list = (frames[i] || []).map(unpackAnimFrame).sort((a, b) => a.pri - b.pri);
       for (const f of list) {
-        const p = animPos(f, U, Tg, src, dst, kY);
+        const p = animPos(f, U, Tg, src, dst, kY, invertita);
         /* Davanti o dietro? Come `setSpritePriority` dell'originale:
            0 e 2 = sotto i Pokemon · 1 e 3 = sopra. */
         const cx = (f.pri === 0 || f.pri === 2) ? ctx : ctxF;
@@ -5960,8 +5992,9 @@
         case "confuse":   if (secondary()) applyConfuse(foe, messages); break;
         case "flinch":    if (ch > 0 && Math.random() * 100 < ch && !foe.fainted) foe.volatile.flinch = true; break;
         case "statStage": {
-          const tgt = a.self ? actor : foe;
-          if (isStatus || a.self || (ch > 0 && Math.random() * 100 < ch)) applyStatStage(tgt, a.stats, a.stages, messages, a.self);
+          const suDiSe = statSuDiSe(move, a);
+          const tgt = suDiSe ? actor : foe;
+          if (isStatus || suDiSe || (ch > 0 && Math.random() * 100 < ch)) applyStatStage(tgt, a.stats, a.stages, messages, suDiSe);
           break;
         }
         case "protect":   applyProtect(actor, messages, a.endure); break;
@@ -6017,6 +6050,23 @@
     }[status]);
     if (messages.anim) messages.anim(STATUS_ANIM[status], sideOf(target));
   }
+
+  /* 🔴 Lo sbalzo di statistica va a CHI USA LA MOSSA?
+
+     Due strade, ed e' la seconda che mancava:
+       1. l'attributo ha `self: true` (Danzaspada e compagnia);
+       2. la MOSSA punta la propria parte del campo — USER, USER_AND_ALLIES,
+          USER_SIDE, PARTY. Nell'originale la direzione viene da qui, e
+          Gridodilotta e' esattamente questo caso: l'attributo non dichiara
+          niente, ma la mossa ha `target: USER_AND_ALLIES`.
+     Guardando solo la prima, cinque mosse regalavano il buff all'AVVERSARIO:
+     Gridodilotta, Nebularoma, Controllo Polare, Marciainpiu' e Coaching.
+
+     ⚠️ ALLY / NEAR_ALLY / USER_OR_NEAR_ALLY restano fuori di proposito: li'
+     il bersaglio lo SCEGLI (§39) ed e' gia' l'alleato giusto, quindi vale
+     quello scelto e non chi usa la mossa. */
+  const BERSAGLIO_SU_DI_SE = new Set(["USER", "USER_AND_ALLIES", "USER_SIDE", "PARTY"]);
+  const statSuDiSe = (mv, a) => !!(a.self || (mv && BERSAGLIO_SU_DI_SE.has(mv.target)));
 
   function applyStatStage(target, stats, delta, messages, isSelf) {
     if (target.fainted) return;
@@ -7107,6 +7157,42 @@
      coi nomi e i PP, abilità, passiva, natura, oggetti tenuti, statistiche
      con gli IV, esperienza.
      ====================================================================== */
+  /* Quale spiegazione e' aperta nella scheda: { i, tipo, id }. Una sola alla
+     volta — su un telefono aprirle tutte vorrebbe dire scorrere all'infinito. */
+  let schedaInfo = null;
+  const schedaAperto = (i, tipo, id) =>
+    !!schedaInfo && schedaInfo.i === i && schedaInfo.tipo === tipo && schedaInfo.id === id;
+
+  /* Cosa fa un oggetto TENUTO. Le descrizioni ci sono gia': quelle dei premi
+     (che iniziano con "held: "), quelle delle bacche, e per gli oggetti di
+     specie si costruisce dalla tabella. */
+  function snippetTenuto(voce) {
+    let testo = "";
+    if (voce.tipo === "berry") {
+      testo = BERRY_DATA[voce.chiave].desc;
+    } else if (voce.tipo === "typeboost") {
+      testo = `Potenzia del 20% le mosse di tipo ${T[voce.chiave].it}. Si accumula.`;
+    } else if (SPECIE_BOOST[voce.chiave]) {
+      const b = SPECIE_BOOST[voce.chiave];
+      testo = `Raddoppia ${b.stats.map(x => STAT_IT[x] || x).join(" e ")}, ma solo a `
+            + b.specie.map(k => (S[k] || {}).it || k).join(" o ") + ".";
+    } else {
+      const it = REWARD_POOL.find(x => x.id === voce.chiave);
+      const d = it ? (typeof it.desc === "function" ? it.desc() : it.desc) : "";
+      testo = String(d || "");
+      // via il prefisso "held: " delle descrizioni dei premi.
+      // NIENTE espressione regolare qui: conterrebbe la coppia che chiude un
+      // commento a blocco, e il guardiano della versione clear la conta come
+      // tale (falso allarme, ma e' lui che protegge il file generato).
+      if (testo.slice(0, 5) === "held:") testo = testo.slice(5).trim();
+      if (testo) testo = testo.charAt(0).toUpperCase() + testo.slice(1);
+    }
+    return `<div class="snippet">
+      <div class="snip-top"><b>${voce.nome}</b>${voce.n > 1 ? ` ×${voce.n}` : ""}</div>
+      <div class="snip-testo">${testo || "Nessuna descrizione."}</div>
+    </div>`;
+  }
+
   function showMonScheda(i, mode) {
     const p = game.party[i];
     if (!p) { renderParty(mode); return; }
@@ -7117,14 +7203,18 @@
     const col = ratio > 0.5 ? "var(--hp-green)" : ratio > 0.2 ? "var(--hp-yellow)" : "var(--hp-red)";
     const types = p.types.map(t => `<span class="ticon t-${t}"></span>`).join("");
     const st = p.status ? `<span class="status-badge st-${p.status}">${STATUS_IT[p.status]}</span>` : "";
-    const held = heldSummary(p);
+    const tenuti = heldElenco(p);
     const iv = p.ivs || {};
     const STAT_IT = { atk: "Att", def: "Dif", spatk: "A.Sp", spdef: "D.Sp", spd: "Vel" };
     const stats = Object.keys(STAT_IT).map(k =>
       `<div class="ms-stat"><span class="ms-k">${STAT_IT[k]}</span><b>${p.stats[k]}</b><span class="ms-iv">IV ${iv[k] != null ? iv[k] : "?"}</span></div>`).join("");
     const moves = p.moves.map(m => {
       const mv = M[m.id];
-      return `<div class="ms-mossa${m.pp === 0 ? " vuota" : ""}"><span class="ticon t-${mv.type}"></span><span class="ms-mv-nome">${mv.it}</span><b>${m.pp}/${m.maxPp}</b></div>`;
+      const on = schedaAperto(i, "mv", m.id);
+      return `<button class="ms-mossa${m.pp === 0 ? " vuota" : ""}${on ? " aperta" : ""}" data-info-mv="${m.id}">
+          <span class="ticon t-${mv.type}"></span><span class="ms-mv-nome">${mv.it}</span>
+          <b>${m.pp}/${m.maxPp}</b><span class="chip-i">ⓘ</span>
+        </button>${on ? snippetMossa(m.id) : ""}`;
     }).join("");
     showMetaScreen(`
       <div class="sd-head">
@@ -7141,10 +7231,14 @@
         <div class="ms-hp-num">${Math.max(0, p.hp)} / ${p.maxHp} PS</div>
       </div>
       <div class="sd-riga"><span class="sd-lab">Abilità</span><span class="sd-chips">
-        <span class="pd-ab">${p.ability ? p.ability.it : "—"}</span>
-        ${p.passiveAbility ? `<span class="pd-ab pd-pass">+${p.passiveAbility.it}</span>` : ""}</span></div>
+        ${p.ability ? `<button class="pd-ab ab-info${schedaAperto(i, "ab", p.ability.id) ? " aperta" : ""}" data-info-ab="${p.ability.id}">${p.ability.it}<span class="chip-i">ⓘ</span></button>` : `<span class="pd-ab">—</span>`}
+        ${p.passiveAbility ? `<button class="pd-ab pd-pass ab-info${schedaAperto(i, "ab", p.passiveAbility.id) ? " aperta" : ""}" data-info-ab="${p.passiveAbility.id}">+${p.passiveAbility.it}<span class="chip-i">ⓘ</span></button>` : ""}</span></div>
+      ${schedaInfo && schedaInfo.i === i && schedaInfo.tipo === "ab" ? snippetAbilita(schedaInfo.id) : ""}
       <div class="sd-riga"><span class="sd-lab">Natura</span><span class="sd-chips"><span class="pd-ab pd-nat">${natureLabel(p) || "—"}</span></span></div>
-      ${held ? `<div class="sd-riga"><span class="sd-lab">Tiene</span><span class="sd-chips"><span class="pd-held">🎒 ${held}</span></span></div>` : ""}
+      ${tenuti.length ? `<div class="sd-riga"><span class="sd-lab">Tiene</span><span class="sd-chips">${tenuti.map((v, n) => `
+        <button class="pd-held ab-info${schedaAperto(i, "held", n) ? " aperta" : ""}" data-info-held="${n}">
+          <img class="item-icon tiny" src="${itemIcon(v.icon)}" alt="">${v.nome}${v.n > 1 ? ` ×${v.n}` : ""}<span class="chip-i">ⓘ</span></button>`).join("")}</span></div>
+      ${schedaInfo && schedaInfo.i === i && schedaInfo.tipo === "held" && tenuti[schedaInfo.id] ? snippetTenuto(tenuti[schedaInfo.id]) : ""}` : ""}
       ${p.luck ? `<div class="sd-riga"><span class="sd-lab">Fortuna</span><span class="sd-chips"><span class="pd-luck">🍀 +${p.luck} alla squadra${p.fainted ? " — ma è esausto, quindi non contano" : ""}</span></span></div>` : ""}
       <div class="meta-sub">Mosse</div>
       <div class="ms-mosse">${moves}</div>
@@ -7161,7 +7255,16 @@
       el.style.background = `url("${spr.sheet}") -${spr.frame.x * k}px -${spr.frame.y * k}px / ${spr.sheet_w * k}px ${spr.sheet_h * k}px no-repeat`;
       el.style.imageRendering = "pixelated";
     });
-    metaEl().querySelector('[data-act="back"]').onclick = () => renderParty(mode);
+    /* Apri/chiudi la spiegazione. Toccando la stessa voce si richiude: e' un
+       pannello a fisarmonica, non una finestra da chiudere a parte. */
+    const info = (tipo, id) => {
+      schedaInfo = schedaAperto(i, tipo, id) ? null : { i, tipo, id };
+      showMonScheda(i, mode);
+    };
+    metaEl().querySelectorAll("[data-info-mv]").forEach(b => b.onclick = () => info("mv", b.dataset.infoMv));
+    metaEl().querySelectorAll("[data-info-ab]").forEach(b => b.onclick = () => info("ab", b.dataset.infoAb));
+    metaEl().querySelectorAll("[data-info-held]").forEach(b => b.onclick = () => info("held", parseInt(b.dataset.infoHeld, 10)));
+    metaEl().querySelector('[data-act="back"]').onclick = () => { schedaInfo = null; renderParty(mode); };
     const go = metaEl().querySelector('[data-act="go"]');
     /* ⚠️ Dal negozio non si schiera: non c'è una lotta in corso in cui mandare
        qualcuno. Il tasto non c'è proprio, invece di esserci spento. */
@@ -7171,21 +7274,33 @@
     };
   }
 
+  /* 🔴 A SCHERMO INTERO, come il menu delle ball in lotta.
+     Stava nella fascia comandi, che e' alta un quarto di schermo: con cinque
+     tipi di ball le ultime finivano sotto il bordo, invisibili e non toccabili
+     — identico al difetto gia' corretto per `showBallMenu`, e con la stessa
+     cura. Niente scorrimento da inventare: qui lo spazio c'e' davvero, e la
+     lotta e' finita, quindi non c'e' nulla da guardare dietro. */
   function renderCaptureScreen() {
     const BALL_IMG = { balls: "pb", greatballs: "gb", ultraballs: "ub", rogueballs: "rb", theftballs: "tb", masterballs: "mb" };
     const owned = BALL_TYPES.filter(b => (game[b.key] || 0) > 0);
     const btns = owned.map(b => {
       const pct = b.mult >= 255 ? 100 : captureChancePct(game.enemy, b.mult, psUltimaBall(game.enemy));
-      return `<button class="btn capture-yes" data-b="${b.key}">
-        <img class="ball-icon" src="${ballIcon(BALL_IMG[b.key])}" alt="">${b.it}<span class="cap-sub">~${pct}% · ×${game[b.key]}</span></button>`;
+      return `<button class="btn ball-btn" data-b="${b.key}">
+        <img class="ball-icon" src="${ballIcon(BALL_IMG[b.key])}" alt="">
+        <span class="move-name">${b.it}</span>
+        <span class="move-meta"><span>~${pct}%</span><span>· ×${game[b.key]}</span></span>
+      </button>`;
     }).join("");
-    cmd().innerHTML = `
-      <div class="prompt-line">${game.enemy.name} è a terra: <b>ultima ball</b> per catturarlo!</div>
-      <div class="grid2 capture-grid">${btns}
-        <button class="btn capture-no" data-act="skip">Lascia</button>
-      </div>`;
-    cmd().querySelectorAll("[data-b]").forEach(b => b.onclick = () => attemptCapture(b.dataset.b));
-    cmd().querySelector('[data-act="skip"]').onclick = () => openShop();
+    showMetaScreen(`
+      <div class="meta-title" style="font-size:clamp(19px,5.6vw,30px)">Ultima ball!</div>
+      <div class="meta-sub">${game.enemy.name} è a terra: hai un solo tiro per prenderlo</div>
+      <div class="ball-list">${btns}</div>
+      <div class="meta-actions"><button class="meta-btn ghost" data-act="skip">Lascia stare</button></div>`);
+    metaEl().querySelectorAll("[data-b]").forEach(b => b.onclick = () => {
+      hideMeta();                       // il lancio si vede in scena, non qui
+      attemptCapture(b.dataset.b);
+    });
+    metaEl().querySelector('[data-act="skip"]').onclick = () => { hideMeta(); openShop(); };
   }
 
   /* ---------------- LANCIO BALL IN BATTAGLIA ----------------
@@ -7476,7 +7591,7 @@
       switch (a.kind) {
         case "status": parti.push(`può causare ${(STATUS_IT[a.status] || a.status).toLowerCase()}`); break;
         case "statStage": {
-          const chi = a.self ? "a sé" : "al bersaglio";
+          const chi = statSuDiSe(mv, a) ? "a sé" : "al bersaglio";
           const q = Math.abs(a.stages) >= 2 ? "molto " : "";
           parti.push(`${a.stages > 0 ? "alza" : "abbassa"} ${q}${a.stats.map(s => STAT_IT[s] || s).join(", ")} ${chi}`);
           break;
@@ -8150,8 +8265,11 @@
         const shinyVar = shiny ? rollShinyVar(S[sp].dex, null) : 0;
         /* ⚠️ Va deciso PRIMA di scrivere nel dex se questa nascita sblocca
            davvero qualcosa: se no ogni schiusa annunciava «è sbloccato come
-           starter!» anche per una specie che avevi già da un pezzo. */
-        const eraNuovo = !meta.unlocked[sp];
+           starter!» anche per una specie che avevi già da un pezzo.
+           🔴 E va guardato `giaStarter`, non solo `meta.unlocked`: i 27 di
+           partenza non stanno nel registro, quindi il controllo vecchio li
+           dava per nuovi tutte le volte. */
+        const eraNuovo = !giaStarter(sp);
         const primoCromatico = shiny && (meta.unlocked[sp] || 0) < 2;
         if (!meta.unlocked[sp] || shiny) meta.unlocked[sp] = shiny ? 2 : (meta.unlocked[sp] || 1);
         // livrea più alta vista: da qui prenderà i punti di fortuna come starter
@@ -8167,7 +8285,8 @@
         const extra = [eraNuovo
           ? `${S[sp].it} è sbloccato come starter! 🍬 +3 caramelle`
           : primoCromatico
-            ? `${S[sp].it} ✨ cromatico è sbloccato come starter! 🍬 +3 caramelle`
+            // lo starter c'era gia': di nuovo c'e' la LIVREA, non lo starter
+            ? `${S[sp].it} ✨ è il tuo primo cromatico di questa specie! 🍬 +3 caramelle`
             : `🍬 +3 caramelle ${S[sp].it} (totale ${meta.candy[sp]})`];
         if (livreaMigliore && shinyVar > 0 && !primoCromatico) {
           stessoMomento(extra, `💠 Livrea ${CROM_IT[shinyVar]}: come starter ora vale ${shinyVar + 1} punti di fortuna`);
@@ -9223,6 +9342,13 @@
   }
   const isRoot = k => !preEvoMap()[k];
   // Capostipite della famiglia: Venusaur → Bulbasaur, Raichu → Pichu.
+  /* Era GIA' schierabile come starter, prima di questa registrazione?
+     ⚠️ Non basta `meta.unlocked`: i 27 di partenza non ci stanno dentro, sono
+     schierabili per conto loro (DEFAULT_STARTER_SET). Senza questo controllo
+     catturare o far schiudere uno di loro annunciava «sbloccato come starter!»
+     per un Pokemon che avevi dal primo giorno. */
+  const giaStarter = k => DEFAULT_STARTER_SET.has(k) || !!meta.unlocked[k];
+
   function rootOf(k) {
     const pre = preEvoMap();
     let cur = k, guard = 0;
