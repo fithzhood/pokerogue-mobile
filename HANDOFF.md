@@ -1,7 +1,7 @@
 # HANDOFF — PokéRogue Mobile
 
 Documento per una **nuova sessione di Claude Code**. Leggilo tutto prima di toccare il codice.
-Aggiornato: 2026-09-03 · Stato: **rev 106 pubblicata, 0 errori console**. Ultimo giro: **§40-45**.
+Aggiornato: 2026-09-03 · Stato: **rev 107 pubblicata, 0 errori console**. Ultimo giro: **§40-45**.
 
 ## 🔴 Leggi questo prima di tutto
 
@@ -3784,3 +3784,40 @@ altre.
 ⚠️ Attenzione ai collaudi fatti su un'ondata multipla di 10: la **cura della
 decina** (§42.1) rifà PS e PP a tutti, e sembra che l'oggetto abbia curato
 tutto. Ci sono cascato: la prova va fatta a un'ondata qualsiasi.
+
+
+### 45.6 L'ultima ball anche sui boss delle ondate ×10
+
+Segnalazione: «i Pokémon delle ondate multiple di 10 non danno la possibilità di
+catturarli con l'ultima ball».
+
+La condizione era `if (!wasBoss && !wasTrainer && !game.capturedThisWave)`, e
+quel `!wasBoss` non aveva una ragione dietro: **durante** la lotta i boss erano
+già catturabili (`ballBlockReason` blocca solo i Pokémon degli allenatori), gli
+mancava soltanto il tiro di cortesia alla fine — proprio su quelli che uno vuole
+prendere. Tolto.
+
+Restano fuori da soli, senza bisogno di nominarli:
+- i **capipalestra**, perché i loro Pokémon hanno `.trainer` (riga 2976) e li
+  ferma `wasTrainer`;
+- il **boss finale** dell'ondata 200, che non arriva nemmeno lì: `vittoriaOndata`
+  esce prima con `renderRunVictory`.
+
+Verificato all'ondata 40 contro un boss: compare «Ultima ball!» con la sua
+percentuale.
+
+### 45.7 ⚠️ COLLAUDARE NEL BROWSER: serve RICARICARE DUE VOLTE
+
+Ci ho perso tre giri di prove oggi, e non è scritto da nessuna parte: il guscio
+`pokerogue-boot.js` si comporta nel browser **come sul telefono** (§28). Cioè
+scarica la revisione nuova al primo avvio e la applica **a quello dopo**.
+
+Quindi dopo `node tools/make-manifest.mjs` non basta ricaricare la pagina: la
+prima ricarica sta ancora eseguendo il codice VECCHIO. Bisogna ricaricare
+**due volte** — o, molto meglio, guardare in fondo alla Home, dove c'è scritto
+`rev N`, e controllare che sia quella appena generata prima di dare la colpa al
+codice.
+
+Il sintomo tipico è il peggiore che ci sia: la correzione «non funziona», si va
+a cercare un secondo difetto che non esiste, e magari si rompe qualcosa
+d'altro per farla funzionare.

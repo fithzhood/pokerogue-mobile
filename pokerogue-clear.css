@@ -569,7 +569,19 @@ html, body {
   transition: width .5s ease, background-color .5s ease;
 }
 .hp-text { margin-top: 2px; font-size: 10px; text-align: right; opacity: .9; font-variant-numeric: tabular-nums; }
-.ability-line { margin-top: 1px; font-size: 9px; opacity: .75; font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Riga d'identita' del riquadro PS: i TIPI e l'abilita'.
+   ⚠️ Nell'originale i tipi stanno dentro il riquadro come icone a posizione
+   fissa (pbinfo_player_type1/2), e infatti la scatola non cambia mai misura.
+   Qui le icone sono le stesse di PokeRogue (48x21 dal foglio types.png):
+   `zoom` le rimpicciolisce SENZA rifare i conti delle posizioni nel foglio —
+   `transform: scale()` no, perche' non toglierebbe spazio al testo. */
+.ability-line {
+  margin-top: 1px; font-size: 9px; opacity: .75; font-style: italic;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  display: flex; align-items: center; gap: 4px;
+}
+.tipi-mini { display: inline-flex; gap: 3px; flex: 0 0 auto; }
+.tipi-mini .ticon { zoom: .6; }
 /* BARRA DELL'ESPERIENZA — una per Pokemon, solo dalla tua parte del campo.
    L'esperienza e' condivisa ma la curva di crescita e' di ciascuno: due membri
    della squadra NON salgono di livello insieme. */
@@ -608,6 +620,12 @@ html, body {
   grid-template-rows: 1fr 1fr;
   gap: var(--gap);
   min-width: 0;
+  /* [ATTENZIONE] min-height: 0 non e chirurgia, e obbligatorio: dentro una
+     colonna flex il valore di partenza e auto, cioe la griglia si rifiuta di
+     scendere sotto l altezza dei suoi pulsanti. Quando lo spazio manca non si
+     stringe lei: spinge FUORI dallo schermo la riga sotto, ed e sparita la
+     riga con Descrizioni e Indietro (misurato: 8 px oltre il bordo). */
+  min-height: 0;
 }
 
 .btn {
@@ -638,10 +656,26 @@ html, body {
 /* Pulsanti mossa: mostrano nome, tipo e PP; colore dal tipo (via JS) */
 .move-btn { padding: 4px; }
 .move-btn .move-name { font-size: clamp(15px, 4.6vw, 23px); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* [ATTENZIONE] UNA riga sola. Andando a capo il pulsante diventava alto tre
+   righe (nome + icone + PP) e i quattro pulsanti non ci stavano piu nella
+   fascia comandi: la riga con Descrizioni e Indietro finiva sotto il bordo.
+   Se lo spazio manca si accorciano i PP, non si aggiunge una riga. */
 .move-btn .move-meta {
-  display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: center;
+  display: flex; gap: 5px; align-items: center; flex-wrap: nowrap; justify-content: center;
   font-size: clamp(10px, 3vw, 14px); font-weight: 600; opacity: .95;
+  max-width: 100%; overflow: hidden;
 }
+.move-btn .move-pp { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.move-btn .ticon, .move-btn .cicon { flex: 0 0 auto; }
+/* Le due targhette (tipo e categoria) da sole si prendevano 90 px dei 171
+   utili, e i PP finivano tagliati a meta: rimpicciolite un filo ci sta tutto.
+   Misurato: 48+42 -> 39+34, e i PP passano da 71 px a 88. */
+.move-btn .ticon, .move-btn .cicon { zoom: .82; }
+/* [ATTENZIONE] Il segno dell efficacia sta nell ANGOLO, fuori dal flusso: in
+   riga si mangiava lo spazio dei PP, che finivano tagliati a P4... In
+   Scarlatto/Violetto quel segno sta al bordo della riga, non in mezzo ai dati. */
+.move-btn { position: relative; }
+.move-btn .eff-chip { position: absolute; top: 4px; right: 4px; }
 .type-tag {
   padding: 1px 7px; border-radius: 999px;
   font-size: clamp(9px, 2.6vw, 13px); letter-spacing: .3px;
@@ -1265,6 +1299,10 @@ button.pd-card:not(:disabled):active { background: rgba(255,255,255,.14); }
    spiegazione che si apre sotto e' un altro elemento della griglia, quindi in
    due colonne finiva accanto alla mossa invece che sotto. */
 .ms-mosse { display: grid; grid-template-columns: 1fr; gap: 5px; margin: 4px 0 8px; }
+/* Scelta della mossa per Etere e PP-su: una colonna, come la scheda. */
+.ms-mosse-scelta { display: grid; grid-template-columns: 1fr; gap: 8px; margin: 1.5vh 0; }
+.ms-mosse-scelta .move-btn { padding: 8px 10px; }
+.ms-mosse-scelta .move-btn[disabled] { opacity: .45; }
 .ms-mossa {
   display: flex; align-items: center; gap: 4px; min-width: 0;
   background: rgba(255,255,255,.06); border-radius: 9px; padding: 5px 7px;
@@ -1480,6 +1518,18 @@ button.pd-card:not(:disabled):active { background: rgba(255,255,255,.14); }
 /* I due filtri a interruttore stanno nella stessa barra dei menù a tendina,
    ma non devono allargarsi come loro: sono larghi quanto la scritta. */
 .filter-chip, .filtro-chip { flex: 0 0 auto; padding: 5px 9px; font-size: clamp(10px, 2.8vw, 13px); }
+
+/* Scelta del bersaglio in doppio: due caselle fisse per gli avversari (stesso
+   ordine dello schermo) e sotto quelli dalla tua parte. La casella VUOTA resta
+   al suo posto: e' il modo per non far scivolare il superstite dove prima
+   c'era l'altro. */
+.tgt-grid { grid-template-rows: 1fr; }
+.tgt-vuoto {
+  background: rgba(255,255,255,.03);
+  border: 1px dashed rgba(255,255,255,.10);
+  box-shadow: none; pointer-events: none;
+}
+.tgt-miei { display: grid; grid-template-columns: 1fr; gap: var(--gap); margin-top: var(--gap); }
 
 .filter-sel, .filter-q {
   flex: 1 1 30%; min-width: 0;
