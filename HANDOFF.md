@@ -1,7 +1,7 @@
 # HANDOFF — PokéRogue Mobile
 
 Documento per una **nuova sessione di Claude Code**. Leggilo tutto prima di toccare il codice.
-Aggiornato: 2026-09-02 · Stato: **rev 88 pubblicata, 0 errori console**. Ultimo giro: **§40-42**.
+Aggiornato: 2026-09-02 · Stato: **rev 90 pubblicata, 0 errori console**. Ultimo giro: **§40-42**.
 
 ## 🔴 Leggi questo prima di tutto
 
@@ -3489,3 +3489,29 @@ del furto — e li è giusto.
 
 Misurato a 384 px nel caso peggiore (nome da 12 lettere, ₽9.999.999, lente e
 menu): **una riga sola**, 32 px, contatori interi.
+
+
+### 42.6 🔴 Il secondo alleato usciva dal campo senza passare dal richiamo
+
+Segnalazione: «dopo una lotta in doppio il mio secondo Pokémon è rientrato
+automaticamente nella ball ma i suoi debuff sono rimasti».
+
+Vero, ed era in due punti. `game.player2` veniva **azzerato e basta**, senza mai
+passare da `richiamaNellaBall`:
+
+1. in `nextWave`, alla riga `game.double = false; game.enemy2 = null;
+   game.player2 = null;` — cioè proprio quando la doppia finisce e il secondo
+   alleato rientra nella ball;
+2. quando il secondo alleato **cade** e viene rimpiazzato da una riserva: quello
+   caduto lascia il campo, e anche lì si portava dietro gli sbalzi.
+
+⚠️ **L'asimmetria fra i due alleati non è una svista, è il modello**: il PRIMO
+resta in campo da un'ondata all'altra e quindi conserva stadi e stato (§30.1),
+il SECONDO esce e quindi li perde. Va tenuta, e per questo il richiamo va messo
+solo sul secondo. Verificato dal vivo: fine doppia con il secondo a −3 Attacco /
+−2 Difesa / +2 Velocità → all'ondata dopo è a zero, mentre il primo conserva il
+suo +2 Attacco.
+
+⚠️ Il terzo posto in cui `player2` diventa `null` è la **promozione** (il primo
+cade e il secondo prende il suo posto): lì NON va richiamato, perché in campo ci
+resta. Sono tre casi che si somigliano e vogliono cose diverse.
