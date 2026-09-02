@@ -1668,10 +1668,19 @@
     let ball = null;
     if (text && typeof text === "object") { ball = text.ball || null; text = text.text; }
     const p = game.player, e = game.enemy;
+    /* 🔴 ANCHE I SECONDI SLOT. Prima l'istantanea riguardava solo
+       `game.player` e `game.enemy`: in doppio gli altri due riquadri mostravano
+       sempre lo stato di FINE turno, quindi si vedeva un Pokemon gia' a terra
+       alla prima frase, prima delle mosse che l'avrebbero abbattuto.
+       (Segnalazione: «gli eventi non appaiono nell'ordine in cui vengono
+       eseguiti».) */
+    const p2 = game.player2, e2 = game.enemy2;
     const ev = {
       text,
       php: p ? p.hp : 0, pmax: p ? p.maxHp : 1, pst: p ? p.status : null, pfaint: p ? p.fainted : false, phit: !!(p && p._justHit),
       ehp: e ? e.hp : 0, emax: e ? e.maxHp : 1, est: e ? e.status : null, efaint: e ? e.fainted : false, ehit: !!(e && e._justHit),
+      p2hp: p2 ? p2.hp : 0, p2max: p2 ? p2.maxHp : 1, p2st: p2 ? p2.status : null, p2faint: p2 ? p2.fainted : false, p2hit: !!(p2 && p2._justHit),
+      e2hp: e2 ? e2.hp : 0, e2max: e2 ? e2.maxHp : 1, e2st: e2 ? e2.status : null, e2faint: e2 ? e2.fainted : false, e2hit: !!(e2 && e2._justHit),
       /* CHI c'e' in campo in questo momento. Senza questo la scena disegnava
          sempre `game.player`, che al cambio e' gia' il Pokemon NUOVO: si
          leggeva «Ritirati, Ivysaur!» mentre a schermo c'era gia' Charmander,
@@ -1681,10 +1690,15 @@
          mostrerebbero il risultato di fine turno gia' alla prima frase: si
          leggeva «L'Attacco di X sale!» con la freccia verde gia' accesa. */
       pstg: p ? { ...p.stages } : null, estg: e ? { ...e.stages } : null,
+      p2stg: p2 ? { ...p2.stages } : null, e2stg: e2 ? { ...e2.stages } : null,
     };
     if (ball) ev.ball = ball;
-    if (p) p._justHit = false;   // il colpo si "consuma": solo il 1° evento dopo scuote
+    // il colpo si "consuma": solo il 1° evento dopo scuote. Vale per tutti e
+    // quattro, o in doppio la scossa resterebbe appiccicata per tutto il turno.
+    if (p) p._justHit = false;
     if (e) e._justHit = false;
+    if (p2) p2._justHit = false;
+    if (e2) e2._justHit = false;
     return ev;
   }
   /* Marca un messaggio con l'animazione della ball: `verso` e' "ritiro"
@@ -1700,13 +1714,17 @@
      dell'impatto e non un istante prima. Vale anche per il PRIMO evento del
      turno, che non avrebbe un evento precedente da cui pescare. */
   const CAMPI_SNAP = ["php", "pmax", "pst", "pfaint", "ehp", "emax", "est", "efaint",
-                      "pmon", "emon", "p2mon", "e2mon", "pstg", "estg"];
+                      "p2hp", "p2max", "p2st", "p2faint", "e2hp", "e2max", "e2st", "e2faint",
+                      "pmon", "emon", "p2mon", "e2mon",
+                      "pstg", "estg", "p2stg", "e2stg"];
   function riallinea(e) {
     if (!e.pre) { e.pre = {}; for (const k of CAMPI_SNAP) e.pre[k] = e[k]; }
     const s = snapEvent("");
     for (const k of CAMPI_SNAP) e[k] = s[k];
     if (s.phit) e.phit = true;
     if (s.ehit) e.ehit = true;
+    if (s.p2hit) e.p2hit = true;
+    if (s.e2hit) e.e2hit = true;
   }
   function makeLog() {
     const events = [];
@@ -6656,7 +6674,7 @@
       </div>
       <div class="hp-text">${Math.max(0, hp)} / ${maxHp}</div>
       ${barraExp(fighter)}
-      ${fighter.ability ? `<div class="ability-line">${fighter.ability.it}</div>` : ""}
+      <div class="ability-line"><span class="tipi-mini">${fighter.types.map(t => `<span class="ticon t-${t}"></span>`).join("")}</span>${fighter.ability ? fighter.ability.it : ""}</div>
       ${badgeStadi(fighter, ov && ov.stages)}
       ${badgeIV(fighter)}`;
     /* Il bersaglio del dito e' la RIGA intera, non il singolo chip: i chip
@@ -6742,7 +6760,7 @@
   // frame (opzionale) = evento con snapshot: se presente, le barre/sprite mostrano
   // lo stato di QUEL momento (riproduzione scaglionata), non lo stato finale.
   /* Disegna (o nasconde) uno dei due slot secondari della lotta in doppio. */
-  function slot2(prefix, slotSel, f, cap) {
+  function slot2(prefix, slotSel, f, cap, ov, sprOv) {
     const slot = document.querySelector(slotSel);
     if (!slot) return;
     // il riquadro PS non sta piu' dentro lo slot (sta agli angoli della scena):
@@ -6751,8 +6769,8 @@
     if (!f) { slot.hidden = true; if (panel) panel.hidden = true; return; }
     slot.hidden = false;
     if (panel) panel.hidden = false;
-    renderSprite($(prefix + "-sprite"), f, cap, null);
-    renderHpPanel(panel, f, null);
+    renderSprite($(prefix + "-sprite"), f, cap, sprOv || null);
+    renderHpPanel(panel, f, ov || null);
   }
 
   function renderScene(frame) {
@@ -6761,6 +6779,10 @@
     const pOv = frame ? { hp: frame.php, maxHp: frame.pmax, status: frame.pst, stages: frame.pstg } : null;
     const eSprOv = frame ? { fainted: frame.efaint, hit: frame.ehit } : null;
     const pSprOv = frame ? { fainted: frame.pfaint, hit: frame.phit } : null;
+    const e2Ov = frame ? { hp: frame.e2hp, maxHp: frame.e2max, status: frame.e2st, stages: frame.e2stg } : null;
+    const p2Ov = frame ? { hp: frame.p2hp, maxHp: frame.p2max, status: frame.p2st, stages: frame.p2stg } : null;
+    const e2SprOv = frame ? { fainted: frame.e2faint, hit: frame.e2hit } : null;
+    const p2SprOv = frame ? { fainted: frame.p2faint, hit: frame.p2hit } : null;
     // chi finisce in campo e' "visto": basta questo punto solo, ci passano
     // selvatici, boss, squadre degli allenatori e incontri misteriosi
     if (game.enemy) registerSeen(game.enemy.speciesId);
@@ -6779,8 +6801,8 @@
     // SECONDI slot: presenti solo nelle lotte in doppio
     const gm = $("#game");
     if (gm) gm.classList.toggle("double", !!game.double);
-    slot2("#enemy2", ".battler-slot.enemy2", E2, spriteCfg(ENEMY_SPRITE, E2));
-    slot2("#player2", ".battler-slot.ally2", P2, spriteCfg(PLAYER_SPRITE, P2));
+    slot2("#enemy2", ".battler-slot.enemy2", E2, spriteCfg(ENEMY_SPRITE, E2), e2Ov, e2SprOv);
+    slot2("#player2", ".battler-slot.ally2", P2, spriteCfg(PLAYER_SPRITE, P2), p2Ov, p2SprOv);
     // barre degli oggetti tenuti (giocatore e avversario)
     renderHeldBar("#held-ally", P);
     renderHeldBar("#held-enemy", E);
@@ -6824,7 +6846,20 @@
        pulsante della mossa si vede il migliore dei due, ma se i due avversari
        hanno tipi diversi e' proprio la scelta del bersaglio a decidere. */
     const mvSel = M[(currentChooser() || game.player).moves[moveIndex].id];
-    const btns = bersagli.map((f, i) => {
+
+    /* 🔴 CASELLE FISSE, nell'ordine in cui i Pokemon stanno in campo.
+       Prima i pulsanti erano la lista dei bersagli VIVI: quando uno cadeva, il
+       superstite scivolava nella casella dell'altro e il dito, che quella
+       posizione l'aveva gia' imparata, colpiva quello sbagliato. Adesso ogni
+       slot ha la sua casella: se e' vuoto resta una casella spenta.
+       L'ordine e' quello dello SCHERMO (vedi `ordineSchermo`): a sinistra lo
+       slot `enemy2`, a destra `enemy`. */
+    const slotSinistra = game.enemy2 || null;
+    const slotDestra = game.enemy || null;
+    const disegna = (f) => {
+      if (!f) return `<span class="btn move-btn tgt-vuoto"></span>`;
+      const i = bersagli.indexOf(f);
+      if (i < 0) return `<span class="btn move-btn tgt-vuoto"></span>`;
       const ratio = Math.max(0, f.hp / f.maxHp);
       const col = ratio > 0.5 ? "var(--hp-green)" : ratio > 0.2 ? "var(--hp-yellow)" : "var(--hp-red)";
       /* ⚠️ Il bersaglio dalla TUA parte va segnalato: adesso che si può
@@ -6837,10 +6872,17 @@
             ${chipEfficacia(mvSel, [f])}
             <span class="tgt-hp"><span style="width:${ratio * 100}%;background:${col}"></span></span></span>
         </button>`;
-    }).join("");
+    };
+    // le due caselle degli avversari, sempre e comunque due
+    const righeNemici = bersagli.some(f => isEnemySide(f))
+      ? `<div class="grid2 tgt-grid">${disegna(slotSinistra)}${disegna(slotDestra)}</div>` : "";
+    // e sotto, a tutta larghezza, chi sta dalla tua parte (alleato o te stesso)
+    const miei = bersagli.filter(f => !isEnemySide(f));
+    const righeMie = miei.length
+      ? `<div class="tgt-miei">${miei.map(disegna).join("")}</div>` : "";
     cmd().innerHTML = `
       <div class="prompt-line">Chi vuoi colpire? <span class="hud">· o toccalo in campo</span></div>
-      <div class="grid2">${btns}</div>
+      ${righeNemici}${righeMie}
       <div class="back-row"><button class="btn back" data-act="back">Indietro</button></div>`;
     const scegli = (f) => { evidenziaBersagli(null); playerChooseMove(moveIndex, f); };
     cmd().querySelectorAll(".tgt-btn").forEach(b => b.onclick = () =>
@@ -9873,16 +9915,19 @@
   const someone   = f => () => game.party.some(f);
 
   // PP Up: +1/5 dei PP base per stadio, fino a 3 stadi (come nei giochi).
-  function applyPpUp(p, stages) {
-    for (const m of p.moves) {
-      const base = M[m.id].pp;
-      const cur = m.ppUp || 0;
-      const add = Math.min(stages, 3 - cur);
-      if (add <= 0) continue;
-      m.ppUp = cur + add;
-      const gain = Math.floor(base / 5) * add;
-      m.maxPp += gain; m.pp += gain;
-    }
+  /* 🔴 UNA mossa sola, quella scelta. Prima il ciclo passava su tutte e
+     quattro: PP-su e PP-max valevano il quadruplo dell'originale, dove la
+     descrizione dice chiaro «i PP di UNA mossa». */
+  function applyPpUp(p, stages, indice) {
+    const m = p.moves[indice || 0];
+    if (!m) return;
+    const base = M[m.id].pp;
+    const cur = m.ppUp || 0;
+    const add = Math.min(stages, 3 - cur);
+    if (add <= 0) return;
+    m.ppUp = cur + add;
+    const gain = Math.floor(base / 5) * add;
+    m.maxPp += gain; m.pp += gain;
   }
   /* Mosse che il Pokemon POTREBBE conoscere dal suo learnset ma non ha:
      e' quello che fa ricordare il Fungo della memoria (MEMORY_MUSHROOM). */
@@ -9892,9 +9937,13 @@
       .map(([, mv]) => mv);
   }
   // Etere/Elisir: `moves` = quante mosse (1 = quella piu' scarica), `amount` = -1 pieno
-  function restorePp(p, howMany, amount) {
+  /* `howMany === 1` = una mossa sola: se `indice` c'e', e' quella SCELTA da chi
+     gioca (Etere ed Etere max lo chiedono, come nell'originale); se manca si
+     ripiega su quella messa peggio. */
+  function restorePp(p, howMany, amount, indice) {
     const list = howMany === 1
-      ? [p.moves.slice().sort((a, b) => (a.pp / a.maxPp) - (b.pp / b.maxPp))[0]]
+      ? [indice != null ? p.moves[indice]
+                        : p.moves.slice().sort((a, b) => (a.pp / a.maxPp) - (b.pp / b.maxPp))[0]]
       : p.moves;
     for (const m of list) {
       if (!m) continue;
@@ -10088,10 +10137,10 @@
       target: "mon", valid: canHeal, avail: someone(canHeal), apply: p => hpRestore(p, 20, 10) },
     { tier: "COMMON", weight: 3, id: "superpotion", label: "Superpozione", desc: "cura 50 PS o il 25%", icon: "super_potion",
       target: "mon", valid: canHeal, avail: someone(canHeal), apply: p => hpRestore(p, 50, 25) },
-    { tier: "COMMON", weight: 3, id: "ether", label: "Etere", desc: "+10 PP a una mossa", icon: "ether",
-      target: "mon", valid: needsPp, avail: someone(needsPp), apply: p => restorePp(p, 1, 10) },
-    { tier: "COMMON", weight: 3, id: "maxether", label: "Etere max", desc: "PP pieni a una mossa", icon: "max_ether",
-      target: "mon", valid: needsPp, avail: someone(needsPp), apply: p => restorePp(p, 1, -1) },
+    { tier: "COMMON", weight: 3, id: "ether", label: "Etere", desc: "+10 PP a una mossa che scegli tu", icon: "ether",
+      target: "mon", mossa: true, valid: needsPp, avail: someone(needsPp), apply: (p, pk, i) => restorePp(p, 1, 10, i) },
+    { tier: "COMMON", weight: 3, id: "maxether", label: "Etere max", desc: "PP pieni a una mossa che scegli tu", icon: "max_ether",
+      target: "mon", mossa: true, valid: needsPp, avail: someone(needsPp), apply: (p, pk, i) => restorePp(p, 1, -1, i) },
     { tier: "COMMON", weight: 2, id: "candy", label: "Caramella rara", desc: "+1 livello", icon: "rare_candy",
       target: "mon", valid: alive, apply: p => addLevels(p, 1) },
     { tier: "COMMON", weight: 2, id: "berry", label: "Bacca", desc: "held: si attiva da sola in lotta", icon: "sitrus_berry",
@@ -10132,8 +10181,8 @@
       target: "mon", valid: needsPp, avail: someone(needsPp), apply: p => restorePp(p, 99, 10) },
     { tier: "GREAT", weight: 3, id: "maxelisir", label: "Elisir max", desc: "PP pieni a tutte le mosse", icon: "max_elixir",
       target: "mon", valid: needsPp, avail: someone(needsPp), apply: p => restorePp(p, 99, -1) },
-    { tier: "GREAT", weight: 2, id: "ppup", label: "PP-su", desc: "alza i PP massimi di una mossa", icon: "pp_up",
-      target: "mon", valid: canPpUp, avail: someone(canPpUp), apply: p => applyPpUp(p, 1) },
+    { tier: "GREAT", weight: 2, id: "ppup", label: "PP-su", desc: "alza i PP massimi di una mossa che scegli tu", icon: "pp_up",
+      target: "mon", mossa: true, ppUp: true, valid: canPpUp, avail: someone(canPpUp), apply: (p, pk, i) => applyPpUp(p, 1, i) },
     { tier: "GREAT", weight: 3, id: "vit", label: "Vitamina", desc: "+10% a una statistica base", icon: "protein",
       target: "mon", valid: alive, dyn: "stat", apply: (p, pk) => { p.vits[pk.stat] = (p.vits[pk.stat] || 0) + 1; recomputeStats(p); } },
     /* Le pepite dicono QUANTO valgono: dipende dall'ondata, quindi la
@@ -10168,8 +10217,8 @@
       apply: (p, pk) => { p.held.typeboost = p.held.typeboost || {}; p.held.typeboost[pk.type] = (p.held.typeboost[pk.type] || 0) + 1; } },
     { tier: "ULTRA", weight: 12, id: "bignugget", label: "Granpepita", desc: () => `soldi in quantità moderata (₽${waveMoney(2.5)})`, icon: "big_nugget",
       target: "run", apply: () => { game.money += waveMoney(2.5); } },
-    { tier: "ULTRA", weight: 3, id: "ppmax", label: "PP-max", desc: "PP massimi al massimo", icon: "pp_max",
-      target: "mon", valid: canPpUp, avail: someone(canPpUp), apply: p => applyPpUp(p, 3) },
+    { tier: "ULTRA", weight: 3, id: "ppmax", label: "PP-max", desc: "PP massimi al massimo su una mossa che scegli tu", icon: "pp_max",
+      target: "mon", mossa: true, ppUp: true, valid: canPpUp, avail: someone(canPpUp), apply: (p, pk, i) => applyPpUp(p, 3, i) },
     { tier: "ULTRA", weight: 4, id: "rarercandy", label: "Caramella rarissima", desc: "+1 livello a TUTTA la squadra", icon: "rarer_candy",
       target: "party", apply: () => { for (const q of game.party) addLevels(q, 1); } },
     { tier: "ULTRA", weight: 4, id: "reviverseed", label: "Revitalseme", desc: "held: rianima una volta al 50%", icon: "reviver_seed",
@@ -10629,10 +10678,47 @@
   }
 
   /* Consegna un premio/acquisto: se serve un destinatario lo chiede prima. */
+  /* 🔴 QUALE MOSSA. Etere, Etere max, PP-su e PP-max agiscono su una mossa
+     sola, e nell'originale la scegli tu (il pannello squadra si apre in modo
+     MOVE_MODIFIER). Qui e' una schermata sua, con i PP di ognuna e il tastino
+     che dice cosa fa la mossa. */
+  function chooseMove(pick, mon, onDone, back) {
+    const item = pick.item;
+    const utile = (m, i) => item.ppUp ? (m.ppUp || 0) < 3 : m.pp < m.maxPp;
+    const righe = mon.moves.map((m, i) => {
+      const mv = M[m.id];
+      const ok = utile(m, i);
+      const extra = item.ppUp
+        ? `PP max ${m.maxPp}${(m.ppUp || 0) ? ` · già +${m.ppUp}` : ""}${ok ? "" : " · al massimo"}`
+        : `PP ${m.pp}/${m.maxPp}${ok ? "" : " · già pieni"}`;
+      return `<button class="btn move-btn" data-i="${i}" ${ok ? "" : "disabled"}
+                style="background:${T[mv.type].color};">
+          <span class="move-name">${mv.it}</span>
+          <span class="move-meta"><span class="ticon t-${mv.type}"></span>
+            <span class="move-pp">${extra}</span></span>
+        </button>`;
+    }).join("");
+    showMetaScreen(`
+      <div class="meta-title" style="font-size:clamp(18px,5.2vw,27px)">${pick.label}</div>
+      <div class="meta-sub">Su quale mossa di ${mon.name}?</div>
+      <div class="ms-mosse-scelta">${righe}</div>
+      <div class="meta-actions"><button class="meta-btn ghost" data-act="back">↩ Indietro</button></div>`);
+    metaEl().querySelectorAll(".move-btn").forEach(b => b.onclick = () => {
+      if (b.disabled) return;
+      onDone(parseInt(b.dataset.i, 10));
+    });
+    metaEl().querySelector('[data-act="back"]').onclick = back;
+  }
+
   function grantItem(pick, done, back) {
     const item = pick.item;
-    if (item.target === "mon") chooseTarget(pick, p => { item.apply(p, pick); done(); }, back);
-    else { item.apply(game.player, pick); done(); }
+    if (item.target === "mon") {
+      chooseTarget(pick, p => {
+        // gli oggetti "su una mossa" chiedono ANCHE quale
+        if (item.mossa) chooseMove(pick, p, (i) => { item.apply(p, pick, i); done(); }, back);
+        else { item.apply(p, pick); done(); }
+      }, back);
+    } else { item.apply(game.player, pick); done(); }
   }
 
   // Ingresso nel negozio (dopo un'ondata): azzera il costo del reroll.

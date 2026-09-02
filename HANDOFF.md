@@ -1,7 +1,7 @@
 # HANDOFF — PokéRogue Mobile
 
 Documento per una **nuova sessione di Claude Code**. Leggilo tutto prima di toccare il codice.
-Aggiornato: 2026-09-03 · Stato: **rev 94 pubblicata, 0 errori console**. Ultimo giro: **§40-44**.
+Aggiornato: 2026-09-03 · Stato: **rev 106 pubblicata, 0 errori console**. Ultimo giro: **§40-45**.
 
 ## 🔴 Leggi questo prima di tutto
 
@@ -3689,3 +3689,98 @@ del filtro, o si ricalcola per ognuna delle 571 specie.
 ⚠️ Con «solo Pokérus» e lo stato su «Schierabili» il risultato è spesso VUOTO,
 e non è un difetto: le tre specie del giorno sono estratte fra tutte, non fra
 quelle che hai sbloccato. Mettendo lo stato su «Tutto» si vedono le tre sagome.
+
+
+## 45. Doppio, riquadri e oggetti a mossa singola (2026-09-03, secondo giro)
+
+### 45.1 🔴 In doppio gli eventi si vedevano fuori ordine
+
+Segnalazione: «un Pokémon si vede andare KO prima di ricevere le mosse che lo
+manderanno KO».
+
+Causa: **l'istantanea dell'evento fotografava solo due combattenti su quattro**.
+`snapEvent` salvava `php/ehp/…` di `game.player` e `game.enemy`, e `slot2()`
+passava `null` come override a `renderSprite`/`renderHpPanel`. Quindi i due slot
+SECONDARI mostravano sempre lo stato di **fine turno**, dalla prima frase.
+
+Ora l'istantanea ha anche `p2hp/p2max/p2st/p2faint/p2hit/p2stg` e
+`e2hp/…/e2stg`, sono tutti in `CAMPI_SNAP`, e `slot2` accetta i due override.
+⚠️ Anche `_justHit` va consumato per tutti e quattro, o in doppio la scossa del
+colpo resta appiccicata per tutto il turno.
+
+Verificato: col secondo alleato che abbatte l'avversario di sinistra, alla
+frase «Secondo usa Braciere!» quell'avversario è ancora a **50/50**, e passa a
+0/50 solo sulla frase dopo.
+
+### 45.2 I tipi dentro il riquadro PS — come li fa l'originale
+
+Domanda: «nelle finestre dei Pokémon credo si debba vedere anche il loro tipo.
+Come lo gestiva l'originale?»
+
+L'originale li mostra: sono **icone a posizione fissa** dentro il riquadro
+(`pbinfo_player_type1/2`, `pbinfo_enemy_type1/2`, fino a tre col Tera), messe
+lì dal costruttore e aggiornate da `setTypes`. Stando a coordinate fisse dentro
+una scatola di misura fissa, non allargano mai niente.
+
+Da noi stanno sulla riga dell'abilità, con le **stesse icone di PokéRogue**
+(`types.png`, 48×21). ⚠️ Per rimpicciolirle si usa `zoom`, non
+`transform: scale()`: il secondo non toglierebbe spazio al testo, e soprattutto
+cambiare `background-size` vorrebbe dire rifare i conti di tutte le 18
+posizioni nel foglio.
+
+### 45.3 In doppio le caselle dei bersagli non si spostano più
+
+Segnalazione: «i nomi da selezionare devono rimanere in posizione fissa
+rispecchiando l'ordine a schermo, anche dopo che un Pokémon va KO».
+
+Prima i pulsanti erano la lista dei bersagli **vivi**: quando uno cadeva, il
+superstite scivolava nella casella dell'altro — e il dito, che quella posizione
+l'aveva già imparata, colpiva quello sbagliato.
+
+Ora gli avversari hanno **due caselle fisse** nell'ordine dello schermo (a
+sinistra lo slot `enemy2`, a destra `enemy`), e quella vuota resta lì, spenta e
+tratteggiata. Chi sta dalla tua parte (alleato) va su una riga sotto, a tutta
+larghezza. Verificato: caduto quello di sinistra, il superstite NON si sposta.
+
+### 45.4 🔴 «Descrizioni» e «Indietro» erano finiti sotto il bordo
+
+Segnalazione: «quando schiaccio Lotta non ho la possibilità di tornare indietro
+né di vedere la descrizione delle mosse: le hai tolte o sono sotto il bordo?».
+Sotto il bordo: **8 px**, misurati.
+
+Tre cose, e vale la pena ricordarle tutte e tre:
+
+1. `.grid2` sta in una colonna flex e aveva `min-height: auto`, cioè **si
+   rifiutava di scendere sotto l'altezza dei suoi pulsanti**: quando lo spazio
+   mancava non si stringeva lei, spingeva fuori la riga sotto. `min-height: 0`
+   non è una rifinitura, è obbligatorio.
+2. Con `min-height: 0` da solo i pulsanti venivano schiacciati e i nomi tagliati:
+   il vero eccesso era `.move-meta` che andava **a capo** (nome + icone + PP =
+   tre righe). Ora è `nowrap`.
+3. In una riga sola i PP finivano troncati («P4…»). Due mosse: il chip
+   dell'efficacia è passato **nell'angolo** del pulsante (fuori dal flusso, come
+   il segno di Scarlatto/Violetto), e le due targhette (tipo e categoria) sono
+   scese da 48+42 px a 39+34 con `zoom: .82`. Misurato: i PP passano da 71 px a
+   88 e ci sta «P40 · PP 20/25» intero.
+
+### 45.5 Etere e PP-su: la mossa la scegli tu
+
+Domanda: «come funziona Etere? Nell'originale si sceglie una mossa precisa, qui
+non me l'ha fatto fare».
+
+Vero, e c'era di peggio accanto:
+
+- **Etere** ed **Etere max** sceglievano da soli la mossa messa peggio;
+- **PP-su** e **PP-max** li applicavano a **tutte e quattro** le mosse, cioè
+  valevano il quadruplo dell'originale (dove la descrizione dice «i PP di UNA
+  mossa»).
+
+Ora c'è `chooseMove`, che si apre dopo la scelta del destinatario per gli
+oggetti marcati `mossa: true`: mostra le quattro mosse coi PP attuali (o i PP
+massimi e quanti PP-su ha già preso), e spegne quelle su cui l'oggetto non
+farebbe niente. Verificato: Etere su Ruggito porta 12/40 a 22/40 e non tocca le
+altre.
+
+⚠️ Attenzione ai collaudi fatti su un'ondata multipla di 10: la **cura della
+decina** (§42.1) rifà PS e PP a tutti, e sembra che l'oggetto abbia curato
+tutto. Ci sono cascato: la prova va fatta a un'ondata qualsiasi.
