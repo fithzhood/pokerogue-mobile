@@ -42,7 +42,7 @@
      · quanta ne frutta un nemico:  baseExp × livello / 5 + 1   (×1,5 allenatori)
      · quanta ne prende ciascuno:   chi ha combattuto la divide fra sé;
        chi era in panchina prende il 20% (l'Esperienza Condivisa che in
-       PokeRogue si ottiene presto). Pokerus ×1,5, Esperienzamuleto +%.
+       PokeRogue si ottiene presto). Pokerus ×1,5, Espamuleto +%.
      · da esperienza a livello: PokeRogue MESCOLA la curva della specie con
        quella "media veloce" — `0,325 × propria + 0,675 × livello³` — quindi
        le differenze fra curve sono molto smorzate.
@@ -124,8 +124,7 @@
   /* ====================================================================== */
   /*  META — persistenza (localStorage): voucher, uova, starter sbloccati    */
   /* ====================================================================== */
-  //[metti] const META_KEY = "pokerogue_clear_meta_v1";
-  const META_KEY = "pokerogue_mobile_meta_v1"; /*[riga]*/
+  const META_KEY = "pokerogue_clear_meta_v1";
   // Tier uovo: ondate per la schiusa + peso nel gacha. (numeri ridotti: le run
   // sono corte ma le uova PERSISTONO tra le run, quindi si schiudono col tempo)
   /* Le ondate per la schiusa restano le NOSTRE (ridotte: nell'originale sono
@@ -535,7 +534,7 @@
   function natureMult(f, stat) {
     const n = NATURES[f.nature];
     if (!n || stat === "hp") return 1;
-    // Cuorugiada amplifica l'effetto della natura di 10 punti per pezzo
+    // Rugiadanima amplifica l'effetto della natura di 10 punti per pezzo
     const dew = 0.1 * ((f.held && f.held.souldew) || 0);
     if (n.su === stat) return 1.1 + dew;
     if (n.giu === stat) return 0.9 - dew;
@@ -559,7 +558,7 @@
     const bs = { hp: b("hp"), atk: b("atk"), def: b("def"),
                  spatk: b("spatk"), spdef: b("spdef"), spd: b("spd") };
     // La NATURA moltiplica la statistica finale (+10% / −10%), mai i PS.
-    // Gli oggetti legati alla specie (Elettropalla, Osso spesso...) raddoppiano.
+    // Gli oggetti legati alla specie (Sferapalla, Ossoduro...) raddoppiano.
     const nat = k => Math.floor(calcStat(bs[k], lvl, iv[k]) * natureMult(f, k) * specieBoostMult(f, k));
     f.stats = {
       hp:    calcHP(bs.hp, lvl, iv.hp),
@@ -606,7 +605,7 @@
   // Sceglie l'abilita' della specie (a caso tra le normali; fallback nascosta).
   /* Abilità di un esemplare che compare in campo. Come `generateAbilityIndex`:
      l'abilità NASCOSTA è rara — 1 su 256 — e le due normali si tirano a sorte.
-     L'Abilitamuleto alza la probabilità della nascosta (solo sui selvatici).
+     L'Abilamuleto alza la probabilità della nascosta (solo sui selvatici).
      Ritorna anche l'INDICE (0,1,2), che serve per registrare nel dex quale
      abilità hai davvero catturato. */
   const TASSO_NASCOSTA = 256;            // BASE_HIDDEN_ABILITY_RATE
@@ -1029,7 +1028,7 @@
     // stat stages: nel critico gli sbalzi negativi di chi attacca e positivi di
     // chi difende vengono ignorati (semplificazione: ignoriamo il def buff nel crit).
     // Scala del brutto colpo: stadio 0 = 1/16, poi 1/8, 1/2, sempre.
-    // Gli stadi arrivano da HighCritAttr, dal Mirino, dalla Baccalangsa e dal Supercolpo.
+    // Gli stadi arrivano da HighCritAttr, dal Mirino, dalla Baccalansa e dal Supercolpo.
     const CRIT_ODDS = [1 / 16, 1 / 8, 1 / 2, 1];
     const cs = Math.min(3, (opts.highCrit ? 1 : 0) + (opts.critStage || 0));
     const crit = opts.forceCrit || Math.random() < CRIT_ODDS[cs];
@@ -1040,10 +1039,8 @@
     // Evolcondensa: +50% alle difese se la specie puo' ancora evolvere
     const evio = (defender.held && defender.held.eviolite && (S[defender.speciesId].evolutions || []).length) ? 1.5 : 1;
     const defAb = abStatMult(defender, isPhysical ? "DEF" : "SPDEF") * evio;
-    const atk = (isPhysical ? attacker.stats.atk : attacker.stats.spatk) * stageMult(atkStage) * atkAb
-              * tempStatMult(attacker, isPhysical ? "atk" : "spatk");
-    const def = (isPhysical ? defender.stats.def : defender.stats.spdef) * stageMult(crit ? Math.min(0, defStage) : defStage) * defAb
-              * tempStatMult(defender, isPhysical ? "def" : "spdef");
+    const atk = (isPhysical ? attacker.stats.atk : attacker.stats.spatk) * stageMult(atkStage) * atkAb;
+    const def = (isPhysical ? defender.stats.def : defender.stats.spdef) * stageMult(crit ? Math.min(0, defStage) : defStage) * defAb;
 
     // abilita': boost di potenza per tipo (Aiutofuoco/Erbaiuto a HP bassi, ecc.)
     // `opts.potenza` sovrascrive la potenza: la usano le mosse a potenza
@@ -1077,36 +1074,6 @@
     if (dmg < 1) dmg = 1;                          // almeno 1 se non immune
 
     return { damage: dmg, effectiveness: eff, crit, immune: false };
-  }
-
-  /* ======================================================================
-     STRUMENTI X — come `TempStatStageBoosterModifier` dell'originale.
-
-     🔴 Prima scrivevano +1 STADIO dentro `f.stages` a ogni entrata in campo.
-     Due difetti veri: valeva 1,5x invece di 1,2x, e soprattutto lo stadio
-     RESTAVA li' per sempre (gli stadi persistono fra le ondate dal §30.1),
-     cioe' un oggetto da 5 ondate regalava un bonus eterno.
-     Ora non toccano piu' gli stadi: sono un moltiplicatore applicato dove la
-     statistica viene usata, +20% per ogni pezzo comprato. La PRECISIONE fa
-     eccezione anche nell'originale: li' vale +1 stadio.
-     ====================================================================== */
-  function tempStatMult(f, stat) {
-    if (stat === "acc" || !game.tempBoost || !game.party.includes(f)) return 1;
-    if (!(game.tempBoost[stat] > 0)) return 1;
-    return 1 + 0.2 * ((game.tempBoostN || {})[stat] || 1);
-  }
-  // Stadi di precisione regalati da Precisione X (0 se non attiva)
-  function tempAccStages(f) {
-    if (!game.tempBoost || !game.party.includes(f) || !(game.tempBoost.acc > 0)) return 0;
-    return (game.tempBoostN || {}).acc || 1;
-  }
-  /* Velocita' che conta per l'ORDINE del turno.
-     ⚠️ Prima l'ordine leggeva `stats.spd` crudo: gli STADI di velocita' non
-     contavano niente (Agilita' non faceva nulla sull'iniziativa) e neanche gli
-     Strumenti X. Le abilita' legate al meteo (Clorofilla, Nuotovelox...) restano
-     fuori: nei dati non portano la condizione, applicarle sempre sarebbe peggio. */
-  function velEff(f) {
-    return f.stats.spd * stageMult(f.stages.spd) * tempStatMult(f, "spd");
   }
 
   // Moltiplicatore statistica da abilita' (StatMultiplierAbAttr).
@@ -1677,10 +1644,6 @@
          leggeva «Ritirati, Ivysaur!» mentre a schermo c'era gia' Charmander,
          e l'animazione del ritiro avrebbe risucchiato quello sbagliato. */
       pmon: p, emon: e, p2mon: game.player2 || null, e2mon: game.enemy2 || null,
-      /* Anche gli SBALZI vanno fotografati, o i badge del riquadro PS
-         mostrerebbero il risultato di fine turno gia' alla prima frase: si
-         leggeva «L'Attacco di X sale!» con la freccia verde gia' accesa. */
-      pstg: p ? { ...p.stages } : null, estg: e ? { ...e.stages } : null,
     };
     if (ball) ev.ball = ball;
     if (p) p._justHit = false;   // il colpo si "consuma": solo il 1° evento dopo scuote
@@ -1700,7 +1663,7 @@
      dell'impatto e non un istante prima. Vale anche per il PRIMO evento del
      turno, che non avrebbe un evento precedente da cui pescare. */
   const CAMPI_SNAP = ["php", "pmax", "pst", "pfaint", "ehp", "emax", "est", "efaint",
-                      "pmon", "emon", "p2mon", "e2mon", "pstg", "estg"];
+                      "pmon", "emon", "p2mon", "e2mon"];
   function riallinea(e) {
     if (!e.pre) { e.pre = {}; for (const k of CAMPI_SNAP) e.pre[k] = e[k]; }
     const s = snapEvent("");
@@ -1714,13 +1677,13 @@
       events,
       push(t) { events.push(snapEvent(t)); },
       // marca l'ultimo evento con un effetto visivo (tipo mossa + bersaglio + quale mossa)
-      fx(type, side, move, from) { if (events.length) events[events.length - 1].fx = { type, side, move, from }; },
+      fx(type, side, move) { if (events.length) events[events.length - 1].fx = { type, side, move }; },
       /* Come `fx`, ma su un evento PRECISO. Serve perche' l'animazione della
          mossa va sul messaggio «X usa Y!», che fotografa la situazione PRIMA
          del colpo. Attaccandola all'ultimo evento finiva su un messaggio gia'
          successivo al danno (spesso «X e' esausto!»): si vedeva il nemico
          cadere e solo dopo partiva l'animazione che avrebbe dovuto colpirlo. */
-      fxAt(i, type, side, move, from) { if (events[i]) events[i].fx = { type, side, move, from }; },
+      fxAt(i, type, side, move) { if (events[i]) events[i].fx = { type, side, move }; },
       /* AGGIUNGE una riga all'ULTIMO evento invece di crearne uno nuovo.
          Serve alle frasi che raccontano lo STESSO momento: «Zubat usa
          Velenospina!» e «È superefficace!» sono una cosa sola, e chiedere due
@@ -1910,41 +1873,7 @@
   /* Ogni 10 ondate si cambia zona. Come nell'originale (`select-biome-phase.ts`
      controlla il MapModifier) la SCELTA c'e' solo se possiedi la Mappa:
      senza, la zona successiva viene estratta a caso fra i collegamenti. */
-  /* 🔴 CURA DI SQUADRA ALLE ONDATE DELLE DECINE (10, 20, 30...)
-
-     E' la `PartyHealPhase` dell'originale, che scatta al cambio zona: tutta la
-     squadra rientra nelle ball e ne esce ripulita. Da noi — per la regola del
-     proprietario che vale dal 14 agosto — gli PS restano quelli che sono: si
-     azzerano solo problemi di stato, stadi ed effetti volatili.
-     ⚠️ Nell'originale qui si rifanno anche PS e PP: se un giorno si vuole
-     quello, il posto e' questo.
-     E' l'unico momento in cui l'attrito accumulato si ferma DAVVERO: fuori di
-     qui stato e stadi appartengono al Pokemon finche' resta in campo. */
-  function curaSquadraDecina() {
-    const daCurare = game.party.filter(p => p.status || Object.values(p.stages || {}).some(v => v)).length;
-    for (const p of game.party) {
-      richiamaNellaBall(p, true);     // stadi a zero E stato guarito
-      p.volatile = { confusion: 0, flinch: false, protect: null, protectUsi: 0,
-                     trap: null, seed: false, seedBy: null, perish: 0, recharge: false,
-                     charging: null, infatuated: false, encore: null, taunt: 0,
-                     torment: false, drowsy: 0, nightmare: false, ingrain: false,
-                     aquaring: false, saltcure: false, curse: false, lastMove: null,
-                     accumulo: 0, bide: null };
-      p.sleepTurns = 0;
-    }
-    renderScene();
-    return daCurare
-      ? ["La squadra rientra nelle ball e ne esce rimessa a nuovo: nessun problema di stato, nessuno sbalzo."]
-      : [];
-  }
-
   function showBiomeChoice() {
-    const cura = curaSquadraDecina();
-    if (cura.length) { queueMessages(cura, scegliBioma); return; }
-    scegliBioma();
-  }
-
-  function scegliBioma() {
     // ultime 10 ondate: si va in END e basta, senza scelta (vedi `versoEND`)
     if (versoEND() && BIOMES.END && game.biome !== "END") {
       game.biome = "END";
@@ -2009,6 +1938,11 @@
                    accumulo: 0, bide: null };
     f._lansat = false;
     f.fainted = false;
+    // Poteslot: finche' dura, la squadra entra in campo con almeno +1 stadio
+    // (`max`, non `=`: ora gli stadi persistono e non vanno peggiorati)
+    if (game.tempBoost && game.party.includes(f)) {
+      for (const k in game.tempBoost) if (k !== "crit" && k in f.stages) f.stages[k] = Math.max(f.stages[k], 1);
+    }
   }
 
   /* Il Pokemon RIENTRA NELLA BALL: perde gli stadi — boost e debuff valgono
@@ -2044,14 +1978,11 @@
     game.pendingTheft = 0;
     game.money = 400;
     game.stones = {};
-    // amuleti e potenziamenti di run (Esperienzamuleto, Monetamuleto, Mappa, ecc.)
+    // amuleti e potenziamenti di run (Espamuleto, Monetamuleto, Mappa, ecc.)
     game.charms = { exp: 0, amulet: 0, healing: 0, shiny: 0, catching: 0, ability: 0, lure: 0,
                     candyJar: 0, berryPouch: 0, ivScanner: 0, goldenPunch: 0, map: 0 };
-    // Strumenti X / Supercolpo: durano 5 ondate. `tempBoostN` conta i pezzi
-    // (si accumulano, come nell'originale); i salvataggi vecchi non ce l'hanno
-    // e valgono 1 pezzo.
+    // Poteslot / Supercolpo: durano 5 ondate
     game.tempBoost = {};
-    game.tempBoostN = {};
     game.shopMarkup = 1;      // rincaro dei prezzi (incontro dei rifiuti)
     game.weather = null;      // meteo attivo (dura pochi turni)
     game.terrain = null;      // terreno attivo
@@ -2382,12 +2313,12 @@
       stessoMomento(messages, testo);
     };
     if (onda % 10) return;                       // solo sulle ondate x10
-    // un Esperienzamuleto ogni 10 ondate, che ogni 30 diventa il Super
+    // un Espamuleto ogni 10 ondate, che ogni 30 diventa il Super
     if (onda <= 500) {
-      if (onda % 30 === 20) dai("superexpcharm", "🎁 Ricevi un Esperienzamuleto super!");
-      else dai("expcharm", "🎁 Ricevi un Esperienzamuleto!");
+      if (onda % 30 === 20) dai("superexpcharm", "🎁 Ricevi un Superespamuleto!");
+      else dai("expcharm", "🎁 Ricevi un Espamuleto!");
     }
-    if (onda === 10) dai("expcharm", "🎁 Il professore ti manda un Esperienzamuleto!");
+    if (onda === 10) dai("expcharm", "🎁 Il professore ti manda un Espamuleto!");
     if (onda === 50 || onda === 100 || onda === 150) dai("amulet", "🎁 Ricevi un Monetamuleto!");
   }
 
@@ -2532,7 +2463,7 @@
   }
 
   /* ---------------- MEGAEVOLUZIONE / GIGAMAX ----------------
-     Servono l'oggetto (Megapolsiera / Dynamax Band) comprato al negozio, e la
+     Servono l'oggetto (Megacerchio / Dynamax Band) comprato al negozio, e la
      specie deve avere una forma. Dura per tutta la battaglia; una volta per
      lotta. Statistiche/tipi/abilità della forma sono quelli reali del gioco. */
   function formsFor(p, kind) {
@@ -3491,7 +3422,7 @@
       const sua = p.moves.map(m => m.id).find(id => TRE.includes(id));
       if (sua !== e.tyrogue) return false;
     }
-    // tiene un oggetto legato alla specie (Dente Abissi / Squamabissi)
+    // tiene un oggetto legato alla specie (Dentebissi / Squamabissi)
     if (e.heldItem) {
       const chiave = e.heldItem.toLowerCase().replace(/_/g, "");
       if (!p.held || !p.held[chiave]) return false;
@@ -3677,19 +3608,8 @@
   }
 
   /* ---------------- Fine ondata ---------------- */
-  //[metti] /* Ondata superata: il corpo di sempre. */
-  /* Ondata superata. Se e' appena caduto un ALLENATORE e l'easter egg delle [riga]
-     GIF e' attivo, la GIF viene PRIMA di tutto il resto: e' il momento della [riga]
-     vittoria, non un premio da riscuotere dopo. Dura tanti secondi quanta e' [riga]
-     l'ondata. Finita, la partita riprende da `vittoriaOndata()`, che e' il [riga]
-     corpo di sempre. (§25) [riga] */
+  /* Ondata superata: il corpo di sempre. */
   function onWaveCleared() {
-    /*[via]*/
-    if (game.enemy && game.enemy.trainer && gifPronte()) {
-      gifMostra(game.wave, vittoriaOndata);
-      return;
-    }
-    /*[fine]*/
     vittoriaOndata();
   }
 
@@ -3734,7 +3654,7 @@
     game.money += money;
     stessoMomento(messages, `Ricevi ₽${money}!`);
     // i potenziamenti a tempo (Poteslot/Supercolpo) durano 5 ondate
-    for (const k in game.tempBoost) if (--game.tempBoost[k] <= 0) { delete game.tempBoost[k]; if (game.tempBoostN) delete game.tempBoostN[k]; }
+    for (const k in game.tempBoost) if (--game.tempBoost[k] <= 0) delete game.tempBoost[k];
     // contatore del tesoro di Gimmighoul: cresce a ogni ondata vinta
     for (const p of game.party) if (p.speciesId === "GIMMIGHOUL") p.treasure = (p.treasure || 0) + 1;
     // fiocco: aggiorna il record di ondate raggiunte con questo starter
@@ -3818,7 +3738,7 @@
   function rollCaptureDettaglio(enemy, ballMult, useHp) {
     const p = shakeProb(modifiedCatchRate(enemy, ballMult, useHp));
     // CATTURA CRITICA (esiste nell'originale): una sola scossa invece di quattro.
-    // Il Catturamuleto la rende piu' probabile.
+    // Il Presamuleto la rende piu' probabile.
     const critPct = Math.min(0.25, 0.05 * ((game.charms && game.charms.catching) || 0));
     const critica = !!(critPct && Math.random() < critPct);
     const totale = critica ? 1 : 4;
@@ -4298,18 +4218,6 @@
   /* `femmina` = usa lo sprite femminile dedicato (solo per le 98 specie che
      nell'originale hanno `genderDiffs`). */
   /* Prova una cartella sola. Torna null se lì lo sprite non c'è. */
-  /* Misura VERA di un PNG (larghezza x altezza in pixel), una volta sola. */
-  const pngMisure = {};
-  function misuraPng(src) {
-    if (pngMisure[src]) return pngMisure[src];
-    return (pngMisure[src] = new Promise(res => {
-      const im = new Image();
-      im.onload = () => res({ w: im.naturalWidth, h: im.naturalHeight });
-      im.onerror = () => res(null);
-      im.src = src;
-    }));
-  }
-
   function loadSpriteFrom(dir, name) {
     const key = dir + "/" + name;
     if (spriteCache[key] !== undefined) return Promise.resolve(spriteCache[key]);
@@ -4317,22 +4225,9 @@
       .then(r => { if (!r.ok) throw 0; return r.json(); })
       .then(atlas => {
         const { frame, size } = atlasFrame0(atlas);
-        const sheet = `${dir}/${name}.png`;
-        /* 🔴 La `size` scritta nell'ATLANTE non e' sempre quella vera del PNG:
-           per 135 sprite su 3048 e' un quadrato di comodo (Yungoos dichiara
-           61x61 ma il file e' 61x35). A Phaser non importa — indirizza i
-           fotogrammi dentro la texture caricata — ma noi disegniamo con
-           `background-size`, e con la misura sbagliata il browser STIRA
-           l'immagine: si vedeva un Pokemon ingrandito e tagliato. Quindi la
-           misura la prende dal file. Il caricamento non e' sprecato: scalda
-           anche la cache del browser per l'immagine che stiamo per mostrare. */
-        return misuraPng(sheet).then(vera => {
-          const spr = { sheet, frame,
-                        sheet_w: vera ? vera.w : size.w,
-                        sheet_h: vera ? vera.h : size.h };
-          spriteCache[key] = spr;
-          return spr;
-        });
+        const spr = { sheet: `${dir}/${name}.png`, frame, sheet_w: size.w, sheet_h: size.h };
+        spriteCache[key] = spr;
+        return spr;
       })
       // si ricorda anche i BUCHI: le forme che condividono lo sprite base
       // (Scatterbug, Pumpkaboo) sbagliano il primo tentativo a ogni incontro,
@@ -4541,8 +4436,7 @@
        i rami qui sotto lo riassegnano. */
     const ballMs = e.ball ? animaBallSlot(e.ball.verso, e.ball.lato) : 0;
     const playFx = (poi) => animAvailable(e.fx.move)
-      ? playMoveAnim(e.fx.move, e.fx.from || (slotNemico(e.fx.side) ? "player" : "enemy"),
-                     e.fx.side, e.fx.type, poi)
+      ? playMoveAnim(e.fx.move, e.fx.side === "enemy" ? "player" : "enemy", e.fx.side, e.fx.type, poi)
       : (spawnMoveFx(e.fx.type, e.fx.side), setTimeout(poi, 240), 0);
 
     if (e.anim && e.fx) {
@@ -4632,33 +4526,7 @@
   };
 
   /* Lato di un combattente: serve per ancorare l'animazione al Pokemon giusto. */
-  /* Lo SLOT in cui sta questo Pokemon. In doppio sono QUATTRO, non due.
-     🔴 Prima tornava solo "enemy"/"player": tutto cio' che riguardava il
-     SECONDO nemico — animazione della mossa compresa — finiva addosso al
-     giocatore. Si notava solo su uno dei due avversari perche', quando il primo
-     cade, il superstite viene PROMOSSO a `game.enemy` (vedi `enemyFaints`) e da
-     quel momento l'animazione tornava al posto giusto. */
-  function sideOf(f) {
-    return f === game.enemy ? "enemy"
-         : f === game.enemy2 ? "enemy2"
-         : f === game.player2 ? "player2" : "player";
-  }
-  // Lo slot sta dalla parte dell'avversario? (verso dell'animazione e variante "_o")
-  const slotNemico = s => s === "enemy" || s === "enemy2";
-  /* Lo sprite di uno slot. Se il secondo slot non c'e' (lotta singola, oppure
-     compagno appena caduto) si ripiega sul primario dello stesso lato: meglio
-     un'animazione un po' spostata che nessuna animazione. */
-  const SLOT_SPRITE = { player: "player-sprite", player2: "player2-sprite",
-                        enemy: "enemy-sprite", enemy2: "enemy2-sprite" };
-  function slotSpriteId(side) {
-    const id = SLOT_SPRITE[side] || "player-sprite";
-    const el = document.getElementById(id);
-    // non basta che l'elemento esista: gli slot secondari restano nel DOM ma
-    // `hidden`, e un elemento nascosto misura zero (l'animazione si ancorerebbe
-    // all'angolo dello schermo)
-    if (el && el.getBoundingClientRect().width) return id;
-    return slotNemico(side) ? "enemy-sprite" : "player-sprite";
-  }
+  function sideOf(f) { return f === game.enemy ? "enemy" : "player"; }
 
   /* Carica il file di una mossa (una volta sola, poi resta in memoria). */
   function loadAnimData(key) {
@@ -4770,7 +4638,6 @@
     }
     const data = animCache.get(key);
     const canvas = document.getElementById("anim-canvas");
-    const canvasFront = document.getElementById("anim-canvas-front");
     const scene = document.getElementById("scene");
     // se non c'e' l'animazione: particelle per tipo (o nulla, per le comuni)
     const fallback = () => {
@@ -4781,7 +4648,7 @@
     if (!data || !canvas || !scene) return fallback();
 
     // se attacca l'avversario e il file ha la seconda variante, si usa quella
-    const anim = (slotNemico(userSide) && data.o) ? data.o : data;
+    const anim = (userSide === "enemy" && data.o) ? data.o : data;
     const frames = anim.f;
     if (!frames || !frames.length) return fallback();
 
@@ -4789,20 +4656,15 @@
 
     const rect = scene.getBoundingClientRect();
     const scale = rect.width / ANIM_SPACE_W;
-    const uId = slotSpriteId(userSide);
-    const tId = slotSpriteId(targetSide);
+    const uId = userSide === "enemy" ? "enemy-sprite" : "player-sprite";
+    const tId = targetSide === "enemy" ? "enemy-sprite" : "player-sprite";
     const U = animAnchor(uId, rect, scale), Tg = animAnchor(tId, rect, scale);
     if (!U || !Tg) return fallback();
 
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    for (const cv of [canvas, canvasFront]) {
-      if (!cv) continue;
-      cv.width = Math.round(rect.width * dpr);
-      cv.height = Math.round(rect.height * dpr);
-    }
+    canvas.width = Math.round(rect.width * dpr);
+    canvas.height = Math.round(rect.height * dpr);
     const ctx = canvas.getContext("2d");
-    // canvas davanti ai combattenti: ci finiscono le grafiche a priority 1 e 3
-    const ctxF = canvasFront ? canvasFront.getContext("2d") : ctx;
 
     const sheet = loadSheet(anim.g);
     const shMeta = ANIMS.sheets[anim.g] || {};
@@ -4824,10 +4686,8 @@
     const touched = new Set();   // sprite del gioco spostati dall'animazione
 
     const cleanup = () => {
-      for (const c of new Set([ctx, ctxF])) {
-        c.setTransform(1, 0, 0, 1, 0, 0);
-        c.clearRect(0, 0, canvas.width, canvas.height);
-      }
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
       for (const el of touched) { el.style.transform = ""; el.style.opacity = ""; el.style.transition = ""; }
     };
 
@@ -4842,10 +4702,8 @@
     let i = 0;
     const step = () => {
       if (animRun !== run) return;       // riproduzione annullata o sostituita
-      for (const c of new Set([ctx, ctxF])) {
-        c.setTransform(dpr, 0, 0, dpr, 0, 0);
-        c.clearRect(0, 0, rect.width, rect.height);
-      }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, rect.width, rect.height);
 
       // sfondo dell'animazione (schermate nere, lampi, ecc.)
       for (const e of bgAt[i] || []) {
@@ -4862,9 +4720,6 @@
       const list = (frames[i] || []).map(unpackAnimFrame).sort((a, b) => a.pri - b.pri);
       for (const f of list) {
         const p = animPos(f, U, Tg, src, dst, kY);
-        /* Davanti o dietro? Come `setSpritePriority` dell'originale:
-           0 e 2 = sotto i Pokemon · 1 e 3 = sopra. */
-        const cx = (f.pri === 0 || f.pri === 2) ? ctx : ctxF;
 
         if (f.target === 2) {
           // grafica dell'effetto: una cella 96x96 del foglio
@@ -4873,17 +4728,17 @@
           // anche nell'originale: Phaser ripiega sul primo fotogramma).
           const gf = f.gf < cells ? f.gf : 0;
           const sx = (gf % cols) * ANIM_TILE, sy = Math.floor(gf / cols) * ANIM_TILE;
-          cx.save();
-          cx.globalAlpha = Math.max(0, Math.min(1, f.op / 255));
-          cx.globalCompositeOperation =
+          ctx.save();
+          ctx.globalAlpha = Math.max(0, Math.min(1, f.op / 255));
+          ctx.globalCompositeOperation =
             f.blend === 1 ? "lighter" : f.blend === 2 ? "difference" : "source-over";
-          if (hue) cx.filter = hue;
-          cx.translate(p.x * scale, p.y * scale);
-          if (f.angle) cx.rotate((-f.angle * Math.PI) / 180);
-          cx.scale((f.zx / 100) * p.flip * scale, (f.zy / 100) * scale);
-          cx.drawImage(sheet, sx, sy, ANIM_TILE, ANIM_TILE,
+          if (hue) ctx.filter = hue;
+          ctx.translate(p.x * scale, p.y * scale);
+          if (f.angle) ctx.rotate((-f.angle * Math.PI) / 180);
+          ctx.scale((f.zx / 100) * p.flip * scale, (f.zy / 100) * scale);
+          ctx.drawImage(sheet, sx, sy, ANIM_TILE, ANIM_TILE,
                         -ANIM_TILE / 2, -ANIM_TILE / 2, ANIM_TILE, ANIM_TILE);
-          cx.restore();
+          ctx.restore();
         } else {
           // muove uno dei due combattenti (slancio, rinculo, sparizione)
           const el = f.target === 0 ? uEl : tEl;
@@ -4933,7 +4788,7 @@
     FAIRY:{c:["#ec8fe6","#ffc0f0","#fff"],glyph:"✦",n:9}, NORMAL:{c:["#e0e0e0","#fff","#c0c0c0"],glyph:"✦",n:8},
   };
   function spawnMoveFx(type, side) {
-    const sprite = document.getElementById(slotSpriteId(side));
+    const sprite = document.getElementById(side === "enemy" ? "enemy-sprite" : "player-sprite");
     const scene = document.getElementById("scene");
     if (!sprite || !scene) return;
     const cfg = FX_CFG[type] || FX_CFG.NORMAL;
@@ -4960,7 +4815,6 @@
 
   // Tap = vai subito al prossimo evento (salta l'attesa).
   function advanceMessages() {
-    chiudiStadi();                     // non lasciare il riquadro sopra la scena
     if (game.phase !== "MESSAGE") return;
     nextEvent();
   }
@@ -5055,8 +4909,7 @@
       const pa = M[a.move.id].priority || 0;
       const pb = M[b.move.id].priority || 0;
       if (pa !== pb) return pb - pa;
-      const va = velEff(a.actor), vb = velEff(b.actor);
-      if (va !== vb) return vb - va;
+      if (a.actor.stats.spd !== b.actor.stats.spd) return b.actor.stats.spd - a.actor.stats.spd;
       return Math.random() - 0.5;
     });
 
@@ -5171,7 +5024,7 @@
 
   /* Distribuisce l'esperienza dell'ondata e fa salire chi arriva a livello.
      Quote dell'originale: chi era in campo se la divide, chi è in panchina
-     prende il 20% (Esperienza Condivisa). Pokérus ×1,5, Esperienzamuleto +%. */
+     prende il 20% (Esperienza Condivisa). Pokérus ×1,5, Espamuleto +%. */
   function assegnaEsperienza(messages) {
     registraExpNemici();                       // rete di sicurezza per l'ultimo caduto
     const tot = game.expPending || 0;
@@ -5334,7 +5187,7 @@
       if (messages.snap) messages.snap();
       stessoMomento(messages, `${foe.name} perde ${dato} PS!`);
       if (foe.hp <= 0) { foe.fainted = true; messages.push(`${foe.name} è esausto!`); }
-      segnaFx(messages, messages.length - 1, move.type, sideOf(foe), move.id, sideOf(actor));
+      segnaFx(messages, messages.length - 1, move.type, sideOf(foe), move.id);
       return;
     }
     if (move.id === "BIDE") {
@@ -5392,7 +5245,7 @@
     if (move.accuracy !== -1) {
       // Grandelente: +5% di precisione per pezzo
       const lente = 1 + 0.05 * ((actor.held && actor.held.widelens) || 0);
-      const chance = move.accuracy * accMult(actor.stages.acc + tempAccStages(actor) - foe.stages.eva)
+      const chance = move.accuracy * accMult(actor.stages.acc - foe.stages.eva)
         * abStatMult(actor, "ACC") * lente / abStatMult(foe, "EVA");
       if (Math.random() * 100 >= chance) { stessoMomento(messages, `${actor.name} ha mancato il bersaglio!`); return; }
     }
@@ -5407,7 +5260,7 @@
       if (landed && messages.fx) {
         const key = animKeyForMove(move.id);   // la sua, o quella di ripiego
         prefetchAnim(key);
-        segnaFx(messages, iAnnuncio, move.type, sideOf(foe), key, sideOf(actor));
+        segnaFx(messages, iAnnuncio, move.type, sideOf(foe), key);
       }
     } else if (move.category !== "STATUS") {
       // mossa d'attacco senza potenza fissa nei dati (`power: -1`)
@@ -5415,14 +5268,14 @@
       if (landed && messages.fx) {
         const key = animKeyForMove(move.id);
         prefetchAnim(key);
-        segnaFx(messages, iAnnuncio, move.type, sideOf(foe), key, sideOf(actor));
+        segnaFx(messages, iAnnuncio, move.type, sideOf(foe), key);
       }
     } else if (move.category === "STATUS" && messages.fx) {
       // Anche le mosse di stato hanno la loro animazione: si ancora al bersaglio
       // (che per le mosse su se' stessi e' chi la usa).
       const key = animKeyForMove(move.id);
       prefetchAnim(key);
-      segnaFx(messages, iAnnuncio, move.type, sideOf(foe), key, sideOf(actor));
+      segnaFx(messages, iAnnuncio, move.type, sideOf(foe), key);
     }
 
     // 4-bis. mosse che cambiano il METEO (l'estrattore non le marca: sono poche
@@ -5606,12 +5459,9 @@
 
   /* Appende l'animazione della mossa all'evento dell'annuncio. Se il log non
      sa farlo (array semplice usati da qualche chiamante) si ripiega sull'ultimo. */
-  /* `side` = slot di chi SUBISCE · `from` = slot di chi ATTACCA. Servono
-     entrambi: in doppio il mittente non si puo' piu' dedurre ribaltando il
-     destinatario, perche' i lati non sono due ma quattro. */
-  function segnaFx(messages, i, type, side, key, from) {
-    if (messages.fxAt) messages.fxAt(i, type, side, key, from);
-    else messages.fx(type, side, key, from);
+  function segnaFx(messages, i, type, side, key) {
+    if (messages.fxAt) messages.fxAt(i, type, side, key);
+    else messages.fx(type, side, key);
   }
 
   // Blocchi di stato prima della mossa. Ritorna false se l'attore non agisce.
@@ -5827,7 +5677,7 @@
     const lens = (actor.held && actor.held.multilens) || 0;
     const hits = (multi ? rollMultiHit(multi.mode, actor) : 1) + lens;
     const lensPenalty = lens ? 1 / (1 + lens) : 1;
-    // Mirino / Baccalangsa / Supercolpo alzano la probabilita' di brutto colpo
+    // Mirino / Baccalansa / Supercolpo alzano la probabilita' di brutto colpo
     const critBonus = (actor.held && actor.held.scopelens ? 1 : 0)
                     + (actor.held && actor.held.leek && ["FARFETCHD", "SIRFETCHD"].includes(actor.speciesId) ? 2 : 0)
                     + (actor._lansat ? 2 : 0)
@@ -5850,16 +5700,16 @@
         } else { foe.fainted = true; break; }
       }
     }
-    // Pugno dorato: il danno inflitto frutta soldi
+    // Pugno d'Oro: il danno inflitto frutta soldi
     if (actor === game.player && game.charms.goldenPunch && total > 0) {
       const g = Math.floor(total * 0.5 * game.charms.goldenPunch);
-      if (g > 0) { game.money += g; messages.push(`Il Pugno dorato frutta ₽${g}!`); }
+      if (g > 0) { game.money += g; messages.push(`Il Pugno d'Oro frutta ₽${g}!`); }
     }
-    // Roccia di re: 10% per pezzo di far tentennare
+    // Roccia di Re: 10% per pezzo di far tentennare
     if (actor.held && actor.held.kingsrock && total > 0 && !foe.fainted
         && Math.random() < 0.1 * actor.held.kingsrock) {
       foe.volatile.flinch = true;
-      messages.push(`La Roccia di re fa tentennare ${foe.name}!`);
+      messages.push(`La Roccia di Re fa tentennare ${foe.name}!`);
     }
     // Presartigli: 10% per pezzo di RUBARE un oggetto tenuto, col contatto
     if (actor.held && actor.held.gripclaw && total > 0 && move.contact
@@ -5884,10 +5734,10 @@
       stessoMomento(messages, `${actor.name} ha assorbito energia!`);
       if (messages.anim) messages.anim("COMMON_HEALTH_UP", sideOf(actor));
     }
-    // held: Conchinella — recuperi 1/8 del danno inflitto (impilabile)
+    // held: Conchiglia — recuperi 1/8 del danno inflitto (impilabile)
     if (actor.held && actor.held.shellbell && total > 0 && actor.hp < actor.maxHp && !actor.fainted) {
       actor.hp = Math.min(actor.maxHp, actor.hp + Math.max(1, Math.floor(total * actor.held.shellbell / 8)));
-      stessoMomento(messages, `La Conchinella ristora ${actor.name}!`);
+      stessoMomento(messages, `La Conchiglia ristora ${actor.name}!`);
     }
     const recoil = attrs.find(a => a.kind === "recoil");
     if (recoil && total > 0 && !actor.fainted && !findAb(actor, "noRecoil")) {
@@ -5908,12 +5758,12 @@
       }
     }
 
-    // Revitalseme: rianima una volta sola, poi si consuma
+    // Seme Rinascita: rianima una volta sola, poi si consuma
     if (foe.fainted && foe.held && foe.held.reviverseed) {
       foe.held.reviverseed--;
       if (!foe.held.reviverseed) delete foe.held.reviverseed;
       foe.fainted = false; foe.hp = Math.floor(foe.maxHp / 2);
-      messages.push(`Il Revitalseme riporta in forze ${foe.name}!`);
+      messages.push(`Il Seme Rinascita riporta in forze ${foe.name}!`);
       if (messages.anim) messages.anim("COMMON_HEALTH_UP", sideOf(foe));
     }
     if (foe.fainted) {
@@ -6116,7 +5966,7 @@
 
   /* ----------------------------------------------------------------------
      BACCHE — si tengono e si attivano DA SOLE quando serve, poi si consumano.
-     La Porta bacche (BERRY_POUCH) da' il 30% di non consumarle, come l'originale.
+     La Bacchiporta (BERRY_POUCH) da' il 30% di non consumarle, come l'originale.
      Va chiamata dopo ogni colpo e a fine turno, per entrambi i combattenti.
      ---------------------------------------------------------------------- */
   function useBerry(f, kind, messages) {
@@ -6207,10 +6057,10 @@
       if (messages.anim) messages.anim(STATUS_ANIM[f.status], sideOf(f));
       if (f.hp <= 0) { f.fainted = true; messages.push(`${f.name} è esausto!`); }
     }
-    // Piccolo buco nero: a ogni fine turno ruba un oggetto all'avversario
+    // Buconero: a ogni fine turno ruba un oggetto all'avversario
     if (f.held && f.held.blackhole) {
       const altro = f === game.enemy ? game.player : game.enemy;
-      if (altro && !altro.fainted) rubaOggetto(f, altro, messages, "Il Piccolo buco nero", "ruba");
+      if (altro && !altro.fainted) rubaOggetto(f, altro, messages, "Il Buconero", "ruba");
     }
     // PRESE: 1/8 dei PS max, finché durano
     if (f.volatile.trap) {
@@ -6394,65 +6244,6 @@
       : "";
   };
 
-  /* ======================================================================
-     SBALZI DI STATISTICA A SCHERMO
-
-     Nell'originale gli stadi si guardano aprendo il riquadro delle statistiche
-     accanto alla barra PS. Qui il dito prende il posto del tasto: sul riquadro
-     PS compare un badge per ogni statistica ALTERATA (solo quelle: su un
-     telefono sette voci sempre accese sarebbero rumore), e toccandolo si apre
-     l'elenco completo con il moltiplicatore vero.
-     ⚠️ Il tocco non deve arrivare alla scena, o farebbe anche avanzare la
-     narrazione: da qui lo `stopPropagation`.
-     ====================================================================== */
-  const STAT_ORDINE = ["atk", "def", "spatk", "spdef", "spd", "acc", "eva"];
-  const STAT_SIGLA = { atk: "ATT", def: "DIF", spatk: "A.SP", spdef: "D.SP",
-                       spd: "VEL", acc: "PRE", eva: "ELU" };
-  // moltiplicatore vero di uno stadio: le due scale sono diverse
-  const moltStadio = (k, n) => (k === "acc" || k === "eva" ? accMult(n) : stageMult(n));
-  const frecce = n => (n > 0 ? "▲" : "▼").repeat(Math.min(3, Math.abs(n)))
-                      + (Math.abs(n) > 3 ? Math.abs(n) : "");
-
-  function badgeStadi(f, stages) {
-    const st = stages || (f && f.stages);
-    if (!f || !st) return "";
-    const attivi = STAT_ORDINE.filter(k => (st[k] || 0) !== 0);
-    if (!attivi.length) return "";
-    return `<div class="stat-badges">` + attivi.map(k => {
-      const n = st[k];
-      return `<button class="stat-badge ${n > 0 ? "su" : "giu"}" data-stat="${k}"
-        >${STAT_SIGLA[k]}<i>${frecce(n)}</i></button>`;
-    }).join("") + `</div>`;
-  }
-
-  /* Elenco completo degli stadi di UN combattente. Si chiude toccando ovunque. */
-  function apriStadi(f) {
-    chiudiStadi();
-    const scena = document.getElementById("scene");
-    if (!scena || !f) return;
-    const righe = STAT_ORDINE.map(k => {
-      const n = f.stages[k] || 0;
-      const m = moltStadio(k, n);
-      return `<div class="sp-riga ${n > 0 ? "su" : n < 0 ? "giu" : ""}">
-        <span class="sp-nome">${STAT_IT[k]}</span>
-        <span class="sp-stadio">${n > 0 ? "+" : ""}${n}</span>
-        <span class="sp-molt">×${m.toFixed(2).replace(".", ",")}</span></div>`;
-    }).join("");
-    const pop = document.createElement("div");
-    pop.id = "stat-pop";
-    pop.innerHTML = `<div class="sp-tit">${f.name}</div>${righe}
-      <div class="sp-nota">gli sbalzi si azzerano rientrando nella ball</div>`;
-    pop.onclick = (e) => { e.stopPropagation(); chiudiStadi(); };
-    scena.appendChild(pop);
-    // il tocco SUCCESSIVO in scena lo chiude (in cattura: quello che l'ha
-    // aperto ha gia' fermato la propagazione, quindi non si autochiude)
-    scena.addEventListener("click", chiudiStadi, { once: true, capture: true });
-  }
-  function chiudiStadi() {
-    const v = document.getElementById("stat-pop");
-    if (v) v.remove();
-  }
-
   function renderHpPanel(el, fighter, ov) {
     const hp = ov ? ov.hp : fighter.hp;
     const maxHp = ov ? ov.maxHp : fighter.maxHp;
@@ -6472,12 +6263,7 @@
       </div>
       <div class="hp-text">${Math.max(0, hp)} / ${maxHp}</div>
       ${barraExp(fighter)}
-      ${fighter.ability ? `<div class="ability-line">${fighter.ability.it}</div>` : ""}
-      ${badgeStadi(fighter, ov && ov.stages)}`;
-    el.querySelectorAll(".stat-badge").forEach(b => b.onclick = (e) => {
-      e.stopPropagation();            // non far avanzare anche la narrazione
-      apriStadi(fighter);
-    });
+      ${fighter.ability ? `<div class="ability-line">${fighter.ability.it}</div>` : ""}`;
   }
 
   /* Barra dell'ESPERIENZA — solo per i TUOI Pokemon, come nei giochi veri.
@@ -6567,8 +6353,8 @@
 
   function renderScene(frame) {
     applyAmbiente();          // luce dell'ora + effetto del meteo in corso
-    const eOv = frame ? { hp: frame.ehp, maxHp: frame.emax, status: frame.est, stages: frame.estg } : null;
-    const pOv = frame ? { hp: frame.php, maxHp: frame.pmax, status: frame.pst, stages: frame.pstg } : null;
+    const eOv = frame ? { hp: frame.ehp, maxHp: frame.emax, status: frame.est } : null;
+    const pOv = frame ? { hp: frame.php, maxHp: frame.pmax, status: frame.pst } : null;
     const eSprOv = frame ? { fainted: frame.efaint, hit: frame.ehit } : null;
     const pSprOv = frame ? { fainted: frame.pfaint, hit: frame.phit } : null;
     // chi finisce in campo e' "visto": basta questo punto solo, ci passano
@@ -6746,7 +6532,7 @@
       if (k === "typeboost") {
         for (const t in p.held.typeboost) {
           out.push({ tipo: "typeboost", chiave: t, n: p.held.typeboost[t],
-                     nome: nomeTypeBoost(t), icon: TYPEBOOST_ICON[t] || "silk_scarf" });
+                     nome: `Boost ${T[t].it}`, icon: TYPEBOOST_ICON[t] || "silk_scarf" });
         }
         continue;
       }
@@ -6783,7 +6569,7 @@
       if (da.held[voce.chiave] <= 0) delete da.held[voce.chiave];
       a.held[voce.chiave] = (a.held[voce.chiave] || 0) + n;
     }
-    /* ⚠️ Gli oggetti legati alla specie (Elettropalla, Osso spesso…) e l'Evolcondensa
+    /* ⚠️ Gli oggetti legati alla specie (Sferapalla, Ossoduro…) e l'Evolcondensa
        cambiano le STATISTICHE: dopo un travaso vanno ricalcolate su entrambi, o
        restano quelle di prima finché non succede altro. */
     recomputeStats(da); recomputeStats(a);
@@ -7375,14 +7161,13 @@
   /*  meta battaglia (turni, eventi, animazioni), che sarebbe fragile.       */
   /* ====================================================================== */
   const SLOT_V = 1;                       // se cambia la forma dei dati, si alza
-  //[metti] const SLOT_KEY = n => `pokerogue_clear_save_${n}`;
-  const SLOT_KEY = n => `pokerogue_mobile_save_${n}`; /*[riga]*/
+  const SLOT_KEY = n => `pokerogue_clear_save_${n}`;
 
   /* Campi della run da salvare. Fuori restano: `player`/`enemy` (si ricreano),
      `events`/`timer`/`afterEvents` (roba di narrazione) e `encReward`, che e'
      una FUNZIONE e non sopravvive a JSON. */
   const CAMPI_RUN = ["balls", "greatballs", "ultraballs", "rogueballs", "theftballs",
-    "pendingTheft", "money", "stones", "charms", "tempBoost", "tempBoostN", "shopMarkup",
+    "pendingTheft", "money", "stones", "charms", "tempBoost", "shopMarkup",
     "cicloOffset", "encSeen", "encTiersSeen", "leagueIdx", "evilIdx", "finalBossIdx",
     "rivalFemale", "hasMegaRing", "hasDynamaxBand", "active", "biome", "starterSpecies"];
 
@@ -7695,10 +7480,6 @@
         <button class="meta-btn danger" data-a="reset">⚠️ Azzera tutto<span class="sub">cancella ogni progresso</span></button>
       </div>
       <div class="rev-line">${etichettaRevisione()}</div>`);
-    /*[via]*/
-    // easter egg: tre tocchi sul titolo aprono il selettore dello zip di GIF (§25)
-    metaEl().querySelector(".meta-title").onclick = gifTocco;
-    /*[fine]*/
     metaEl().querySelector('[data-a="run"]').onclick = showSlots;
     metaEl().querySelector('[data-a="gacha"]').onclick = () => showGacha(null);
     metaEl().querySelector('[data-a="eggs"]').onclick = showEggs;
@@ -8449,13 +8230,13 @@
             cond: () => bug().length > 0,
             run() { const p = rndOf(bug()); addHeld(p, "leftovers");
               return `Va in estasi davanti a ${p.name}! Ti regala degli Avanzi.`; } },
-          { label: "Dona uno strumento Coleottero", sub: "cedi uno strumento di tipo · ricevi di meglio",
+          { label: "Dona uno strumento Coleottero", sub: "cedi un Boost di Tipo · ricevi di meglio",
             cond: () => aliveParty().some(p => p.held && p.held.typeboost && Object.keys(p.held.typeboost).length),
             run() {
               const p = aliveParty().find(x => x.held && x.held.typeboost && Object.keys(x.held.typeboost).length);
               const t = Object.keys(p.held.typeboost)[0];
               p.held.typeboost[t]--; if (!p.held.typeboost[t]) delete p.held.typeboost[t];
-              return `Le doni ${nomeTypeBoost(t)}. In cambio: ${encReward("ULTRA")}!`; } },
+              return `Le doni il tuo Boost ${T[t].it}. In cambio: ${encReward("ULTRA")}!`; } },
           { label: "Vai via", run: () => "Riesci a svignartela mentre parla ancora." },
         ];
       },
@@ -8778,7 +8559,7 @@
             startTrainerBattle(squadra, "ace_trainer_m", "la Famiglia Vinci",
               ["« Siamo la famiglia Vinci! Vediamo se resisti a tutti e cinque! »"]);
             return null; } },
-        { label: "Rifiuta la sfida", sub: "squadra curata · Caramella rarissima", run() {
+        { label: "Rifiuta la sfida", sub: "squadra curata · Caramellone", run() {
             healParty();
             return `Declini cortesemente. Ti offrono da bere e ti regalano: ${encGive("rarercandy")}!`; } },
       ],
@@ -9451,21 +9232,7 @@
   function boostBase(p, stat) { p.vits[stat] = (p.vits[stat] || 0) + 1; recomputeStats(p); }
   const VITS = ["atk", "def", "spatk", "spdef", "spd", "hp"];
   const VIT_IT = { atk: "ATT", def: "DIF", spatk: "A.SP", spdef: "D.SP", spd: "VEL", hp: "PS" };
-  const VIT_NOME = { hp: "PS-su", atk: "Proteina", def: "Ferro", spatk: "Calcio", spdef: "Zinco", spd: "Carburante" };
-  /* STRUMENTI X (TempStatStageBooster dell'originale). Non sono vitamine e non
-     si chiamano "Poteslot": hanno nome, icona e statistiche loro.
-     ⚠️ Le statistiche NON sono le stesse delle vitamine: qui non c'e' PS
-     (un "Poteslot PS" non faceva assolutamente nulla, `stages` non ha `hp`)
-     e c'e' invece la PRECISIONE. */
-  const XITEMS = {
-    atk:   { it: "Attacco X",       icon: "x_attack" },
-    def:   { it: "Difesa X",        icon: "x_defense" },
-    spatk: { it: "Att. Speciale X", icon: "x_sp_atk" },
-    spdef: { it: "Dif. Speciale X", icon: "x_sp_def" },
-    spd:   { it: "Velocità X",      icon: "x_speed" },
-    acc:   { it: "Precisione X",    icon: "x_accuracy" },
-  };
-  const XITEM_KEYS = Object.keys(XITEMS);
+  const VIT_NOME = { hp: "Più PS", atk: "Proteina", def: "Ferro", spatk: "Calcio", spdef: "Zinco", spd: "Carburante" };
 
   // Curamuleto: +10% a ogni cura (HEALING_CHARM dell'originale)
   function healMult() { return 1 + 0.1 * (game.charms.healing || 0); }
@@ -9496,7 +9263,7 @@
     }
   }
   /* Mosse che il Pokemon POTREBBE conoscere dal suo learnset ma non ha:
-     e' quello che fa ricordare il Fungo della memoria (MEMORY_MUSHROOM). */
+     e' quello che fa ricordare il Fungorico (MEMORY_MUSHROOM). */
   function mosseDimenticate(p) {
     return (LEARN[p.speciesId] || [])
       .filter(([lv, mv]) => lv <= p.level && M[mv] && !p.moves.some(m => m.id === mv))
@@ -9513,7 +9280,7 @@
     }
   }
   function addLevels(p, n) {
-    p.level += n + (game.charms.candyJar || 0);   // Barattolo di caramelle: +1 livello per caramella
+    p.level += n + (game.charms.candyJar || 0);   // Caramelliera: +1 livello per caramella
     recomputeStats(p); checkLevelUpsQuiet(p);
   }
   function addBerry(p, kind) { p.berries[kind] = (p.berries[kind] || 0) + 1; }
@@ -9563,9 +9330,9 @@
     }
   }
   /* Ruba un oggetto tenuto (o una bacca) da `vittima` a `ladro`.
-     E' quello che fanno Presartigli (al contatto) e Piccolo buco nero (a ogni turno). */
+     E' quello che fanno Presartigli (al contatto) e Buconero (a ogni turno). */
   function rubaOggetto(ladro, vittima, messages, chi, verbo) {
-    // oggetti "inchiodati": il Piccolo buco nero del boss finale non si può sfilare
+    // oggetti "inchiodati": il Buconero del boss finale non si può sfilare
     const fissi = vittima._heldFisso || [];
     const chiavi = Object.keys(vittima.held || {})
       .filter(k => k !== "typeboost" && !fissi.includes(k));
@@ -9583,7 +9350,7 @@
       vittima.held.typeboost[t]--; if (!vittima.held.typeboost[t]) delete vittima.held.typeboost[t];
       ladro.held.typeboost = ladro.held.typeboost || {};
       ladro.held.typeboost[t] = (ladro.held.typeboost[t] || 0) + 1;
-      nome = nomeTypeBoost(t);
+      nome = `Boost ${T[t].it}`;
     } else {
       const b = bacche[scelta - chiavi.length - tipi.length];
       vittima.berries[b]--; if (!vittima.berries[b]) delete vittima.berries[b];
@@ -9631,12 +9398,12 @@
      solo se hai in squadra un Pokemon che li userebbe.
      ---------------------------------------------------------------------- */
   const SPECIE_BOOST = {
-    lightball:  { it: "Elettropalla",  icon: "light_ball",     stats: ["atk", "spatk"], mult: 2, specie: ["PIKACHU"] },
-    thickclub:  { it: "Osso spesso",    icon: "thick_club",     stats: ["atk"],          mult: 2, specie: ["CUBONE", "MAROWAK"] },
+    lightball:  { it: "Sferapalla",  icon: "light_ball",     stats: ["atk", "spatk"], mult: 2, specie: ["PIKACHU"] },
+    thickclub:  { it: "Ossoduro",    icon: "thick_club",     stats: ["atk"],          mult: 2, specie: ["CUBONE", "MAROWAK"] },
     metalpowder:{ it: "Metalpolvere",icon: "metal_powder",   stats: ["def"],          mult: 2, specie: ["DITTO"] },
-    quickpowder:{ it: "Velopolvere",icon:"quick_powder",   stats: ["spd"],          mult: 2, specie: ["DITTO"] },
+    quickpowder:{ it: "Velocipolvere",icon:"quick_powder",   stats: ["spd"],          mult: 2, specie: ["DITTO"] },
     deepseascale:{it: "Squamabissi", icon: "deep_sea_scale", stats: ["spdef"],        mult: 2, specie: ["CLAMPERL"] },
-    deepseatooth:{it: "Dente Abissi",  icon: "deep_sea_tooth", stats: ["spatk"],        mult: 2, specie: ["CLAMPERL"] },
+    deepseatooth:{it: "Dentebissi",  icon: "deep_sea_tooth", stats: ["spatk"],        mult: 2, specie: ["CLAMPERL"] },
   };
   const SPECIE_BOOST_KEYS = Object.keys(SPECIE_BOOST);
   // Chi in squadra userebbe questo oggetto?
@@ -9701,19 +9468,14 @@
       target: "mon", valid: canHeal, avail: someone(canHeal), apply: p => hpRestore(p, 50, 25) },
     { tier: "COMMON", weight: 3, id: "ether", label: "Etere", desc: "+10 PP a una mossa", icon: "ether",
       target: "mon", valid: needsPp, avail: someone(needsPp), apply: p => restorePp(p, 1, 10) },
-    { tier: "COMMON", weight: 3, id: "maxether", label: "Etere max", desc: "PP pieni a una mossa", icon: "max_ether",
+    { tier: "COMMON", weight: 3, id: "maxether", label: "Etere Max", desc: "PP pieni a una mossa", icon: "max_ether",
       target: "mon", valid: needsPp, avail: someone(needsPp), apply: p => restorePp(p, 1, -1) },
-    { tier: "COMMON", weight: 2, id: "candy", label: "Caramella rara", desc: "+1 livello", icon: "rare_candy",
+    { tier: "COMMON", weight: 2, id: "candy", label: "Caramella Rara", desc: "+1 livello", icon: "rare_candy",
       target: "mon", valid: alive, apply: p => addLevels(p, 1) },
     { tier: "COMMON", weight: 2, id: "berry", label: "Bacca", desc: "held: si attiva da sola in lotta", icon: "sitrus_berry",
       target: "mon", valid: alive, dyn: "berry", apply: (p, pk) => addBerry(p, pk.berry) },
-    { tier: "COMMON", weight: 4, id: "xitem", label: "Strumento X", desc: "+20% a una statistica per 5 ondate", icon: "x_attack",
-      target: "run", dyn: "xstat", apply: (p, pk) => {
-        game.tempBoostN = game.tempBoostN || {};
-        // se ne hai gia' uno attivo si somma, se no si riparte da un pezzo
-        game.tempBoostN[pk.stat] = (game.tempBoost[pk.stat] > 0 ? (game.tempBoostN[pk.stat] || 1) : 0) + 1;
-        game.tempBoost[pk.stat] = 5;
-      } },
+    { tier: "COMMON", weight: 4, id: "xitem", label: "Poteslot", desc: "+1 stadio per 5 ondate", icon: "protein",
+      target: "run", dyn: "stat", apply: (p, pk) => { game.tempBoost[pk.stat] = 5; } },
     { tier: "COMMON", weight: 4, id: "lure", label: "Esca", desc: "più lotte in doppio", icon: "lure",
       target: "run", avail: () => (game.charms.lure || 0) < 3,
       apply: () => { game.charms.lure = (game.charms.lure || 0) + 1; } },
@@ -9726,35 +9488,32 @@
       target: "run", apply: () => { game.greatballs += 5; } },
     { tier: "GREAT", weight: 3, id: "hyperpotion", label: "Iperpozione", desc: "cura 200 PS o il 50%", icon: "hyper_potion",
       target: "mon", valid: canHeal, avail: someone(canHeal), apply: p => hpRestore(p, 200, 50) },
-    { tier: "GREAT", weight: 3, id: "maxpotion", label: "Pozione max", desc: "PS pieni", icon: "max_potion",
+    { tier: "GREAT", weight: 3, id: "maxpotion", label: "Pozione Max", desc: "PS pieni", icon: "max_potion",
       target: "mon", valid: canHeal, avail: someone(canHeal), apply: p => { p.hp = p.maxHp; } },
-    { tier: "GREAT", weight: 3, id: "fullrestore", label: "Ricarica totale", desc: "PS pieni e cura lo stato", icon: "full_restore",
+    { tier: "GREAT", weight: 3, id: "fullrestore", label: "Cura Totale", desc: "PS pieni e cura lo stato", icon: "full_restore",
       target: "mon", valid: p => canHeal(p) || hasStatus(p), avail: someone(p => canHeal(p) || hasStatus(p)),
       apply: p => { p.hp = p.maxHp; p.status = null; } },
-    { tier: "GREAT", weight: 3, id: "fullheal", label: "Cura totale", desc: "cura lo stato", icon: "full_heal",
+    { tier: "GREAT", weight: 3, id: "fullheal", label: "Antistato", desc: "cura lo stato", icon: "full_heal",
       target: "mon", valid: hasStatus, avail: someone(hasStatus), apply: p => { p.status = null; } },
     { tier: "GREAT", weight: 3, id: "revive", label: "Revitalizzante", desc: "rianima al 50%", icon: "revive",
       target: "mon", valid: isDown, avail: someone(isDown), apply: p => { p.fainted = false; p.hp = Math.floor(p.maxHp / 2); } },
-    { tier: "GREAT", weight: 2, id: "maxrevive", label: "Revitalizzante max", desc: "rianima a PS pieni", icon: "max_revive",
+    { tier: "GREAT", weight: 2, id: "maxrevive", label: "Revitalizz. Max", desc: "rianima a PS pieni", icon: "max_revive",
       target: "mon", valid: isDown, avail: someone(isDown), apply: p => { p.fainted = false; p.hp = p.maxHp; } },
-    { tier: "GREAT", weight: 1, id: "sacredash", label: "Cenere magica", desc: "rianima TUTTA la squadra", icon: "sacred_ash",
+    { tier: "GREAT", weight: 1, id: "sacredash", label: "Cenere Magica", desc: "rianima TUTTA la squadra", icon: "sacred_ash",
       target: "party", avail: someone(isDown), apply: () => { for (const q of game.party) if (q.fainted) { q.fainted = false; q.hp = q.maxHp; } } },
     { tier: "GREAT", weight: 3, id: "elisir", label: "Elisir", desc: "+10 PP a tutte le mosse", icon: "elixir",
       target: "mon", valid: needsPp, avail: someone(needsPp), apply: p => restorePp(p, 99, 10) },
-    { tier: "GREAT", weight: 3, id: "maxelisir", label: "Elisir max", desc: "PP pieni a tutte le mosse", icon: "max_elixir",
+    { tier: "GREAT", weight: 3, id: "maxelisir", label: "Elisir Max", desc: "PP pieni a tutte le mosse", icon: "max_elixir",
       target: "mon", valid: needsPp, avail: someone(needsPp), apply: p => restorePp(p, 99, -1) },
-    { tier: "GREAT", weight: 2, id: "ppup", label: "PP-su", desc: "alza i PP massimi di una mossa", icon: "pp_up",
+    { tier: "GREAT", weight: 2, id: "ppup", label: "PP-Su", desc: "alza i PP massimi di una mossa", icon: "pp_up",
       target: "mon", valid: canPpUp, avail: someone(canPpUp), apply: p => applyPpUp(p, 1) },
     { tier: "GREAT", weight: 3, id: "vit", label: "Vitamina", desc: "+10% a una statistica base", icon: "protein",
       target: "mon", valid: alive, dyn: "stat", apply: (p, pk) => { p.vits[pk.stat] = (p.vits[pk.stat] || 0) + 1; recomputeStats(p); } },
-    /* Le pepite dicono QUANTO valgono: dipende dall'ondata, quindi la
-       descrizione e' una funzione (come `getDescription` dell'originale, che
-       scrive "una contenuta quantita' di soldi (₽1.234)"). */
-    { tier: "GREAT", weight: 5, id: "nugget", label: "Pepita", desc: () => `soldi in quantità contenuta (₽${waveMoney(1)})`, icon: "nugget",
+    { tier: "GREAT", weight: 5, id: "nugget", label: "Pepita", desc: "vale dei soldi", icon: "nugget",
       target: "run", apply: () => { game.money += waveMoney(1); } },
-    { tier: "GREAT", weight: 4, id: "direhit", label: "Supercolpo", desc: "+1 brutto colpo per 5 ondate", icon: "dire_hit",
+    { tier: "GREAT", weight: 4, id: "direhit", label: "Supercolpo", desc: "+1 brutto colpo per 5 ondate", icon: "scope_lens",
       target: "run", apply: () => { game.tempBoost.crit = 5; } },
-    { tier: "GREAT", weight: 4, id: "stone", label: "Pietra evolutiva", desc: "fa evolvere chi può usarla", icon: "fire_stone",
+    { tier: "GREAT", weight: 4, id: "stone", label: "Pietra Evolutiva", desc: "fa evolvere chi può usarla", icon: "fire_stone",
       target: "run", dyn: "stone", avail: () => usefulStones().length > 0, apply: (p, pk) => { game.stones[pk.stone] = (game.stones[pk.stone] || 0) + 1; } },
     { tier: "GREAT", weight: 1, id: "map", label: "Mappa", desc: "ti fa scegliere dove andare", icon: "map",
       target: "run", avail: () => !game.charms.map, apply: () => { game.charms.map = 1; } },
@@ -9767,23 +9526,23 @@
       target: "mon", dyn: "specieboost", avail: () => boostSpecieDisponibili().length > 0,
       valid: p => boostSpecieDisponibili().some(k => SPECIE_BOOST[k].specie.includes(p.speciesId)),
       apply: (p, pk) => addHeld(p, pk.boost) },
-    { tier: "GREAT", weight: 3, id: "mushroom", label: "Fungo della memoria", desc: "fa ricordare una mossa dimenticata", icon: "big_mushroom",
+    { tier: "GREAT", weight: 3, id: "mushroom", label: "Fungorico", desc: "fa ricordare una mossa dimenticata", icon: "max_mushrooms",
       target: "mon", valid: p => mosseDimenticate(p).length > 0, avail: someone(p => mosseDimenticate(p).length > 0),
       apply: p => { const mv = rndOf(mosseDimenticate(p)); insegnaTm(mv, p); } },
 
     /* ===================== ULTRA ====================== */
     { tier: "ULTRA", weight: 6, id: "ultraballs", label: "Ultra Ball ×5", desc: "cattura ×2", icon: "ub", ball: true,
       target: "run", apply: () => { game.ultraballs += 5; } },
-    { tier: "ULTRA", weight: 9, id: "typeboost", label: "Strumento di tipo", desc: "held: +20% alle mosse di un tipo", icon: "charcoal",
+    { tier: "ULTRA", weight: 9, id: "typeboost", label: "Boost di Tipo", desc: "held: +20% a un tipo", icon: "charcoal",
       target: "mon", valid: alive, dyn: "type",
       apply: (p, pk) => { p.held.typeboost = p.held.typeboost || {}; p.held.typeboost[pk.type] = (p.held.typeboost[pk.type] || 0) + 1; } },
-    { tier: "ULTRA", weight: 12, id: "bignugget", label: "Granpepita", desc: () => `soldi in quantità moderata (₽${waveMoney(2.5)})`, icon: "big_nugget",
+    { tier: "ULTRA", weight: 12, id: "bignugget", label: "Pepitona", desc: "vale molti soldi", icon: "big_nugget",
       target: "run", apply: () => { game.money += waveMoney(2.5); } },
-    { tier: "ULTRA", weight: 3, id: "ppmax", label: "PP-max", desc: "PP massimi al massimo", icon: "pp_max",
+    { tier: "ULTRA", weight: 3, id: "ppmax", label: "PP-Max", desc: "PP massimi al massimo", icon: "pp_max",
       target: "mon", valid: canPpUp, avail: someone(canPpUp), apply: p => applyPpUp(p, 3) },
-    { tier: "ULTRA", weight: 4, id: "rarercandy", label: "Caramella rarissima", desc: "+1 livello a TUTTA la squadra", icon: "rarer_candy",
+    { tier: "ULTRA", weight: 4, id: "rarercandy", label: "Caramellone", desc: "+1 livello a TUTTA la squadra", icon: "rarer_candy",
       target: "party", apply: () => { for (const q of game.party) addLevels(q, 1); } },
-    { tier: "ULTRA", weight: 4, id: "reviverseed", label: "Revitalseme", desc: "held: rianima una volta al 50%", icon: "reviver_seed",
+    { tier: "ULTRA", weight: 4, id: "reviverseed", label: "Seme Rinascita", desc: "held: rianima una volta al 50%", icon: "reviver_seed",
       target: "mon", valid: alive, apply: p => addHeld(p, "reviverseed") },
     { tier: "ULTRA", weight: 3, id: "quickclaw", label: "Rapidartigli", desc: "held: 10% di attaccare per primo", icon: "quick_claw",
       target: "mon", valid: alive, apply: p => addHeld(p, "quickclaw") },
@@ -9795,17 +9554,17 @@
       target: "mon", valid: alive, apply: p => addHeld(p, "toxicorb") },
     { tier: "ULTRA", weight: 3, id: "flameorb", label: "Fiammosfera", desc: "held: ti scotta a fine turno", icon: "flame_orb",
       target: "mon", valid: alive, apply: p => addHeld(p, "flameorb") },
-    { tier: "ULTRA", weight: 5, id: "candyjar", label: "Barattolo di caramelle", desc: "+1 livello per ogni caramella", icon: "candy_jar",
+    { tier: "ULTRA", weight: 5, id: "candyjar", label: "Caramelliera", desc: "+1 livello per ogni caramella", icon: "candy_jar",
       target: "run", apply: () => { game.charms.candyJar = (game.charms.candyJar || 0) + 1; } },
-    { tier: "ULTRA", weight: 8, id: "expcharm", label: "Esperienzamuleto", desc: "+25% esperienza", icon: "exp_charm",
+    { tier: "ULTRA", weight: 8, id: "expcharm", label: "Espamuleto", desc: "+25% esperienza", icon: "exp_charm",
       target: "run", apply: () => { game.charms.exp = (game.charms.exp || 0) + 25; } },
     { tier: "ULTRA", weight: 3, id: "amulet", label: "Monetamuleto", desc: "+20% soldi", icon: "amulet_coin",
       target: "run", apply: () => { game.charms.amulet = (game.charms.amulet || 0) + 1; } },
-    { tier: "ULTRA", weight: 2, id: "goldenpunch", label: "Pugno dorato", desc: "il danno inflitto frutta soldi", icon: "golden_punch",
+    { tier: "ULTRA", weight: 2, id: "goldenpunch", label: "Pugno d'Oro", desc: "il danno inflitto frutta soldi", icon: "golden_punch",
       target: "run", apply: () => { game.charms.goldenPunch = (game.charms.goldenPunch || 0) + 1; } },
     { tier: "ULTRA", weight: 4, id: "ivscanner", label: "Scanner IV", desc: "mostra gli IV degli avversari", icon: "iv_scanner",
       target: "run", avail: () => !game.charms.ivScanner, apply: () => { game.charms.ivScanner = 1; } },
-    { tier: "ULTRA", weight: 4, id: "rarestone", label: "Pietra rara", desc: "una pietra evolutiva rara", icon: "sun_stone",
+    { tier: "ULTRA", weight: 4, id: "rarestone", label: "Pietra Rara", desc: "una pietra evolutiva rara", icon: "sun_stone",
       target: "run", dyn: "stone", avail: () => usefulStones().length > 0, apply: (p, pk) => { game.stones[pk.stone] = (game.stones[pk.stone] || 0) + 1; } },
     { tier: "ULTRA", weight: 11, id: "tmultra", label: "MT", desc: "insegna una mossa forte", icon: "tm_normal",
       target: "run", dyn: "tm", tmTier: "ULTRA", avail: () => !!randomTm("ULTRA"),
@@ -9819,15 +9578,15 @@
       target: "run", apply: () => { game.rogueballs = (game.rogueballs || 0) + 5; } },
     { tier: "ROGUE", weight: 3, id: "leftovers", label: "Avanzi", desc: "held: rigenera 1/16 a fine turno", icon: "leftovers",
       target: "mon", valid: alive, apply: p => addHeld(p, "leftovers") },
-    { tier: "ROGUE", weight: 3, id: "shellbell", label: "Conchinella", desc: "held: recuperi 1/8 del danno", icon: "shell_bell",
+    { tier: "ROGUE", weight: 3, id: "shellbell", label: "Conchiglia", desc: "held: recuperi 1/8 del danno", icon: "shell_bell",
       target: "mon", valid: alive, apply: p => addHeld(p, "shellbell") },
     { tier: "ROGUE", weight: 5, id: "focusband", label: "Bandana", desc: "held: 10% di resistere con 1 PS", icon: "focus_band",
       target: "mon", valid: alive, apply: p => addHeld(p, "focusband") },
-    { tier: "ROGUE", weight: 3, id: "kingsrock", label: "Roccia di re", desc: "held: 10% di far tentennare", icon: "kings_rock",
+    { tier: "ROGUE", weight: 3, id: "kingsrock", label: "Roccia di Re", desc: "held: 10% di far tentennare", icon: "kings_rock",
       target: "mon", valid: alive, apply: p => addHeld(p, "kingsrock") },
     { tier: "ROGUE", weight: 4, id: "scopelens", label: "Mirino", desc: "held: +1 stadio di brutto colpo", icon: "scope_lens",
       target: "mon", valid: alive, apply: p => addHeld(p, "scopelens") },
-    { tier: "ROGUE", weight: 7, id: "souldew", label: "Cuorugiada", desc: "held: rinforza l'effetto della natura", icon: "soul_dew",
+    { tier: "ROGUE", weight: 7, id: "souldew", label: "Rugiadanima", desc: "held: rinforza l'effetto della natura", icon: "soul_dew",
       target: "mon", valid: p => alive(p) && NATURES[p.nature] && NATURES[p.nature].su,
       apply: p => addHeld(p, "souldew") },
     { tier: "ULTRA", weight: 3, id: "mysticalrock", label: "Rocciamistica", desc: "held: il meteo dura più a lungo", icon: "mystical_rock",
@@ -9836,19 +9595,19 @@
       target: "mon", valid: p => alive(p) && ["FARFETCHD", "SIRFETCHD"].includes(p.speciesId),
       avail: () => aliveParty().some(p => ["FARFETCHD", "SIRFETCHD"].includes(p.speciesId)),
       apply: p => addHeld(p, "leek") },
-    { tier: "ROGUE", weight: 4, id: "berrypouch", label: "Porta bacche", desc: "30% di non consumare le bacche", icon: "berry_pouch",
+    { tier: "ROGUE", weight: 4, id: "berrypouch", label: "Bacchiporta", desc: "30% di non consumare le bacche", icon: "berry_pouch",
       target: "run", apply: () => { game.charms.berryPouch = (game.charms.berryPouch || 0) + 1; } },
-    { tier: "ROGUE", weight: 2, id: "relicgold", label: "Dobloantico", desc: () => `soldi in grande quantità (₽${waveMoney(10)})`, icon: "relic_gold",
+    { tier: "ROGUE", weight: 2, id: "relicgold", label: "Riccantico", desc: "vale moltissimi soldi", icon: "relic_gold",
       target: "run", apply: () => { game.money += waveMoney(10); } },
-    { tier: "ROGUE", weight: 8, id: "superexpcharm", label: "Esperienzamuleto super", desc: "+60% esperienza", icon: "super_exp_charm",
+    { tier: "ROGUE", weight: 8, id: "superexpcharm", label: "Superespamuleto", desc: "+60% esperienza", icon: "super_exp_charm",
       target: "run", apply: () => { game.charms.exp = (game.charms.exp || 0) + 60; } },
-    { tier: "ROGUE", weight: 4, id: "catchingcharm", label: "Catturamuleto", desc: "più catture critiche", icon: "catching_charm",
+    { tier: "ROGUE", weight: 4, id: "catchingcharm", label: "Presamuleto", desc: "più catture critiche", icon: "catching_charm",
       target: "run", apply: () => { game.charms.catching = (game.charms.catching || 0) + 1; } },
-    { tier: "ROGUE", weight: 6, id: "abilitycharm", label: "Abilitamuleto", desc: "i selvatici hanno l'abilità nascosta", icon: "ability_charm",
+    { tier: "ROGUE", weight: 6, id: "abilitycharm", label: "Abilamuleto", desc: "i selvatici hanno l'abilità nascosta", icon: "ability_charm",
       target: "run", apply: () => { game.charms.ability = (game.charms.ability || 0) + 1; } },
-    { tier: "ROGUE", weight: 3, id: "megaRing", label: "Megapolsiera", desc: "sblocca la megaevoluzione", icon: "mega_bracelet",
+    { tier: "ROGUE", weight: 3, id: "megaRing", label: "Megacerchio", desc: "sblocca la megaevoluzione", icon: "mega_bracelet",
       target: "run", avail: () => !game.hasMegaRing, apply: () => { game.hasMegaRing = true; } },
-    { tier: "ROGUE", weight: 3, id: "dynamaxBand", label: "Polsino Dynamax", desc: "sblocca la gigamaxizzazione", icon: "dynamax_band",
+    { tier: "ROGUE", weight: 3, id: "dynamaxBand", label: "Fascia Dynamax", desc: "sblocca la gigamaxizzazione", icon: "dynamax_band",
       target: "run", avail: () => !game.hasDynamaxBand, apply: () => { game.hasDynamaxBand = true; } },
     { tier: "ROGUE", weight: 2, id: "voucherplus", label: "Buono Uovo Plus", desc: "+5 tiri al gacha", icon: "coupon",
       target: "run", apply: () => { meta.vouchers += 5; saveMeta(); } },
@@ -9864,7 +9623,7 @@
       target: "mon", valid: alive, apply: p => addHeld(p, "multilens") },
     { tier: "ROGUE", weight: 5, id: "gripclaw", label: "Presartigli", desc: "held: 10% di rubare un oggetto al contatto", icon: "grip_claw",
       target: "mon", valid: alive, apply: p => addHeld(p, "gripclaw") },
-    { tier: "MASTER", weight: 10, id: "blackhole", label: "Piccolo buco nero", desc: "held: ruba un oggetto ogni turno", icon: "mini_black_hole",
+    { tier: "MASTER", weight: 10, id: "blackhole", label: "Buconero", desc: "held: ruba un oggetto ogni turno", icon: "mini_black_hole",
       target: "mon", valid: alive, apply: p => addHeld(p, "blackhole") },
     { tier: "MASTER", weight: 4, id: "voucherpremium", label: "Buono Uovo Premium", desc: "+10 tiri al gacha", icon: "coupon",
       target: "run", apply: () => { meta.vouchers += 10; saveMeta(); } },
@@ -9900,57 +9659,31 @@
 
   /* Bacche: si tengono e si attivano DA SOLE in lotta (come nell'originale). */
   const BERRY_DATA = {
-    SITRUS: { it: "Baccacedro", icon: "sitrus_berry", desc: "cura il 25% sotto meta' PS" },
-    LUM:    { it: "Baccaprugna",   icon: "lum_berry",    desc: "cura qualsiasi stato" },
+    SITRUS: { it: "Baccharanc", icon: "sitrus_berry", desc: "cura il 25% sotto meta' PS" },
+    LUM:    { it: "Baccalum",   icon: "lum_berry",    desc: "cura qualsiasi stato" },
     LEPPA:  { it: "Baccamela",  icon: "leppa_berry",  desc: "+10 PP a una mossa esaurita" },
-    ENIGMA: { it: "Baccaenigma", icon: "enigma_berry", desc: "cura il 25% se colpito superefficace" },
+    ENIGMA: { it: "Baccanigma", icon: "enigma_berry", desc: "cura il 25% se colpito superefficace" },
     LIECHI: { it: "Baccalici",  icon: "liechi_berry", desc: "+1 Attacco sotto un quarto di PS" },
-    GANLON: { it: "Baccalongan",  icon: "ganlon_berry", desc: "+1 Difesa sotto un quarto di PS" },
-    PETAYA: { it: "Baccapitaya",  icon: "petaya_berry", desc: "+1 Att. Sp. sotto un quarto di PS" },
-    APICOT: { it: "Baccacocca",  icon: "apicot_berry", desc: "+1 Dif. Sp. sotto un quarto di PS" },
-    SALAC:  { it: "Baccasalak",   icon: "salac_berry",  desc: "+1 Velocita' sotto un quarto di PS" },
-    LANSAT: { it: "Baccalangsa", icon: "lansat_berry", desc: "+2 brutto colpo sotto un quarto di PS" },
-    STARF:  { it: "Baccambola",icon: "starf_berry",  desc: "+2 a una stat a caso sotto un quarto" },
+    GANLON: { it: "Baccalgan",  icon: "ganlon_berry", desc: "+1 Difesa sotto un quarto di PS" },
+    PETAYA: { it: "Baccataya",  icon: "petaya_berry", desc: "+1 Att. Sp. sotto un quarto di PS" },
+    APICOT: { it: "Baccapico",  icon: "apicot_berry", desc: "+1 Dif. Sp. sotto un quarto di PS" },
+    SALAC:  { it: "Baccalac",   icon: "salac_berry",  desc: "+1 Velocita' sotto un quarto di PS" },
+    LANSAT: { it: "Baccalansa", icon: "lansat_berry", desc: "+2 brutto colpo sotto un quarto di PS" },
+    STARF:  { it: "Baccastella",icon: "starf_berry",  desc: "+2 a una stat a caso sotto un quarto" },
   };
   const BERRY_KEYS = Object.keys(BERRY_DATA);
 
   /* -- Icone reali di PokeRogue per oggetti/ball/vitamine/boost ------------ */
-  /* Icone INCORPORATE (data URI). Servono per gli oggetti aggiunti dopo
-     l'ultimo APK: gli asset stanno solo dentro l'APK e NON viaggiano con
-     l'aggiornamento a caldo, quindi un PNG nuovo in `assets/` resterebbe un
-     buco vuoto sul telefono fino alla prossima ricostruzione. Sono 8 icone
-     32x32 da 285 byte l'una (3 KB in tutto in base64). */
-  const ITEM_DATAURI = {
-    x_attack: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgBAMAAACBVGfHAAAAIVBMVEUAAAAgICCDMTGkSkrFYnPmg3uclJTunKzm1dX/5t7///8icg1iAAAAAXRSTlMAQObYZgAAAKpJREFUeF5joC9gFBRAFRBLS0QRYcxIW5mIoqA1alWaALICl1VLwxACgiJlXqtcwxLh8q7lRrOWl5jDBYRUwqdLugMFkBRUFoaYBjfCBEzDp4uXiJhGCMAEFFUrC8OdgArgKsrVS0SdK+C2iobPBCoIMWSAC1TOLFV1DhFAEpgeahpigiRQXhpsFKKCEBAJDTU2dFFE8pmxsbERUAcCCBsbCwqiBp8gA30BAGrtJrnF5vaHAAAAAElFTkSuQmCC",
-    x_defense: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgBAMAAACBVGfHAAAAIVBMVEUAAAAgICA5OYtKSqRzYsV7g+aUlJysnO7V1ebe5v////+/l/rsAAAAAXRSTlMAQObYZgAAAKpJREFUeF5joC9gFBRAFRBLS0QRYcxIW5mIoqA1alWaALICl1VLwxACgiJlXqtcwxLh8q7lRrOWl5jDBYRUwqdLugMFkBRUFoaYBjfCBEzDp4uXiJhGCMAEFFUrC8OdgArgKsrVS0SdK+C2iobPBCoIMWSAC1TOLFV1DhFAEpgeahpigiRQXhpsFKKCEBAJDTU2dFFE8pmxsbERUAcCCBsbCwqiBp8gA30BAGrtJrnF5vaHAAAAAElFTkSuQmCC",
-    x_sp_atk: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgBAMAAACBVGfHAAAAIVBMVEUAAAAgICBqaiCcnEqkpFrNzWqcnJTm5qzm5tX//97////u9APtAAAAAXRSTlMAQObYZgAAAKpJREFUeF5joC9gFBRAFRBLS0QRYcxIW5mIoqA1alWaALICl1VLwxACgiJlXqtcwxLh8q7lRrOWl5jDBYRUwqdLugMFkBRUFoaYBjfCBEzDp4uXiJhGCMAEFFUrC8OdgArgKsrVS0SdK+C2iobPBCoIMWSAC1TOLFV1DhFAEpgeahpigiRQXhpsFKKCEBAJDTU2dFFE8pmxsbERUAcCCBsbCwqiBp8gA30BAGrtJrnF5vaHAAAAAElFTkSuQmCC",
-    x_sp_def: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgBAMAAACBVGfHAAAAIVBMVEUAAAAgICBaWlpic3tii4uUlJSLrKy91d7m5tXu7u7////hl5epAAAAAXRSTlMAQObYZgAAAKpJREFUeF5joC9gFBRAFRANDUQRYYwIXRmIoqAta1WoALICl1XLUhECgiKlXqvcUgPh8m7lRrOWl5jDBYRU0qdLugMFkBRUFqaYJTfCBMzSp4uXiJhlCMAEFNUqC9OdgArgKsrVS8ScK+C2iqXPBCpIMWSAC1TOLFNzThFAEpieZpZigiRQXpZslKKCEBBJSzM2dFFE8pmxsbERUAcCCBsbCwqiBp8gA30BAMZ7J2egqDTxAAAAAElFTkSuQmCC",
-    x_speed: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgBAMAAACBVGfHAAAAIVBMVEUAAAAgICAgampKnJxapKRqzc2UnJys5ubV5ube//////8pPwKVAAAAAXRSTlMAQObYZgAAAKpJREFUeF5joC9gFBRAFRBLS0QRYcxIW5mIoqA1alWaALICl1VLwxACgiJlXqtcwxLh8q7lRrOWl5jDBYRUwqdLugMFkBRUFoaYBjfCBEzDp4uXiJhGCMAEFFUrC8OdgArgKsrVS0SdK+C2iobPBCoIMWSAC1TOLFV1DhFAEpgeahpigiRQXhpsFKKCEBAJDTU2dFFE8pmxsbERUAcCCBsbCwqiBp8gA30BAGrtJrnF5vaHAAAAAElFTkSuQmCC",
-    x_accuracy: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgBAMAAACBVGfHAAAAIVBMVEUAAAAgICBzMWKkUpSsYpzNc72clJzutN7m1eb/5vb///+Q1cqMAAAAAXRSTlMAQObYZgAAAKpJREFUeF5joC9gFBRAFRBLS0QRYcxIW5mIoqA1alWaALICl1VLwxACgiJlXqtcwxLh8q7lRrOWl5jDBYRUwqdLugMFkBRUFoaYBjfCBEzDp4uXiJhGCMAEFFUrC8OdgArgKsrVS0SdK+C2iobPBCoIMWSAC1TOLFV1DhFAEpgeahpigiRQXhpsFKKCEBAJDTU2dFFE8pmxsbERUAcCCBsbCwqiBp8gA30BAGrtJrnF5vaHAAAAAElFTkSuQmCC",
-    dire_hit: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgBAMAAACBVGfHAAAAIVBMVEUAAAAgICB7OQi0gzHNlDHmvVqklJT/1YPu1b3/5s3///+wuCDOAAAAAXRSTlMAQObYZgAAAKpJREFUeF5joC9gFBRAFRBLS0QRYcxIW5mIoqA1alWaALICl1VLwxACgiJlXqtcwxLh8q7lRrOWl5jDBYRUwqdLugMFkBRUFoaYBjfCBEzDp4uXiJhGCMAEFFUrC8OdgArgKsrVS0SdK+C2iobPBCoIMWSAC1TOLFV1DhFAEpgeahpigiRQXhpsFKKCEBAJDTU2dFFE8pmxsbERUAcCCBsbCwqiBp8gA30BAGrtJrnF5vaHAAAAAElFTkSuQmCC",
-    big_mushroom: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgBAMAAACBVGfHAAAAIVBMVEUAAAAgICDVOSCLe3v/c1ru1Ur25mK0pKT/pIPezc3u3t666kKVAAAAAXRSTlMAQObYZgAAAIxJREFUeF5jGGggKCiAEGAUFBRUynBECAi5uoR0ZCgiFHi0uIZ4dCAEhDpaXF08mhBmiHS4uLh0IAu4uIa4RgB1IARCXUKbkAREQ1zARiAEXFxdOhQFULR0NAkXIpyh5pLRoWheKQAX0OjoUBIun4UQyOhoUhSvXIUQAPIFGGctRJjhBLIB4XsEezABAGkLHpxJELo6AAAAAElFTkSuQmCC",
-  };
-  const itemIcon = n => ITEM_DATAURI[n] || `assets/ui/items/${n}.png`;
+  const itemIcon = n => `assets/ui/items/${n}.png`;
   const ballIcon = n => `assets/ui/pokeball/${n}.png`;
   const VIT_ICON = { hp: "hp_up", atk: "protein", def: "iron", spatk: "calcium", spdef: "zinc", spd: "carbos" };
-  /* Nome ufficiale dello strumento che potenzia un tipo: nell'originale non
-     si chiamano "Boost Fuoco" ma Carbonella, Acqua magica, Miracolseme... */
-  const TYPEBOOST_IT = { silk_scarf: "Sciarpa seta", black_belt: "Cinturanera", sharp_beak: "Beccaffilato", poison_barb: "Velenaculeo", soft_sand: "Sabbia soffice", hard_stone: "Pietradura", silver_powder: "Argenpolvere", spell_tag: "Spettrotarga", metal_coat: "Metalcopertura", charcoal: "Carbonella", mystic_water: "Acqua magica", miracle_seed: "Miracolseme", magnet: "Magnete", twisted_spoon: "Cucchiaio torto", never_melt_ice: "Gelomai", dragon_fang: "Dente di drago", black_glasses: "Occhialineri", fairy_feather: "Piuma fatata" };
-  const nomeTypeBoost = t => TYPEBOOST_IT[TYPEBOOST_ICON[t]] || `strumento ${(T[t] || {}).it || ""}`;
   const TYPEBOOST_ICON = { NORMAL: "silk_scarf", FIRE: "charcoal", WATER: "mystic_water", GRASS: "miracle_seed", ELECTRIC: "magnet", PSYCHIC: "twisted_spoon", FIGHTING: "black_belt", FLYING: "sharp_beak", POISON: "poison_barb", GROUND: "soft_sand", ROCK: "hard_stone", GHOST: "spell_tag", DRAGON: "dragon_fang", DARK: "black_glasses", STEEL: "metal_coat", ICE: "never_melt_ice", BUG: "silver_powder", FAIRY: "fairy_feather" };
   // Icona di una scelta premio. Le scelte "dinamiche" (vitamina, boost di tipo,
   // pietra, bacca) hanno l'icona del pezzo effettivamente estratto.
-  /* La descrizione di un premio. Alcune dipendono dall'ondata (le pepite
-     dicono quante monete valgono adesso) e sono funzioni. */
-  function descOggetto(pk) {
-    const d = pk.desc || pk.item.desc;
-    return typeof d === "function" ? d() : d;
-  }
-
   function rewardIconSrc(pk) {
     const it = pk.item;
     if (pk.stat && it.id === "vit") return itemIcon(VIT_ICON[pk.stat] || "hp_up");
-    if (pk.stat && it.id === "xitem") return itemIcon((XITEMS[pk.stat] || {}).icon || "x_attack");
+    if (pk.stat && it.id === "xitem") return itemIcon(VIT_ICON[pk.stat] || "hp_up");
     if (pk.type) return itemIcon(TYPEBOOST_ICON[pk.type] || "silk_scarf");
     if (pk.stone) return itemIcon(STONE_DATA[pk.stone].icon);
     if (pk.berry) return itemIcon(BERRY_DATA[pk.berry].icon);
@@ -9978,20 +9711,12 @@
     const rnd = a => a[Math.floor(Math.random() * a.length)];
     if (item.dyn === "stat") {
       pick.stat = rnd(VITS);
-      pick.label = VIT_NOME[pick.stat];
-      pick.desc = `+10% ${STAT_IT[pick.stat] || VIT_IT[pick.stat]} di base`;
-    } else if (item.dyn === "xstat") {
-      pick.stat = rnd(XITEM_KEYS);
-      pick.label = XITEMS[pick.stat].it;
-      pick.desc = pick.stat === "acc"
-        ? "+1 stadio di Precisione a tutta la squadra, per 5 ondate"
-        : `+20% ${STAT_IT[pick.stat]} a tutta la squadra, per 5 ondate`;
+      pick.label = item.id === "vit" ? VIT_NOME[pick.stat] : `Poteslot ${VIT_IT[pick.stat]}`;
     } else if (item.dyn === "type") {
       // un tipo fra quelli che la squadra usa davvero, come fa l'originale
       const tipi = [...new Set(game.party.flatMap(p => p.types))];
       pick.type = rnd(tipi.length ? tipi : ["NORMAL"]);
-      pick.label = nomeTypeBoost(pick.type);
-      pick.desc = `held: +20% alle mosse di tipo ${T[pick.type].it}`;
+      pick.label = `Boost ${T[pick.type].it}`;
     } else if (item.dyn === "stone") {
       const s = usefulStones();
       if (!s.length) return null;              // nessuno in squadra la userebbe
@@ -10151,8 +9876,7 @@
     [{ id: "potion", mult: 0.2 }, { id: "ether", mult: 0.4 }, { id: "revive", mult: 2 }],
     [{ id: "superpotion", mult: 0.45 }, { id: "fullheal", mult: 1 }],
     [{ id: "elisir", mult: 1 }, { id: "maxether", mult: 1 }],
-    // ⚠️ il Fungo della memoria mancava: nell'originale sta proprio qui, a x4
-    [{ id: "hyperpotion", mult: 0.8 }, { id: "maxrevive", mult: 2.75 }, { id: "mushroom", mult: 4 }],
+    [{ id: "hyperpotion", mult: 0.8 }, { id: "maxrevive", mult: 2.75 }],
     [{ id: "maxpotion", mult: 1.5 }, { id: "maxelisir", mult: 2.5 }],
     [{ id: "fullrestore", mult: 2.25 }],
     [{ id: "sacredash", mult: 10 }],
@@ -10287,7 +10011,7 @@
     const cards = picks.map((pk, i) =>
       `<button class="shop-card" data-i="${i}" style="background:${TIER_COL[pk.item.tier] || TIER_COL.COMMON};">
         <img class="item-icon" src="${rewardIconSrc(pk)}" alt="">
-        <span class="rn">${pk.label}</span><span class="rd">${descOggetto(pk)}</span></button>`).join("");
+        <span class="rn">${pk.label}</span><span class="rd">${pk.desc || pk.item.desc}</span></button>`).join("");
     const stock = shopStock();
     const buyRows = stock.map((g, i) =>
       `<button class="shop-buy" data-s="${i}" ${game.money < g.price ? "disabled" : ""}>
@@ -10369,17 +10093,17 @@
   }
   // Nomi brevi degli oggetti tenuti, per la vista squadra e la scelta destinatario
   const HELD_IT = {
-    leftovers: "Avanzi", shellbell: "Conchinella", focusband: "Bandana",
-    quickclaw: "Rapidartigli", kingsrock: "Roccia di re", scopelens: "Mirino",
+    leftovers: "Avanzi", shellbell: "Conchiglia", focusband: "Bandana",
+    quickclaw: "Rapidartigli", kingsrock: "Roccia di Re", scopelens: "Mirino",
     widelens: "Grandelente", multilens: "Multilente", eviolite: "Evolcondensa",
-    reviverseed: "Revitalseme", toxicorb: "Tossicsfera", flameorb: "Fiammosfera",
-    souldew: "Cuorugiada", leek: "Porro",
-    gripclaw: "Presartigli", blackhole: "Piccolo buco nero", mysticalrock: "Rocciamistica",
-    lightball: "Elettropalla", thickclub: "Osso spesso", metalpowder: "Metalpolvere",
-    quickpowder: "Velopolvere", deepseascale: "Squamabissi", deepseatooth: "Dente Abissi",
+    reviverseed: "Seme Rinascita", toxicorb: "Tossicsfera", flameorb: "Fiammosfera",
+    souldew: "Rugiadanima", leek: "Porro",
+    gripclaw: "Presartigli", blackhole: "Buconero", mysticalrock: "Rocciamistica",
+    lightball: "Sferapalla", thickclub: "Ossoduro", metalpowder: "Metalpolvere",
+    quickpowder: "Velocipolvere", deepseascale: "Squamabissi", deepseatooth: "Dentebissi",
   };
   // Nome leggibile di un oggetto tenuto (i Boost di Tipo non hanno voce fissa)
-  const nomeHeld = k => k === "typeboost" ? "uno strumento di tipo" : (HELD_IT[k] || k);
+  const nomeHeld = k => k === "typeboost" ? "un Boost di Tipo" : (HELD_IT[k] || k);
   function heldSummary(p) {
     const parts = [];
     for (const k in (p.held || {})) {
@@ -10448,217 +10172,6 @@
     cmd().querySelector('[data-act="home"]').onclick = showHome;
   }
 
-  /*[via]*/
-  /* ====================================================================== */
-  /*  PREMIO GIF (easter egg) — §25                                         */
-  /*                                                                        */
-  /*  Tre tocchi di fila sul titolo della Home aprono il selettore di file   */
-  /*  del telefono: si sceglie uno ZIP pieno di GIF. Lo zip viene scompattato*/
-  /*  in sottofondo (unica traccia visibile: la barra sul bordo basso della  */
-  /*  scena) e da quel momento ogni ALLENATORE sconfitto fa comparire una    */
-  /*  GIF a schermo intero, per tanti secondi quanta e' l'ondata.            */
-  /*                                                                        */
-  /*  ⚠️ Il selettore di file era vietato dalle regole storiche del          */
-  /*  proprietario: e' stato lui a chiederlo esplicitamente per questa       */
-  /*  funzione. Non "correggerlo" per fedelta' al vecchio documento.         */
-  /*                                                                        */
-  /*  Niente librerie: lo zip si legge a mano (sotto) e i dati compressi si  */
-  /*  espandono con DecompressionStream, che il browser ha gia'.             */
-  /* ====================================================================== */
-
-  // Estensioni accettate dentro lo zip. Le GIF sono il caso previsto, ma
-  // WebP/APNG animate si comportano allo stesso modo dentro un <img>.
-  const GIF_EXT = /\.(gif|webp|apng|png|jpe?g)$/i;
-  const GIF_MIME = { gif: "image/gif", webp: "image/webp", apng: "image/apng",
-                     png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg" };
-
-  const gifs = {
-    lista: [],          // { nome, url } gia' pronte all'uso
-    usate: new Set(),   // nomi gia' mostrati: non si ripetono finche' ce n'e' altre
-    caricando: false,
-  };
-
-  const gifBarra = () => document.getElementById("gif-load");
-
-  /* Avanzamento: `fatte` su `totale`. A fine corsa la barra sparisce da sola. */
-  function gifProgresso(fatte, totale) {
-    const b = gifBarra(); if (!b) return;
-    b.hidden = false;
-    b.classList.remove("errore");
-    b.querySelector("i").style.width = (totale ? (fatte / totale) * 100 : 0) + "%";
-    if (fatte >= totale) setTimeout(() => { b.hidden = true; }, 900);
-  }
-  /* L'unico modo di segnalare un guaio senza scrivere messaggi: barra rossa. */
-  function gifErrore(perche) {
-    console.warn("[gif]", perche);
-    const b = gifBarra(); if (!b) return;
-    b.hidden = false;
-    b.classList.add("errore");
-    setTimeout(() => { b.hidden = true; b.classList.remove("errore"); }, 2200);
-  }
-
-  /* ---- Lettura dello ZIP, a mano --------------------------------------
-     Uno zip finisce con l'EOCD (End Of Central Directory), che dice dove sta
-     l'indice delle voci. Si legge solo la CODA del file: cosi' uno zip da
-     centinaia di MB non viene mai caricato tutto in memoria. */
-  async function zipIndice(file) {
-    const codaLen = Math.min(file.size, 66000);   // 22 byte + commento (max 65535)
-    const coda = new DataView(await file.slice(file.size - codaLen).arrayBuffer());
-    let eocd = -1;
-    for (let i = coda.byteLength - 22; i >= 0; i--) {
-      if (coda.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
-    }
-    if (eocd < 0) throw new Error("non sembra un file zip");
-    const n = coda.getUint16(eocd + 10, true);
-    const cdLen = coda.getUint32(eocd + 12, true);
-    const cdOff = coda.getUint32(eocd + 16, true);
-    if (n === 0xffff || cdOff === 0xffffffff) throw new Error("zip64 non supportato");
-
-    const cd = new DataView(await file.slice(cdOff, cdOff + cdLen).arrayBuffer());
-    const nomi = new TextDecoder();
-    const voci = [];
-    let p = 0;
-    for (let i = 0; i < n && p + 46 <= cd.byteLength; i++) {
-      if (cd.getUint32(p, true) !== 0x02014b50) break;      // indice rovinato
-      const nomeLen  = cd.getUint16(p + 28, true);
-      const extraLen = cd.getUint16(p + 30, true);
-      const commLen  = cd.getUint16(p + 32, true);
-      const voce = {
-        metodo:    cd.getUint16(p + 10, true),
-        compressa: cd.getUint32(p + 20, true),
-        off:       cd.getUint32(p + 42, true),
-        nome: nomi.decode(new Uint8Array(cd.buffer, cd.byteOffset + p + 46, nomeLen)),
-      };
-      p += 46 + nomeLen + extraLen + commLen;
-      // fuori: cartelle, roba di sistema di macOS, file che non sono immagini
-      if (voce.nome.endsWith("/") || voce.nome.startsWith("__MACOSX/")) continue;
-      if (voce.nome.split("/").pop().startsWith(".")) continue;
-      if (!GIF_EXT.test(voce.nome)) continue;
-      voci.push(voce);
-    }
-    return voci;
-  }
-
-  /* Tira fuori UNA voce come Blob pronto per un <img>.
-     ⚠️ Le lunghezze di nome/extra vanno rilette dall'header LOCALE: nell'indice
-     centrale possono essere diverse, e sbagliarle significa partire in mezzo ai
-     dati. */
-  async function zipEstrai(file, voce) {
-    const testa = new DataView(await file.slice(voce.off, voce.off + 30).arrayBuffer());
-    if (testa.getUint32(0, true) !== 0x04034b50) throw new Error("voce rovinata: " + voce.nome);
-    const dati = voce.off + 30 + testa.getUint16(26, true) + testa.getUint16(28, true);
-    const pezzo = file.slice(dati, dati + voce.compressa);
-    const ext = voce.nome.split(".").pop().toLowerCase();
-    const mime = GIF_MIME[ext] || "application/octet-stream";
-    // metodo 0 = archiviato senza comprimere, 8 = deflate (il caso normale)
-    if (voce.metodo === 0) return pezzo.slice(0, pezzo.size, mime);
-    if (voce.metodo !== 8) throw new Error("compressione non gestita: " + voce.metodo);
-    const flusso = pezzo.stream().pipeThrough(new DecompressionStream("deflate-raw"));
-    const espanso = await new Response(flusso).blob();
-    // ⚠️ `slice` con il terzo argomento cambia solo il tipo, non ricopia i dati:
-    // senza un MIME esplicito il blob: url non viene disegnato dall'<img>.
-    return espanso.slice(0, espanso.size, mime);
-  }
-
-  /* Scompatta lo zip UNA VOCE ALLA VOLTA lasciando respirare il gioco fra una
-     e l'altra: si continua a giocare mentre carica, ed e' gia' possibile
-     vincere una GIF fra quelle arrivate finora. */
-  async function gifCaricaZip(file) {
-    if (gifs.caricando) return;
-    gifs.caricando = true;
-    try {
-      if (typeof DecompressionStream === "undefined") throw new Error("browser senza DecompressionStream");
-      const voci = await zipIndice(file);
-      if (!voci.length) throw new Error("nessuna immagine nello zip");
-      gifProgresso(0, voci.length);
-      let fatte = 0;
-      for (const voce of voci) {
-        try {
-          const blob = await zipEstrai(file, voce);
-          gifs.lista.push({ nome: voce.nome, url: URL.createObjectURL(blob) });
-        } catch (e) {
-          console.warn("[gif] salto", voce.nome, e.message);   // una guasta non ferma le altre
-        }
-        gifProgresso(++fatte, voci.length);
-        await new Promise(r => setTimeout(r, 0));
-      }
-      if (!gifs.lista.length) throw new Error("nessuna immagine leggibile");
-    } catch (e) {
-      gifErrore(e.message);
-    } finally {
-      gifs.caricando = false;
-    }
-  }
-
-  const gifPronte = () => gifs.lista.length > 0;
-
-  /* Pesca una GIF mai vista. Quando sono finite si ricomincia il giro: meglio
-     una replica che nessun premio (una run lunga batte piu' allenatori di
-     quante GIF ci siano nello zip). */
-  function gifPesca() {
-    let libere = gifs.lista.filter(g => !gifs.usate.has(g.nome));
-    if (!libere.length) { gifs.usate.clear(); libere = gifs.lista.slice(); }
-    const scelta = libere[Math.floor(Math.random() * libere.length)];
-    gifs.usate.add(scelta.nome);
-    return scelta;
-  }
-
-  /* Mostra la GIF a schermo intero per `secondi`, poi chiama `poi()`.
-     La fase "GIF" blocca il resto: `advanceMessages` risponde solo a "MESSAGE",
-     quindi nessun tocco puo' far proseguire la partita sotto l'overlay.
-     Il tocco sulla GIF la chiude in anticipo: e' una via d'uscita, non un
-     obbligo (all'ondata 190 durerebbe piu' di tre minuti). */
-  function gifMostra(secondi, poi) {
-    const el = document.getElementById("gif-prize");
-    const scelta = gifPesca();
-    const fasePrima = game.phase;
-    game.phase = "GIF";
-    el.innerHTML = `<img src="${scelta.url}" alt="">`;
-    el.hidden = false;
-    let chiuso = false;
-    const chiudi = () => {
-      if (chiuso) return;
-      chiuso = true;
-      clearTimeout(timer);
-      el.onclick = null;
-      el.hidden = true;
-      el.innerHTML = "";              // libera il decoder della GIF
-      game.phase = fasePrima;
-      if (poi) poi();
-    };
-    const timer = setTimeout(chiudi, Math.max(1, secondi) * 1000);
-    el.onclick = chiudi;
-    return scelta.nome;
-  }
-
-  /* Tre tocchi entro 700 ms sul titolo della Home = apri il selettore. */
-  let gifTocchi = 0, gifTocchiTimer = null;
-  function gifTocco() {
-    clearTimeout(gifTocchiTimer);
-    gifTocchiTimer = setTimeout(() => { gifTocchi = 0; }, 700);
-    if (++gifTocchi < 3) return;
-    gifTocchi = 0;
-    const inp = document.getElementById("gif-zip");
-    inp.value = "";                  // stesso file due volte di fila: serve
-    inp.click();
-  }
-
-  /* hook di debug: il selettore di file non si puo' guidare da uno script, e
-     senza questo la funzione sarebbe impossibile da provare in automatico.
-       __gif.stato()        quante ne sono pronte, quante gia' usate
-       __gif.zip("ZZ.zip")  carica uno zip servito dal server, come se l'avessi scelto
-       __gif.prova(3)       mostra subito una GIF per 3 secondi
-       __gif.apri()         apre il selettore (come il triplo tocco) */
-  window.__gif = {
-    stato: () => ({ pronte: gifs.lista.length, usate: gifs.usate.size,
-                    caricando: gifs.caricando, nomi: gifs.lista.map(g => g.nome) }),
-    zip: (url) => fetch(url).then(r => r.blob()).then(gifCaricaZip),
-    prova: (sec) => gifMostra(sec || 3, () => {}),
-    apri: () => document.getElementById("gif-zip").click(),
-    pesca: () => gifPesca().nome,
-  };
-
-  /*[fine]*/
   /* ---------------------------------------------------------------------- */
   /*  AVVIO — carica i dati reali, poi comincia                             */
   /* ---------------------------------------------------------------------- */
@@ -10697,13 +10210,6 @@
       // solo le specie con sprite disponibile (esclude le forme regionali senza asset)
       SPECIES_KEYS = Object.keys(species).filter(k => !species[k].noSprite);
       loadMeta();
-      /*[via]*/
-      // easter egg delle GIF: lo zip scelto parte subito a scompattarsi (§25)
-      document.getElementById("gif-zip").addEventListener("change", (ev) => {
-        const file = ev.target.files && ev.target.files[0];
-        if (file) gifCaricaZip(file);
-      });
-      /*[fine]*/
       showHome();
       /* Arrivati qui il gioco e' su e funzionante: si dice al cane da guardia
          che questa versione e' buona. Se non lo dicessimo (perche' l'avvio e'
@@ -10734,5 +10240,4 @@
      pronto si parte subito. */
   if (document.readyState === "loading") window.addEventListener("DOMContentLoaded", boot);
   else boot();
-
 })();

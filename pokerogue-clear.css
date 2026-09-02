@@ -432,50 +432,6 @@ html, body {
   position: absolute; z-index: 9;
 }
 .hp-panel[hidden] { display: none; }          /* la classe batterebbe [hidden] */
-
-/* ============================================================================
-   BADGE DEGLI SBALZI DI STATISTICA
-   Uno per ogni statistica alterata, sotto la riga dell'abilita'. Piccoli ma
-   toccabili: 22px di altezza con l'area del dito allargata dal padding.
-   ========================================================================== */
-.stat-badges { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
-.stat-badge {
-  display: inline-flex; align-items: center; gap: 2px;
-  font: 700 9px/1 "Trebuchet MS", system-ui, sans-serif;
-  letter-spacing: .3px;
-  padding: 4px 5px; min-height: 20px;
-  border: 1px solid transparent; border-radius: 5px;
-  color: #0c1018; cursor: pointer;
-}
-.stat-badge i { font-style: normal; font-size: 8px; letter-spacing: -1px; }
-.stat-badge.su   { background: #6ed07a; border-color: #9ff0a8; }
-.stat-badge.giu  { background: #e2726d; border-color: #ffa9a4; }
-
-/* Elenco completo, aperto toccando un badge. Si chiude toccandolo di nuovo. */
-#stat-pop {
-  position: absolute; z-index: 12;
-  left: 50%; top: 50%; transform: translate(-50%, -50%);
-  min-width: 62%; max-width: 88%;
-  background: rgba(14,17,24,.96);
-  border: 2px solid rgba(255,255,255,.22); border-radius: 12px;
-  padding: 9px 11px 8px;
-  box-shadow: 0 6px 20px rgba(0,0,0,.55);
-  font: 12px/1.35 "Trebuchet MS", system-ui, sans-serif; color: #f4f6fb;
-}
-#stat-pop .sp-tit { font-weight: 700; font-size: 14px; margin-bottom: 5px; }
-#stat-pop .sp-riga {
-  display: grid; grid-template-columns: 1fr auto auto; gap: 8px;
-  align-items: baseline; padding: 2px 0;
-  border-top: 1px solid rgba(255,255,255,.07);
-  color: rgba(244,246,251,.55);
-}
-#stat-pop .sp-riga.su  { color: #8fe39a; }
-#stat-pop .sp-riga.giu { color: #ff9a95; }
-#stat-pop .sp-stadio { font-weight: 700; min-width: 22px; text-align: right; }
-#stat-pop .sp-molt { font-variant-numeric: tabular-nums; min-width: 44px; text-align: right; }
-#stat-pop .sp-nota {
-  margin-top: 6px; font-size: 10px; color: rgba(244,246,251,.45); font-style: italic;
-}
 /* sotto l'indicatore d'ondata (in alto a sinistra) E sotto il vassoio di ball
    dell'allenatore, che sta anch'esso a sinistra: sono i due elementi con cui
    si scontrerebbe */
@@ -1252,24 +1208,19 @@ button.pd-card:not(:disabled):active { background: rgba(255,255,255,.14); }
 /* Natura nel dettaglio squadra: si distingue dalle abilità */
 .pd-ab.pd-nat { background: rgba(200, 150, 60, .22); color: #e8c078; }
 
-/* Canvas delle animazioni delle mosse (frame veri di PokeRogue, griglia 96x96).
-   🔴 SONO DUE, e non e' un doppione. Ogni grafica del dato originale ha una
-   `priority`: 1 e 3 vogliono stare DAVANTI ai Pokemon, 0 e 2 DIETRO. Con un
-   canvas solo si sbagliava per forza:
-     - a z-index 7 lo sfondo dell'animazione copriva l'intera schermata;
-     - a z-index 3 (il ripiego di prima) il Pokemon colpito stava sempre davanti
-       e mangiava meta' animazione — ed e' il 97% dei casi, priority 1.
-   Ordine vero della scena, dal basso in alto:
+/* Canvas delle animazioni delle mosse: copre la scena, sopra i combattenti.
+   I frame veri di PokeRogue vengono disegnati qui (griglia 96x96). */
+/* ⚠️ Le animazioni delle mosse vanno SOPRA lo sfondo ma SOTTO i combattenti:
+   a z-index 7 coprivano tutta la scena, Pokemon compresi, e certe mosse
+   nascondevano l'intera schermata. Ordine della scena, dal basso in alto:
      #arena/sfondo (0) < #anim-canvas (3) < .battler-slot (4) <
-     #anim-canvas-front (5) < ball e particelle (6) < #ambiente (7) <
-     riquadri PS e indicatore d'ondata (9) < overlay #meta (20) */
-#anim-canvas, #anim-canvas-front {
+     riquadri PS (5) < oggetti tenuti (6) < overlay #meta (20) */
+#anim-canvas {
   position: absolute; inset: 0;
   width: 100%; height: 100%;
   pointer-events: none;
   z-index: 3;
 }
-#anim-canvas-front { z-index: 5; }
 
 /* flash colorato sullo sprite quando viene colpito */
 .sprite.fx-flash { animation: fxFlash .35s ease; }
@@ -1410,7 +1361,6 @@ button.pd-card:not(:disabled):active { background: rgba(255,255,255,.14); }
   opacity: 0;
   transition: opacity .25s ease;
   pointer-events: none;
-
 }
 #arena.on { opacity: 1; }
 
@@ -1522,67 +1472,6 @@ button.pd-card:not(:disabled):active { background: rgba(255,255,255,.14); }
   70%      { transform: rotate(240deg) scale(1); opacity: .5; }
 }
 
-/*[via]*/
-/* ============================================================================
-   PREMIO GIF (easter egg) — §25
-   Due soli pezzi di interfaccia: la barra di caricamento sul bordo basso della
-   scena e l'overlay a schermo intero con la GIF di vittoria.
-   ⚠️ Le due regole `[hidden]` qui sotto servono davvero: `display` dichiarato
-   in una regola di ID/classe BATTE `[hidden]{display:none}` dello user-agent
-   (stessa trappola di `.battler-slot[hidden]`, §19). Senza, gli elementi
-   restano disegnati anche da nascosti.
-   ========================================================================== */
-#gif-load[hidden], #gif-prize[hidden] { display: none; }
-
-/* Barra di caricamento: sottile, sul bordo BASSO DELLO SCHERMO.
-   ⚠️ `fixed`, non `absolute`: stava dentro #scene e quindi si appoggiava al
-   bordo basso del CAMPO DI LOTTA, cioe' a meta' altezza del telefono, sul
-   confine con i comandi. Ora e' figlia di #game e ancorata allo schermo.
-   Regge perche' nessun antenato ha `transform`/`filter`, che farebbero
-   degradare `fixed` ad `absolute`.
-   ⚠️ z-index 30, cioe' SOPRA le schermate meta (20): lo zip si sceglie dalla
-   Home, che e' una schermata meta, quindi con un valore piu' basso la barra
-   resterebbe nascosta proprio mentre carica.
-   `max-width` + `margin-inline` la tengono dentro la cornice su PC, dove il
-   gioco e' largo 480px e non quanto la finestra. */
-#gif-load {
-  position: fixed; left: 0; right: 0; bottom: 0; top: auto;
-  max-width: 480px; margin-inline: auto;
-  height: 4px; z-index: 30;
-  background: rgba(0, 0, 0, .35);
-  pointer-events: none;               /* non ruba mai un tocco alla scena */
-}
-#gif-load i {
-  display: block; height: 100%; width: 0;
-  background: linear-gradient(90deg, #ff9c54, #ffd479);
-  box-shadow: 0 0 6px rgba(255, 156, 84, .9);
-  transition: width .25s linear;
-}
-/* Zip illeggibile o senza immagini: la barra diventa rossa e sparisce da sola.
-   E' l'unico modo che ha l'easter egg di dire "non ha funzionato", visto che
-   non deve mostrare nessun messaggio. */
-#gif-load.errore i { background: #ff5252; box-shadow: 0 0 6px rgba(255, 82, 82, .9); width: 100%; }
-
-/* La GIF: copre TUTTA la cornice del gioco, sopra qualsiasi altra schermata. */
-#gif-prize {
-  position: absolute; inset: 0; z-index: 60;
-  display: flex; align-items: center; justify-content: center;
-  background: #000;
-  animation: gifEntra .28s ease-out;
-}
-/* "Dimensioni ottimizzate": la GIF riempie il piu' possibile senza deformarsi
-   ne' sbordare, qualunque sia il suo formato (verticale, quadrato, panoramico).
-   ⚠️ Serve `width/height: 100%` + `object-fit: contain`, NON `max-width`: le GIF
-   sono piccole (250x169 quella di prova) e con i soli `max-*` restavano a
-   grandezza naturale in mezzo a uno schermo nero. */
-#gif-prize img {
-  width: 100%; height: 100%;
-  object-fit: contain;
-  image-rendering: auto;   /* ingrandite: meglio sfumate che a scaletta */
-}
-@keyframes gifEntra { from { opacity: 0; } to { opacity: 1; } }
-
-/*[fine]*/
 /* ============================================================================
    SALVATAGGI — schermata dei 3 slot (§26)
    ========================================================================== */

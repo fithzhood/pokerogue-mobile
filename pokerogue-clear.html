@@ -1,17 +1,17 @@
 
-<!--[metti] <!DOCTYPE html> -->
-<!--[metti] <html lang="it"> -->
-<!--[metti] <head> -->
-<!--[metti] <meta charset="UTF-8"> -->
-<!--[metti] <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"> -->
-<!--[metti] <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate"> -->
-<!--[metti] <meta name="theme-color" content="#05060a"> -->
-<!--[metti] <title>PokeRogue Mobile</title> -->
-<!--[metti] <base href="/pokerogue-mobile/"> -->
-<!--[metti] <link rel="stylesheet" href="/pokerogue-clear/pokerogue-clear.css"> -->
-<!--[metti] <style>*{margin:0;padding:0;box-sizing:border-box}html,body{height:100%;background:#05060a;color:#f4f6fb;font-family:"Trebuchet MS","Segoe UI",system-ui,sans-serif;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;overflow:hidden}</style> -->
-<!--[metti] </head> -->
-<!--[metti] <body> -->
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+<meta name="theme-color" content="#05060a">
+<title>PokeRogue Mobile</title>
+<base href="/pokerogue-mobile/">
+<link rel="stylesheet" href="/pokerogue-clear/pokerogue-clear.css">
+<style>*{margin:0;padding:0;box-sizing:border-box}html,body{height:100%;background:#05060a;color:#f4f6fb;font-family:"Trebuchet MS","Segoe UI",system-ui,sans-serif;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;overflow:hidden}</style>
+</head>
+<body>
   <!-- Cornice del gioco: verticale, due schermi impilati -->
   <div id="game">
 
@@ -80,19 +80,13 @@
         <div class="hp-panel side-ally" id="player-hp-panel"></div>
         <div class="hp-panel side-ally second" id="player2-hp-panel" hidden></div>
 
-        <!-- Animazioni delle mosse. DUE canvas, non uno: nel dato originale ogni
-             grafica porta una `priority` che dice se sta davanti o dietro ai
-             Pokemon (97% davanti). Con un canvas solo o coprivano tutto o
-             stavano tutte dietro: qui sotto quello di dietro, poi i
-             combattenti, poi quello davanti. Nessuno dei due prende il tocco. -->
+        <!-- Animazioni delle mosse: disegnate sopra tutto, non intercettano il tocco -->
         <canvas id="anim-canvas"></canvas>
-        <canvas id="anim-canvas-front"></canvas>
 
         <!-- AMBIENTE: tinta dell'ora del giorno + effetto del meteo in corso.
              Copre sfondo, pedane e Pokemon, ma NON i riquadri PS (che stanno
              piu' in alto): il testo deve restare leggibile anche di notte. -->
         <div id="ambiente"><i class="amb-meteo"></i></div>
-
       </div>
     </section>
 
@@ -104,26 +98,9 @@
 
     <!-- Overlay a schermo intero per le schermate META (home/gacha/uova) -->
     <div id="meta" hidden></div>
-
-    <!--[via]-->
-    <!-- PREMIO GIF: la GIF di vittoria, a schermo intero sopra ogni cosa -->
-    <div id="gif-prize" hidden></div>
-
-    <!-- PREMIO GIF (easter egg): unica traccia visibile mentre lo zip si
-         scompatta in sottofondo. Sta sul bordo basso dello SCHERMO, non della
-         scena: prima era dentro #scene e finiva a meta' altezza, sul confine
-         fra campo di lotta e comandi. -->
-    <div id="gif-load" hidden><i></i></div>
-    <!--[fine]-->
-
   </div>
 
-  <!--[via]-->
-  <!-- Selettore dello zip delle GIF: si apre SOLO col triplo tocco sul titolo
-       (easter egg). Fuori da #game perche' non deve occupare spazio. -->
-  <input type="file" id="gif-zip" accept=".zip,application/zip" hidden>
-  <!--[fine]-->
-<!--[metti] <script src="/pokerogue-clear/pokerogue-clear.js"></script> -->
-<!--[metti] </body> -->
-<!--[metti] </html> -->
+<script src="/pokerogue-clear/pokerogue-clear.js"></script>
+</body>
+</html>
 

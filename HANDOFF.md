@@ -1,7 +1,7 @@
 # HANDOFF — PokéRogue Mobile
 
 Documento per una **nuova sessione di Claude Code**. Leggilo tutto prima di toccare il codice.
-Aggiornato: 2026-08-14 · Stato: **rev 47 pubblicata, 0 errori console**.
+Aggiornato: 2026-09-02 · Stato: **rev 78 pubblicata, 0 errori console**. Ultimo giro: **§40**.
 
 ## 🔴 Leggi questo prima di tutto
 
@@ -3138,3 +3138,160 @@ motore non sa colpire più di uno.
   Passano per lo stesso `switch` delle altre.
 
 ---
+
+## 40. Il giro del 2 settembre: oggetti veri, animazioni al posto giusto, sbalzi visibili
+
+Segnalazioni arrivate mentre il proprietario giocava, una alla volta. Sette cose,
+tutte chiuse e verificate nel browser.
+
+### 40.1 «Cura totale ripristina tutti i PS» — erano i NOMI a essere scambiati
+
+Il comportamento era giusto, il nome no. In italiano **Full Restore = «Ricarica
+totale»** e **Full Heal = «Cura totale»**: noi chiamavamo «Cura Totale» il Full
+Restore e «Antistato» il Full Heal. Chi comprava «Cura totale» al negozio si
+vedeva rifare tutti i PS, ed era giusto che si lamentasse.
+
+🔴 **La fonte dei nomi esiste e va usata**: `../PokeRogue/locales/it/` ha
+`modifier-type.json` (nomi e descrizioni di TUTTI gli oggetti), `berry.json`,
+`nature.json`, `move.json`… Prima i nomi erano inventati a mano. Ne sono stati
+corretti **una trentina**: Fungorico→Fungo della memoria, Caramellone→Caramella
+rarissima, Espamuleto→Esperienzamuleto, Conchiglia→Conchinella,
+Riccantico→Dobloantico, Buconero→Piccolo buco nero, Seme Rinascita→Revitalseme,
+Bacchiporta→Porta bacche, Megacerchio→Megapolsiera, Sferapalla→Elettropalla…
+più **tutte le bacche** (Baccharanc→Baccacedro, Baccalum→Baccaprugna,
+Baccastella→Baccambola…) e **gli strumenti di tipo**, che non si chiamano
+«Boost Fuoco» ma Carbonella, Acqua magica, Miracolseme, Gelomai (`TYPEBOOST_IT`).
+
+⚠️ I nomi comparivano anche nei MESSAGGI di lotta («La Conchiglia ristora X!»):
+la sostituzione è stata globale, non solo sulle etichette.
+
+### 40.2 Gli «Strumenti X» non erano strumenti X
+
+Si chiamavano **«Poteslot»**, avevano l'icona di una vitamina e pescavano dalle
+statistiche delle VITAMINE. Tre difetti veri sotto il nome sbagliato:
+
+- esisteva un **«Poteslot PS»** che non faceva *niente*: `stages` non ha `hp`,
+  quindi un premio su sei era un pezzo di carta. Nell'originale al posto dei PS
+  c'è la **PRECISIONE**;
+- valevano **+1 stadio (×1,5)** invece del **+20%** dell'originale;
+- 🔴 e soprattutto scrivevano lo stadio DENTRO il Pokémon a ogni entrata in
+  campo. Dal §30.1 gli stadi persistono fra le ondate → un oggetto da 5 ondate
+  regalava un bonus **eterno**.
+
+Ora c'è `XITEMS` (Attacco X, Difesa X, Att. Speciale X, Dif. Speciale X,
+Velocità X, Precisione X, con le loro icone) e l'effetto è un MOLTIPLICATORE
+applicato dove la statistica si usa (`tempStatMult`), +20% per pezzo, che si
+accumula come `TempStatStageBoosterModifier`. La precisione fa eccezione anche
+nell'originale: lì vale +1 stadio (`tempAccStages`).
+`game.tempBoostN` conta i pezzi (i salvataggi vecchi non ce l'hanno → vale 1).
+
+⚠️ **Effetto collaterale necessario**: `velEff()`. L'ordine del turno leggeva
+`stats.spd` CRUDO, quindi gli stadi di velocità non contavano niente — Agilità
+non spostava l'iniziativa, e Velocità X sarebbe stato un placebo. Ora l'ordine
+usa stadi + Strumenti X. **Restano fuori le abilità legate al meteo**
+(Clorofilla, Nuotovelox, Remasabbia, Spalaneve): nei dati estratti non portano
+la condizione, applicarle sempre raddoppierebbe la velocità col sereno.
+
+### 40.3 «La Pepita dice che vale dei soldi, ma quanti?»
+
+`desc` ora può essere una **funzione** (`descOggetto(pk)` la valuta al
+disegno). Pepita/Granpepita/Dobloantico scrivono la cifra vera dell'ondata:
+«soldi in quantità contenuta (₽710)», come `getDescription` dell'originale.
+
+### 40.4 L'emporio: cresceva già bene, mancava un articolo
+
+Domanda del proprietario: «l'emporio cresce con le ondate come nell'originale?»
+**Sì**, identico: `ceil((ondata+10)/30)` righe, chiuso sulle ondate ×10, prezzi
+come multipli di `waveMoney(1)`. Verificato: 3 articoli all'ondata 5, 5 alla 45,
+10 alla 95, **14** alla 185. Mancava però il **Fungo della memoria** (4ª riga,
+×4), che nell'originale sta proprio lì. Aggiunto.
+
+### 40.5 🔴 In doppio le animazioni finivano sul Pokémon sbagliato
+
+`sideOf()` tornava solo `"enemy"` o `"player"`. Con quattro slot in campo,
+tutto ciò che riguardava il **secondo nemico** («player» per esclusione)
+finiva addosso al giocatore.
+
+⚠️ Perché si vedeva su UNO SOLO dei due avversari: quando il primo cade, il
+superstite viene **promosso** a `game.enemy` (`game.enemy = game.enemy2`), e da
+lì in poi l'animazione tornava al posto giusto. Il proprietario l'ha descritto
+esattamente così: «sull'altro nemico, dopo aver sconfitto il primo, sembra tutto
+a posto».
+
+Ora `sideOf` torna quattro slot, `slotNemico(s)` dice da che parte sta e
+`slotSpriteId(s)` trova lo sprite (con ripiego sul primario se il secondo slot è
+`hidden`: **un elemento nascosto misura zero** e l'animazione si ancorerebbe
+all'angolo). L'fx porta anche `from`, lo slot di CHI ATTACCA: prima si deduceva
+ribaltando il bersaglio, e con quattro lati il ribaltamento non vuol dire niente.
+
+### 40.6 🔴 Le animazioni stavano DIETRO ai Pokémon (tutte)
+
+`#anim-canvas` era a `z-index: 3`, sotto i combattenti (4). Era un ripiego: a
+z-index 7 lo sfondo di certe animazioni copriva l'intera schermata. Solo che nel
+dato originale ogni grafica ha una **`priority`** che dice se va davanti o
+dietro, e **il 97% va davanti** (misurato su 400 animazioni: priority 1 =
+56.275 sprite, priority 2 = 927, priority 3 = 535).
+
+Ora i canvas sono **due**: `#anim-canvas` (3, sotto i combattenti — ci finisce
+lo sfondo dell'animazione e le priority 0 e 2) e `#anim-canvas-front` (5, sopra
+— priority 1 e 3). Ordine vero della scena, aggiornato:
+
+    #arena (0) < #anim-canvas (3) < .battler-slot (4) < #anim-canvas-front (5)
+    < ball e particelle (6) < #ambiente (7) < riquadri PS e ondata (9) < #meta (20)
+
+⚠️ Il commento in cima al CSS diceva «riquadri PS (5)»: era vecchio di parecchio,
+i riquadri PS stanno a 9. Il posto libero fra 4 e 6 c'era.
+
+### 40.7 «Yungoos ha lo sprite ingrandito e tagliato» — erano 135 sprite
+
+L'atlante di Yungoos dichiara `size: 61×61`, ma il PNG è **61×35**. A Phaser non
+importa (indirizza i fotogrammi dentro la texture vera), ma noi disegniamo con
+`background-size`: con la misura sbagliata il browser stira l'immagine e
+l'elemento ne mostra solo un pezzo.
+
+**Non era un caso isolato: 135 atlanti su 3048** hanno la misura di comodo
+(Ogerpon, Zygarde-complete, tutti i Flabébé/Floette/Florges, Xurkitree…). Ora
+`loadSpriteFrom` misura il PNG davvero (`misuraPng`, cache per file). Il
+caricamento non è sprecato: scalda la cache del browser per l'immagine che si
+sta per mostrare.
+
+### 40.8 Sbalzi di statistica visibili e toccabili
+
+Richiesta: «i buff e i malus devono essere visibili tramite piccoli badge
+cliccabili, e devono resettarsi quando il Pokémon rientra nella ball».
+
+Sul riquadro PS di ogni combattente compare un badge per ogni statistica
+**alterata** (solo quelle: sette voci sempre accese sarebbero rumore su un
+telefono), verde in su e rosso in giù, con le frecce. Toccandolo si apre
+`#stat-pop` con tutte e sette le voci, lo stadio e il **moltiplicatore vero**
+(due scale diverse: `stageMult` per le statistiche, `accMult` per precisione ed
+elusione). Si chiude toccandolo, toccando altrove in scena, o al messaggio dopo.
+
+⚠️ Il tocco fa `stopPropagation`, o farebbe avanzare anche la narrazione.
+⚠️ Gli stadi sono entrati nell'ISTANTANEA dell'evento (`pstg`/`estg` in
+`snapEvent`, più `CAMPI_SNAP`): senza, i badge mostravano il risultato di fine
+turno già alla prima frase — si leggeva «L'Attacco di X sale!» con la freccia
+verde già accesa. (Gli slot secondari non hanno istantanea, né per i PS né per
+gli stadi: lì si vede lo stato attuale.)
+
+### 40.9 Cura di squadra alle ondate delle decine
+
+`curaSquadraDecina()`, chiamata da `showBiomeChoice()` prima della scelta della
+zona: è la `PartyHealPhase` dell'originale, che scatta al cambio bioma. Tutta la
+squadra rientra nelle ball e ne esce senza problemi di stato, senza stadi e
+senza volatili.
+
+🔴 **Gli PS NON si toccano**, per la regola del proprietario del 14 agosto («i
+problemi di stato, i boost e i debuff rimangono tra un'ondata e l'altra»).
+⚠️ Nell'originale la PartyHealPhase rifà anche **PS e PP**: se un giorno si
+vuole quello, il posto è `curaSquadraDecina`, e la riga è già indicata nel
+commento.
+
+Fuori dalle decine la regola resta quella di sempre, e ora è confermata dal
+proprietario: **rientrando nella ball si perdono gli stadi ma NON lo stato**
+(veleno, paralisi, sonno, scottatura, congelamento restano). Verificato:
+Charmander scottato con +3 Attacco rientra → Attacco a 0, scottatura ancora lì.
+
+⚠️ **Resta in piedi il richiamo davanti agli ALLENATORI** (§30.1), che cura
+anche lo stato. Il proprietario non l'ha nominato in questo giro: prima di
+toglierlo, chiedere.
