@@ -3050,7 +3050,7 @@
     // i Pokemon degli allenatori pescano dal pool oggetti dedicato
     for (const m of mons) m.trainerMon = true;
     game.trainerName = name;
-    game.trainerRoster = mons.slice();      // serve alla Theft Ball
+    game.trainerRoster = mons.slice();      // serve alla Clepto Ball
     game.trainerIsRival = mons.some(m => m.rival);
     // chiave dei dialoghi ufficiali (vedi `chiaveDialogo`): serve a fargli dire
     // qualcosa quando lo batti
@@ -3215,7 +3215,7 @@
         f.trainer = who; f.evil = true;
         mons.push(f);
       }
-      game.evilRank = evilKind;    // serve al bottino Theft Ball (recluta/admin/boss)
+      game.evilRank = evilKind;    // serve al bottino Clepto Ball (recluta/admin/boss)
       const cry = evilKind === "boss"
         ? `«Il mio piano è perfetto! ${evil.name} dominerà!»`
         : evilKind === "admin" ? `«Sono un Admin di ${evil.name}. Non passerai!»`
@@ -3825,7 +3825,7 @@
          quindi li ferma wasTrainer. Il boss finale non arriva nemmeno qui: a
          200 la run finisce prima, con renderRunVictory. */
       if (!wasTrainer && !game.capturedThisWave) { offerCapture(); return; }
-      // allenatore (NON il Rivale): con una Theft Ball puoi rubargli un Pokémon
+      // allenatore (NON il Rivale): con una Clepto Ball puoi rubargli un Pokémon
       if (wasTrainer && !game.trainerIsRival && (game.theftballs || 0) > 0 && game.trainerRoster.length) { offerSteal(); return; }
       openShop();
     }))); });
@@ -4111,12 +4111,17 @@
     { key: "greatballs",  it: "Mega Ball",  mult: 1.5 },
     { key: "ultraballs",  it: "Ultra Ball", mult: 2 },
     { key: "rogueballs",  it: "Rogue Ball", mult: 3 },
-    { key: "theftballs",  it: "Theft Ball", mult: 2, theft: true },
+    /* Clepto Ball: e' il nome ITALIANO UFFICIALE della Snag Ball, quella dei
+       giochi GameCube (Pokemon Colosseum e XD), dove serviva proprio a rubare i
+       Pokemon agli allenatori. Nella stessa famiglia stanno il Team Clepto
+       (Team Snagem) e la Cleptatrice (Snag Machine).
+       ⚠️ La chiave interna resta `theftballs`: sta dentro i salvataggi. */
+    { key: "theftballs",  it: "Clepto Ball", mult: 2, theft: true },
     { key: "masterballs", it: "Master Ball", mult: 255 },
   ];
   function totalBalls() { return BALL_TYPES.reduce((s, b) => s + (game[b.key] || 0), 0); }
 
-  /* ---- FURTO con Theft Ball: scegli un Pokémon della squadra avversaria ----
+  /* ---- FURTO con Clepto Ball: scegli un Pokémon della squadra avversaria ----
      Meccanica esclusiva di questo gioco: nell'originale i Pokémon degli
      allenatori NON sono catturabili. Probabilità come Ultra Ball (x2), il
      Rivale è immune. */
@@ -4132,7 +4137,7 @@
     }).join("");
     showMetaScreen(`
       <div class="meta-title" style="font-size:clamp(19px,5.6vw,29px)">🕶 Furto</div>
-      <div class="me-text">Hai <b>${game.theftballs}</b> Theft Ball. Quale Pokémon rubi a ${game.trainerName}?</div>
+      <div class="me-text">Hai <b>${game.theftballs}</b> Clepto Ball. Quale Pokémon rubi a ${game.trainerName}?</div>
       <div class="me-opts">${rows}
         <button class="me-opt" data-act="skip"><span class="me-opt-l">Lascia stare</span></button></div>`);
     metaEl().querySelectorAll(".me-opt[data-i]").forEach(b => b.onclick = () => {
@@ -4140,13 +4145,13 @@
       game.theftballs--;
       hideMeta();
       const caught = rollCapture(m, 2, 1);
-      const msgs = [`Lanci una Theft Ball su ${m.name}…`];
+      const msgs = [`Lanci una Clepto Ball su ${m.name}…`];
       if (caught) {
         const mon = makeFighter(m.speciesId, m.level, { shiny: m.shiny, shinyVar: m.shinyVar, ivs: m.ivs, variant: m.variant, abilIndex: m.abilIndex, gender: m.gender });
         ereditaPs(mon, m);
         accogliPokemon(mon, msgs, "🕶 Rubato!");
         registerCaught(m.speciesId, m.shiny, m.ivs, msgs, m.variant, m.abilIndex, m.nature, m.shinyVar, m.gender);
-      } else msgs.push(`${m.name} è sfuggito alla Theft Ball!`);
+      } else msgs.push(`${m.name} è sfuggito alla Clepto Ball!`);
       renderScene();
       queueMessages(msgs, () => chiediPostoInSquadra(() => openShop()));
     });
@@ -6480,7 +6485,7 @@
        ball grigia   → ce l'hai, ma QUESTO ha ancora qualcosa di nuovo
        ball piena    → ce l'hai già tutto: è solo un avversario
 
-     Vale per i selvatici **e** per quelli degli allenatori: con la Theft Ball
+     Vale per i selvatici **e** per quelli degli allenatori: con la Clepto Ball
      si rubano, quindi l'informazione serve lo stesso. */
   function statoDex(f) {
     if (!f || !isEnemySide(f) || !S[f.speciesId]) return null;
@@ -7368,7 +7373,7 @@
   /* ---------------- LANCIO BALL IN BATTAGLIA ----------------
      Come nei giochi veri: si lancia durante la lotta, consuma il turno, e si
      possono lanciare quante ball si vuole. Le ball normali funzionano solo sui
-     SELVATICI; la Theft Ball (nostra aggiunta) ruba anche agli allenatori, ma
+     SELVATICI; la Clepto Ball (nostra aggiunta) ruba anche agli allenatori, ma
      non al Rivale. Il boss finale non è catturabile. */
   function ballBlockReason(ball) {
     const e = game.enemy;
@@ -7376,7 +7381,7 @@
     // NB: il boss finale È catturabile (scelta del proprietario, diversa
     // dall'originale che lo blocca): tasso basso ma non impossibile.
     if (e.trainer) {
-      if (!ball.theft) return `Non puoi catturare il Pokémon di un allenatore! Serve una Theft Ball.`;
+      if (!ball.theft) return `Non puoi catturare il Pokémon di un allenatore! Serve una Clepto Ball.`;
       if (game.trainerIsRival) return `Il tuo Rivale non ti lascerà rubare nulla!`;
     }
     return null;
@@ -7397,7 +7402,7 @@
       </button>`;
     }).join("");
     const hint = game.enemy && game.enemy.trainer
-      ? `Solo la Theft Ball funziona sugli allenatori`
+      ? `Solo la Clepto Ball funziona sugli allenatori`
       : `Indebolisci e addormenta per alzare le probabilità`;
     /* A SCHERMO INTERO. ⚠️ Nella fascia comandi non ci stava: con cinque tipi
        di ball il contenuto era alto 410 px in uno spazio di 224, e il tasto
@@ -10317,7 +10322,7 @@
 
     /* ============ bottino esclusivo dei team cattivi ============ */
     // Non entra nell'estrazione (weight 0): lo si ottiene solo battendoli.
-    { tier: "ROGUE", weight: 0, id: "theft", label: "Theft Ball", desc: "ruba un Pokémon a un allenatore", icon: "tb", ball: true,
+    { tier: "ROGUE", weight: 0, id: "theft", label: "Clepto Ball", desc: "ruba un Pokémon a un allenatore", icon: "tb", ball: true,
       target: "run", apply: (p, pk) => { game.theftballs = (game.theftballs || 0) + (pk.qty || 1); } },
   ];
   // Probabilita' del TIER (poi si pesca l'oggetto dentro al tier, coi pesi sopra)
@@ -10739,10 +10744,10 @@
     let picks = currentPicks;
     if (!picks) {
       picks = [];
-      // bottino dei team cattivi: Theft Ball garantite, in quantità
+      // bottino dei team cattivi: Clepto Ball garantite, in quantità
       if (game.pendingTheft) {
         const it = REWARD_POOL.find(r => r.id === "theft");
-        picks.push({ item: it, label: `Theft Ball ×${game.pendingTheft}`, qty: game.pendingTheft });
+        picks.push({ item: it, label: `Clepto Ball ×${game.pendingTheft}`, qty: game.pendingTheft });
       }
       // una cura garantita, ma SOLO se c'e' davvero qualcuno da curare
       const heals = REWARD_POOL.filter(r => r.avail && r.avail() &&

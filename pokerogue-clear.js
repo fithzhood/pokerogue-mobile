@@ -3803,8 +3803,16 @@
     }
     // prima le EVOLUZIONI (con la loro animazione), poi le mosse da imparare
     queueMessages(messages, () => { hideTrainerPortrait(); processEvos(() => processHatches(() => processLearns(() => {
-      // ULTIMA BALL (una sola) solo se il selvatico è stato SCONFITTO, non catturato
-      if (!wasBoss && !wasTrainer && !game.capturedThisWave) { offerCapture(); return; }
+      /* ULTIMA BALL (una sola) sul SELVATICO sconfitto e non gia' catturato.
+         [ATTENZIONE] Prima c era anche !wasBoss, e cosi i Pokemon delle ondate
+         multiple di 10 non la offrivano mai: sono proprio quelli che uno vuole
+         prendere. Non c era una ragione dietro - durante la lotta erano gia
+         catturabili (ballBlockReason blocca solo gli allenatori), quindi
+         mancava soltanto il tiro di cortesia alla fine.
+         I capipalestra restano fuori da soli: i loro Pokemon hanno .trainer,
+         quindi li ferma wasTrainer. Il boss finale non arriva nemmeno qui: a
+         200 la run finisce prima, con renderRunVictory. */
+      if (!wasTrainer && !game.capturedThisWave) { offerCapture(); return; }
       // allenatore (NON il Rivale): con una Theft Ball puoi rubargli un Pokémon
       if (wasTrainer && !game.trainerIsRival && (game.theftballs || 0) > 0 && game.trainerRoster.length) { offerSteal(); return; }
       openShop();

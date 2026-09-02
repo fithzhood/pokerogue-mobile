@@ -1,7 +1,7 @@
 # HANDOFF — PokéRogue Mobile
 
 Documento per una **nuova sessione di Claude Code**. Leggilo tutto prima di toccare il codice.
-Aggiornato: 2026-09-03 · Stato: **rev 107 pubblicata, 0 errori console**. Ultimo giro: **§40-45**.
+Aggiornato: 2026-09-03 · Stato: **rev 109 pubblicata, 0 errori console**. Ultimo giro: **§40-45**.
 
 ## 🔴 Leggi questo prima di tutto
 
@@ -282,7 +282,7 @@ Funzionano anche le abilità che chiamano **meteo** (`WEATHER_ABIL`) e **terreno
   **in battaglia**, **consuma il turno**, **lanci illimitati**; % da **HP correnti + stato**
   (37% → 100% su bersaglio indebolito e addormentato). Se il selvatico viene *sconfitto* invece
   che catturato → **una sola ultima ball** a fine lotta.
-- **Theft Ball** (aggiunta originale, non esiste in PokéRogue): rate Ultra ×2, **droppata solo dai
+- **Clepto Ball** (aggiunta originale, non esiste in PokéRogue): rate Ultra ×2, **droppata solo dai
   team cattivi** come premio garantito (recluta ×1 · admin ×2 · boss ×4, da `game.evilRank`).
   È l'**unica** ball che funziona sui Pokémon degli allenatori; rubando, il mon esce dal loro
   roster e l'allenatore manda il prossimo. **Vietata sul Rivale**.
@@ -461,7 +461,7 @@ sta rompendo il gioco. Ognuna è motivata nella sezione indicata.
 | Boss finale | sempre Eternatus | **rosa di 14**, uno per run | §22 |
 | Baby Pokémon | Pichu **e** Pikachu schierabili | **solo il capostipite** (Pichu) | §19 |
 | Boss finale catturabile | bloccato | **catturabile**, a tasso basso | §6.5 |
-| Theft Ball | non esiste | nostra, ruba ai Pokémon degli allenatori | §5 |
+| Clepto Ball | non esiste | nostra, ruba ai Pokémon degli allenatori | §5 |
 | GIF di vittoria | non esistono | nostre, da uno zip scelto dall'utente | §25 |
 | GIF conservate | — | **mai**: si riscelgono a ogni avvio, di proposito | §25 |
 | Cattura | solo comando del turno | in lotta **+ un'ultima ball** a fine lotta | §5 |
@@ -2152,7 +2152,7 @@ rimpicciolisce o si materializza. `verso` = `"ritiro"` | `"uscita"`, `lato` = `p
 - `chiudiBallSlot()` (chiamata in cima a `nextEvent`, come `stopMoveAnim`) conclude di colpo
   l'animazione in corso se si tocca per andare avanti.
 - Agganci: cambio in singolo e in doppio, cambio forzato, allenatore che manda il prossimo,
-  furto con la Theft Ball, richiamo/riemissione dell'allenatore, e la **prima uscita
+  furto con la Clepto Ball, richiamo/riemissione dell'allenatore, e la **prima uscita
   dell'ondata 1**. ⚠️ Dalla seconda ondata in poi il tuo Pokémon **non** riesce da una ball:
   è proprio il non essere richiamato che gli fa portare dietro stato e stadi.
 - ⚠️ Niente `requestAnimationFrame` (nel pannello a volte non scatta, §24): un timer da 20 ms
@@ -2369,7 +2369,7 @@ Stessa regola, con quello che il nostro dex tiene (`meta.unlocked`, `abils`, `na
 | ball **piena** | ce l'hai già tutto: è solo un avversario |
 
 Vale anche per i Pokémon degli allenatori (verificato sul Larvesta del Mangiafuoco): con la
-Theft Ball si rubano, quindi l'informazione serve lo stesso.
+Clepto Ball si rubano, quindi l'informazione serve lo stesso.
 
 ### 32.3 «Ora puoi usarlo come starter» detto a sproposito
 
@@ -3481,8 +3481,8 @@ _Nome_?»: se il taglio arriva, deve sopravvivere il **nome**, non la formula di
 cortesia. Con la vecchia frase restava «Cosa deve far…» e il nome spariva —
 proprio in doppio, dove sapere chi sta scegliendo è l'unica cosa che conta.
 
-⚠️ E dalla riga è sparito il contatore delle **Theft Ball** (🕶N), che c'era
-da prima. Non era solo ingombro: `totalBalls()` somma **anche** le Theft Ball,
+⚠️ E dalla riga è sparito il contatore delle **Clepto Ball** (🕶N), che c'era
+da prima. Non era solo ingombro: `totalBalls()` somma **anche** le Clepto Ball,
 quindi «🔴8 🕶3» faceva credere che fossero 3 in più delle 8, e invece sono 3
 delle 8. Il numero si vede dove serve — nel menu delle ball e nella schermata
 del furto — e li è giusto.
@@ -3797,9 +3797,13 @@ già catturabili (`ballBlockReason` blocca solo i Pokémon degli allenatori), gl
 mancava soltanto il tiro di cortesia alla fine — proprio su quelli che uno vuole
 prendere. Tolto.
 
-Restano fuori da soli, senza bisogno di nominarli:
-- i **capipalestra**, perché i loro Pokémon hanno `.trainer` (riga 2976) e li
-  ferma `wasTrainer`;
+Restano fuori dall'**ultima ball** da soli, senza bisogno di nominarli:
+- gli allenatori, **capipalestra compresi**, perché i loro Pokémon hanno
+  `.trainer` (riga 2976) e li ferma `wasTrainer`. ⚠️ Attenzione: «fuori
+  dall'ultima ball» non vuol dire «non catturabili». I Pokémon degli allenatori
+  si prendono con la **Clepto Ball**, sia in lotta sia col furto di fine
+  battaglia (`offerSteal`), che vale anche per i capipalestra — l'unico immune
+  è il Rivale;
 - il **boss finale** dell'ondata 200, che non arriva nemmeno lì: `vittoriaOndata`
   esce prima con `renderRunVictory`.
 
@@ -3821,3 +3825,15 @@ codice.
 Il sintomo tipico è il peggiore che ci sia: la correzione «non funziona», si va
 a cercare un secondo difetto che non esiste, e magari si rompe qualcosa
 d'altro per farla funzionare.
+
+### 45.8 «Clepto Ball», che è il nome vero
+
+La ball che ruba i Pokémon agli allenatori si chiamava «Theft Ball», che era
+un'invenzione nostra in inglese. È diventata **Clepto Ball**: è il nome
+**italiano ufficiale** della *Snag Ball* dei giochi GameCube (Pokémon Colosseum
+e XD), dove faceva esattamente questo mestiere. Nella stessa famiglia stanno il
+**Team Clepto** (Team Snagem) e la **Cleptatrice** (Snag Machine).
+
+⚠️ La chiave interna resta `theftballs` (e `pendingTheft`, e l'id premio
+`theft`): stanno dentro i salvataggi, rinominarle romperebbe le run in corso
+senza guadagnare niente. Cambia solo quello che si legge.
