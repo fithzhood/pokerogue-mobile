@@ -1,7 +1,7 @@
 # HANDOFF — PokéRogue Mobile
 
 Documento per una **nuova sessione di Claude Code**. Leggilo tutto prima di toccare il codice.
-Aggiornato: 2026-09-02 · Stato: **rev 81 pubblicata, 0 errori console**. Ultimo giro: **§40-41**.
+Aggiornato: 2026-09-02 · Stato: **rev 88 pubblicata, 0 errori console**. Ultimo giro: **§40-42**.
 
 ## 🔴 Leggi questo prima di tutto
 
@@ -3359,3 +3359,127 @@ metriche del telefono): il riquadro PS ha **122 px utili**. Tre chip ci stanno
 fino a coprire i Pokemon (successo davvero: primo tentativo con `flex-wrap`).
 Le frecce ripetute (▲▲▲) sono diventate **freccia + numero** (▲3): meno larghe
 e non c'è da contarle.
+
+
+## 42. Regole del richiamo, menu della run, scanner IV (2026-09-02, terzo giro)
+
+### 42.1 🔴 Le regole di cura sono cambiate — questa è la versione buona
+
+Sostituisce la decisione del 14 agosto (§30.1). Quattro righe, e valgono tutte:
+
+| quando | cosa succede |
+|---|---|
+| **rientro nella ball** (cambio) | solo gli stadi a zero (e la forma mega). Stato e PS restano |
+| **davanti a un ALLENATORE** | stadi a zero **e via la confusione**. Nient'altro |
+| **ondate delle DECINE** (10, 20, 30…) | tutto: stato, stadi, volatili, **PS e PP pieni, esausti rianimati** |
+| tutto il resto del tempo | veleno, paralisi, sonno, scottatura e congelamento **restano** |
+
+`richiamaNellaBall(f)` ha **perso il parametro `curaStato`**: adesso non cura
+mai niente, e chi vuole curare lo fa esplicitamente. Era il flag che rendeva
+difficile leggere la regola.
+
+⚠️ La cura delle decine **rianima gli esausti**, come la `PartyHealPhase`
+dell'originale. Vuol dire che ogni dieci ondate la squadra si rialza da sola: i
+Revitalizzanti servono ad *arrivarci*, non per il dopo. È voluto, chiesto
+esplicitamente.
+
+### 42.2 I catturati tengono i PS
+
+Chi entra nella ball entra in squadra **con i PS che aveva**, non più pieno.
+La riga in `risolviLancio` diceva perfino `// fresco, HP/PP pieni`.
+
+⚠️ Si passa dalla **frazione**, non dal numero: l'esemplare che entra in squadra
+viene ricreato da zero (per non trascinarsi stadi, volatili e la bandierina «è
+di un allenatore») e un **boss ha i PS moltiplicati** — copiare il numero crudo
+darebbe un pieno o un quasi-morto a caso. Mai sotto 1: nella ball ci è entrato
+vivo. Vale per tutti e tre i punti di cattura (selvatico, fine lotta, furto).
+
+### 42.3 Menu della run: le uova si comprano quando si vuole
+
+Richiesta: «in PokéRogue originale si possono comprare le uova in qualsiasi
+istante — c'è un pulsante menu che dà accesso a diverse opzioni».
+
+Il pulsante **☰** sta nella riga della domanda («Cosa deve fare X?»), cioè
+compare esattamente quando si può usare: è l'unico momento in cui il gioco sta
+aspettando te. Dentro: **Macchine Uova**, **Le mie Uova**, **Salva ed esci**,
+**Torna alla lotta**.
+
+⚠️ `showGacha` e `showEggs` avevano `back → showHome` scritto dentro. Ora
+prendono un parametro `dove`: dal menu della run si torna al menu, non alla Home
+abbandonando la partita. `showGacha` lo passa anche alla propria ricorsione
+(dopo ogni tiro si ridisegna da sola).
+
+⚠️ Uscendo dal menu **la fase va rimessa a mano** (`chiudiMenuRun`): le
+schermate meta la cambiano in `"GACHA"` / `"EGGS"`, e senza ripristinare
+`"CHOICE"` i comandi non rispondono più. È la trappola di ogni schermata meta
+aperta da dentro una lotta.
+
+⚠️ «Salva ed esci» non salva niente di nuovo: il salvataggio automatico scrive
+**prima** di incrementare l'ondata (§26), quindi si riprende dall'ondata in
+corso rigiocandola. È lo stesso avviso che dà l'originale.
+
+### 42.4 🔴 Lo Scanner IV non faceva assolutamente niente
+
+Domanda del proprietario: «come funziona il rilevatore di IV?». Risposta: non
+funzionava. `game.charms.ivScanner` veniva scritto in `startRun` e nella
+ricompensa, e **non lo leggeva nessuno** — un premio ULTRA con peso 4 che era
+un pezzo di carta. Terzo caso della stessa specie in un giorno, dopo il
+«Poteslot PS» (§40.2) e le animazioni sullo slot sbagliato (§40.5).
+
+Nell'originale (`ScanIvsPhase`) **non mostra i numeri**: accende le etichette
+delle statistiche sul riquadro dell'avversario e colora quelle in cui il suo IV
+è migliore del migliore che hai già registrato per quella specie, in oro se è un
+31 perfetto. È l'informazione che serve davvero, perché catturando si aggiorna
+il tuo record (`recordIVs`): risponde a «vale la pena prenderlo?».
+
+Da noi è la stessa cosa, **passiva** (l'originale prima fa una domanda; il
+proprietario l'ha esclusa: «in maniera non invasiva e fastidiosa»). Sul
+riquadro dell'avversario compaiono al massimo **tre chip**, **oro** per i 31 e
+**verde** per quelli migliori dei tuoi, ordinati per importanza. Se non c'è
+niente da dire scrive «niente di meglio» in grigio senza fondo — informa lo
+stesso, e non grida. I sei numeri veri stanno **a un tocco**, nello stesso
+riquadro usato per gli sbalzi.
+
+⚠️ Il confronto è con `bestIVsFor(specie)`. Se non hai mai catturato quella
+specie non c'è record: il riquadro lo dice, e ogni IV risulta un miglioramento
+(è anche il comportamento dell'originale, dove il record parte da zero).
+
+**La lente è un INTERRUTTORE**, non una decorazione (seconda idea del
+proprietario, che ha sostituito la prima). Sta nella riga dei comandi accanto a
+☰ — è un comando, non un'informazione, e nella scena avrebbe rubato spazio a
+Pokémon e riquadri, che agli angoli ci stanno già tutti.
+
+- **accesa**: i chip si vedono;
+- **spenta**: il riquadro dell'avversario resta pulito;
+- **spenta ma davanti c'è qualcosa che ti serve**: la lente **vibra**.
+  L'informazione non si perde, bussa e basta. Tre scosse e una pausa di due
+  secondi: un tremolio continuo, su un telefono, diventa fastidioso in dieci
+  secondi. C'è la resa per `prefers-reduced-motion` (bordo oro fisso).
+
+Lo stato sta in `meta.ivOn` (si ricorda fra le run). ⚠️ `scannerOn()` vuole
+**entrambe** le cose: possedere l'oggetto *e* non averlo spento.
+
+### 42.5 🔴 La riga dei comandi, rifatta col righello
+
+Reggeva col nastro adesivo: i bottoni in posizione **assoluta** e un
+`padding-right` a occhio. Bastava un nome lungo o una cifra in più nei soldi e
+la **fortuna andava a capo**, mangiandosi una riga intera della fascia comandi
+(segnalato: «non puoi mettere la fortuna a capo, gestisci meglio quel
+pannello»). Il primo rattoppo — rimpicciolire il carattere — era esattamente lo
+stesso errore un po' più in là.
+
+Adesso è un **flex vero**, e ognuno ha il suo compito:
+
+| pezzo | regola |
+|---|---|
+| la domanda (`.pl-testo`) | l'**unica** che si accorcia, coi puntini |
+| i contatori (`.hud`) | `flex: 0 0 auto`: non si toccano mai |
+| i bottoni (`.pl-tasti`) | nel flusso, così non c'è nessun padding da indovinare |
+
+⚠️ E la domanda è diventata «**Tocca a _Nome_**» invece di «Cosa deve fare
+_Nome_?»: se il taglio arriva, deve sopravvivere il **nome**, non la formula di
+cortesia. Con la vecchia frase restava «Cosa deve far…» e il nome spariva —
+proprio in doppio, dove sapere chi sta scegliendo è l'unica cosa che conta.
+
+Misurato a 384 px nel caso peggiore (nome da 12 lettere, ₽9.999.999, Theft
+Ball, lente e menu): **una riga sola**, 32 px, contatori interi.

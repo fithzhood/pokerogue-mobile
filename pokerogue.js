@@ -1912,18 +1912,22 @@
      senza, la zona successiva viene estratta a caso fra i collegamenti. */
   /* 🔴 CURA DI SQUADRA ALLE ONDATE DELLE DECINE (10, 20, 30...)
 
-     E' la `PartyHealPhase` dell'originale, che scatta al cambio zona: tutta la
-     squadra rientra nelle ball e ne esce ripulita. Da noi — per la regola del
-     proprietario che vale dal 14 agosto — gli PS restano quelli che sono: si
-     azzerano solo problemi di stato, stadi ed effetti volatili.
-     ⚠️ Nell'originale qui si rifanno anche PS e PP: se un giorno si vuole
-     quello, il posto e' questo.
-     E' l'unico momento in cui l'attrito accumulato si ferma DAVVERO: fuori di
-     qui stato e stadi appartengono al Pokemon finche' resta in campo. */
+     E' la `PartyHealPhase` dell'originale, che scatta al cambio zona, e fa
+     quello che fa lei: stato, stadi e volatili via, **PS e PP rifatti**. E'
+     l'unico momento in cui l'attrito accumulato si ferma DAVVERO: fuori di qui
+     stato e stadi appartengono al Pokemon finche' resta in campo.
+     Gli ESAUSTI tornano in piedi, come nell'originale. ⚠️ Vuol dire che ogni
+     dieci ondate la squadra si rialza da sola: i Revitalizzanti e la Cenere
+     magica servono per arrivarci, non per il dopo. E' voluto. */
   function curaSquadraDecina() {
-    const daCurare = game.party.filter(p => p.status || Object.values(p.stages || {}).some(v => v)).length;
+    const daCurare = game.party.filter(p => p.status || p.hp < p.maxHp || p.fainted
+      || Object.values(p.stages || {}).some(v => v)
+      || p.moves.some(m => m.pp < m.maxPp)).length;
     for (const p of game.party) {
-      richiamaNellaBall(p, true);     // stadi a zero E stato guarito
+      richiamaNellaBall(p);                       // stadi a zero e forma base
+      p.status = null; p.sleepTurns = 0;
+      p.fainted = false; p.hp = p.maxHp;          // in piedi e PS pieni
+      for (const m of p.moves) m.pp = m.maxPp;    // PP pieni
       p.volatile = { confusion: 0, flinch: false, protect: null, protectUsi: 0,
                      trap: null, seed: false, seedBy: null, perish: 0, recharge: false,
                      charging: null, infatuated: false, encore: null, taunt: 0,
@@ -1934,7 +1938,7 @@
     }
     renderScene();
     return daCurare
-      ? ["La squadra rientra nelle ball e ne esce rimessa a nuovo: nessun problema di stato, nessuno sbalzo."]
+      ? ["La squadra rientra nelle ball e ne esce rimessa a nuovo: PS e PP pieni, nessun problema di stato, nessuno sbalzo."]
       : [];
   }
 
@@ -1983,18 +1987,22 @@
   /* ======================================================================
      ENTRARE IN CAMPO / RIENTRARE NELLA BALL
 
-     🔴 SCELTA DEL PROPRIETARIO, DIVERSA DALL'ORIGINALE (2026-08-14):
-        «i problemi di stato, i boost e i debuff devono rimanere tra un'ondata
-         e l'altra, con l'eccezione delle lotte contro gli allenatori: in quel
-         caso i Pokemon vengono prima rimessi nelle pokeball e poi riestratti,
-         guariti dai problemi di stato (ma non negli HP) e con le stats
-         iniziali.»
+     🔴 SCELTA DEL PROPRIETARIO, DIVERSA DALL'ORIGINALE.
+     Regola in vigore dal **2026-09-02** (sostituisce quella del 14 agosto, che
+     faceva guarire dallo stato anche davanti agli allenatori):
+
+       · rientrando nella ball si perdono SOLO gli stadi (e la forma mega);
+       · veleno, paralisi, sonno, scottatura e congelamento RESTANO;
+       · davanti a un ALLENATORE la squadra rientra: stadi azzerati e
+         confusione tolta, nient'altro;
+       · alle ondate delle DECINE (10, 20, 30...) si azzera tutto e si rifanno
+         anche PS e PP: e' l'unico momento in cui l'attrito si ferma davvero
+         (vedi `curaSquadraDecina`).
 
      Il modello e' fisico e si regge da solo: stato e stadi appartengono al
      Pokemon FINCHE' STA IN CAMPO. Chi non viene mai richiamato se li porta
-     dietro da un'ondata all'altra; chi rientra nella ball perde gli stadi
-     (e la forma mega), e si cura dallo stato solo nel richiamo davanti a un
-     allenatore. Prima invece una sola funzione azzerava tutto a ogni ondata.
+     dietro da un'ondata all'altra. Prima invece una sola funzione azzerava
+     tutto a ogni ondata.
      ====================================================================== */
 
   // Il Pokemon ENTRA IN CAMPO: si azzera solo cio' che appartiene alla singola
@@ -2013,13 +2021,13 @@
 
   /* Il Pokemon RIENTRA NELLA BALL: perde gli stadi — boost e debuff valgono
      finche' resta in campo — e l'eventuale forma mega/gigamax.
-     Lo stato si cura SOLO con `curaStato`, cioe' nel richiamo che precede una
-     lotta con un allenatore. Gli PS non si toccano mai. */
-  function richiamaNellaBall(f, curaStato) {
+     🔴 Non cura NIENTE: ne' stato ne' PS. Aveva un parametro `curaStato` che
+     guariva veleno & co. davanti agli allenatori; dal 2 settembre lo stato lo
+     toglie soltanto la cura delle decine (`curaSquadraDecina`). */
+  function richiamaNellaBall(f) {
     if (!f) return;
     revertForm(f);            // mega/gigamax durano solo una battaglia
     f.stages = { atk: 0, def: 0, spatk: 0, spdef: 0, spd: 0, acc: 0, eva: 0 };
-    if (curaStato) { f.status = null; f.sleepTurns = 0; }
   }
 
   /* Fine di una battaglia: cadono meteo e terreno (non passano da una lotta
@@ -3033,17 +3041,21 @@
     game.trainerDefeated = 0;
     game.enemyQueue = mons.slice(1);
     game.enemy = null;                 // niente mon durante la sfida
-    /* 🔴 RICHIAMO PRIMA DELLA SFIDA (scelta del proprietario, vedi il riquadro
-       sopra `entraInCampo`): davanti a un allenatore la squadra rientra nelle
-       ball e ne riesce guarita dai problemi di stato e con gli stadi azzerati
-       — ma con gli PS che aveva. E' l'unico punto in cui l'attrito accumulato
-       ondata dopo ondata si ferma, ed e' anche il momento in cui si VEDE il
-       Pokemon rientrare e poi riuscire. */
+    /* 🔴 RICHIAMO PRIMA DELLA SFIDA (scelta del proprietario): davanti a un
+       allenatore la squadra rientra nelle ball, azzera gli stadi e si toglie la
+       CONFUSIONE. Nient'altro: PS e problemi di stato restano come sono.
+       ⚠️ Fino al 2 settembre qui si guariva anche da veleno & co.; la regola e'
+       cambiata, adesso lo stato lo toglie solo la cura delle decine.
+       Resta il momento in cui si VEDE il Pokemon rientrare e poi riuscire. */
     const attivo = game.player;
-    const daCurare = game.party.filter(p => p.status).length;
-    for (const p of game.party) richiamaNellaBall(p, true);
+    const daCurare = game.party.filter(p =>
+      (p.volatile && p.volatile.confusion) || Object.values(p.stages || {}).some(v => v)).length;
+    for (const p of game.party) {
+      richiamaNellaBall(p);
+      if (p.volatile) p.volatile.confusion = 0;
+    }
     const intro = [conBall(`Ritirati, ${attivo.name}!`, "ritiro", "player")];
-    if (daCurare) stessoMomento(intro, "La squadra rientra nelle ball e si rimette in sesto.");
+    if (daCurare) stessoMomento(intro, "La squadra rientra nelle ball: sbalzi azzerati e testa sgombra.");
     renderScene();
     loadFighterSprite(game.player, "back").then(s => { game.player.spr = s; redrawScene(); });
     queueMessages(intro, () => {
@@ -4097,6 +4109,7 @@
       const msgs = [`Lanci una Theft Ball su ${m.name}…`];
       if (caught) {
         const mon = makeFighter(m.speciesId, m.level, { shiny: m.shiny, shinyVar: m.shinyVar, ivs: m.ivs, variant: m.variant, abilIndex: m.abilIndex, gender: m.gender });
+        ereditaPs(mon, m);
         accogliPokemon(mon, msgs, "🕶 Rubato!");
         registerCaught(m.speciesId, m.shiny, m.ivs, msgs, m.variant, m.abilIndex, m.nature, m.shinyVar, m.gender);
       } else msgs.push(`${m.name} è sfuggito alla Theft Ball!`);
@@ -4117,6 +4130,17 @@
      messaggi. Si mette da parte in `game.nuovoArrivato` e la si fa dopo, con
      `chiediPostoInSquadra`, che va infilata nella continuazione.
      ====================================================================== */
+  /* I PS di chi entra nella ball se li porta dietro. ⚠️ Si passa dalla
+     FRAZIONE e non dal numero: l'esemplare che entra in squadra viene ricreato
+     da zero (per non trascinarsi stadi, volatili e la bandierina "e' di un
+     allenatore"), e un boss ha i PS moltiplicati — copiare il numero crudo
+     darebbe un pieno o un quasi-morto a caso. Mai sotto 1: nella ball ci e'
+     entrato vivo. */
+  function ereditaPs(mon, da) {
+    if (!mon || !da || !da.maxHp) return;
+    mon.hp = Math.max(1, Math.min(mon.maxHp, Math.round(mon.maxHp * (da.hp / da.maxHp))));
+  }
+
   function accogliPokemon(mon, msgs, preso) {
     if (game.party.length < PARTY_MAX) {
       game.party.push(mon);
@@ -4272,7 +4296,8 @@
   function risolviUltimaBall(enemy, caught) {
     const messages = [];
     if (caught) {
-      const mon = makeFighter(enemy.speciesId, enemy.level, { shiny: enemy.shiny, shinyVar: enemy.shinyVar, ivs: enemy.ivs, variant: enemy.variant, abilIndex: enemy.abilIndex, gender: enemy.gender }); // fresco, HP/PP pieni
+      const mon = makeFighter(enemy.speciesId, enemy.level, { shiny: enemy.shiny, shinyVar: enemy.shinyVar, ivs: enemy.ivs, variant: enemy.variant, abilIndex: enemy.abilIndex, gender: enemy.gender });
+      ereditaPs(mon, enemy);        // i PS che aveva quando la ball si e' chiusa
       accogliPokemon(mon, messages, "Preso!");
       // meta-progressione: starter sbloccato + caramella + IV migliori
       registerCaught(enemy.speciesId, enemy.shiny, enemy.ivs, messages, enemy.variant, enemy.abilIndex, enemy.nature, enemy.shinyVar, enemy.gender);
@@ -6465,6 +6490,94 @@
     if (v) v.remove();
   }
 
+  /* ======================================================================
+     SCANNER IV — passivo, sempre acceso
+
+     🔴 Era un premio che non faceva NIENTE: `game.charms.ivScanner` veniva
+     scritto in `startRun` e nella ricompensa, e non lo leggeva nessuno.
+
+     Nell'originale (`ScanIvsPhase`) non mostra i numeri: accende le etichette
+     delle statistiche sul riquadro dell'avversario, colorando quelle in cui il
+     suo IV e' MIGLIORE del migliore che hai gia' registrato per quella specie
+     (oro se e' un 31 perfetto). E' l'informazione che serve davvero, perche'
+     catturando si aggiorna il tuo record (`recordIVs`): dice «vale la pena
+     prenderlo?».
+
+     Da noi e' la stessa cosa, senza la domanda che l'originale fa prima: entra
+     l'avversario e l'informazione c'e' gia', in un angolo del suo riquadro.
+     I numeri veri stanno a un tocco, come per gli sbalzi. */
+  const IV_SIGLA = { hp: "PS", atk: "ATT", def: "DIF", spatk: "A.SP", spdef: "D.SP", spd: "VEL" };
+  const IV_NOME  = { hp: "PS", atk: "Attacco", def: "Difesa", spatk: "Att. Speciale",
+                     spdef: "Dif. Speciale", spd: "Velocità" };
+  const IV_MAX = 31;
+
+  // Le statistiche che vale la pena segnalare, gia' ordinate: prima i 31, poi
+  // i miglioramenti piu' grossi.
+  function ivNotevoli(f) {
+    const mie = bestIVsFor(f.speciesId) || {};
+    return IV_KEYS
+      .map(k => ({ k, v: (f.ivs || {})[k] || 0, mio: mie[k] || 0 }))
+      .filter(x => x.v === IV_MAX || x.v > x.mio)
+      .sort((a, b) => (b.v === IV_MAX) - (a.v === IV_MAX) || (b.v - b.mio) - (a.v - a.mio));
+  }
+
+  // Lo scanner e' acceso? Va posseduto E non spento a mano dalla lente.
+  const scannerOn = () => !!(game.charms && game.charms.ivScanner) && meta.ivOn !== false;
+  // C'e' qualcosa che varrebbe la pena guardare, fra chi ho davanti?
+  const ivInteressanti = () => enemiesOnField().some(f => f && f.ivs && ivNotevoli(f).length);
+
+  function badgeIV(f) {
+    if (!scannerOn() || !f || !f.ivs || !isEnemySide(f)) return "";
+    const notevoli = ivNotevoli(f).slice(0, 3);
+    const chip = notevoli.length
+      ? notevoli.map(x => `<span class="iv-chip ${x.v === IV_MAX ? "perfetto" : "meglio"}"
+          >${IV_SIGLA[x.k]}${x.v === IV_MAX ? "★" : "▲"}</span>`).join("")
+      : `<span class="iv-chip niente">niente di meglio</span>`;
+    return `<div class="iv-badges">${chip}</div>`;
+  }
+
+  /* La LENTE: interruttore dello scanner, nella riga dei comandi accanto al
+     menu. 🔴 Sta li' e non nella scena perche' e' un COMANDO, non
+     un'informazione: nella scena rubava spazio ai Pokemon e ai riquadri, che
+     agli angoli ci stanno gia' tutti.
+     Spenta, il riquadro dell'avversario resta pulito. Ma se in campo c'e' un
+     esemplare con IV che ti servono, la lente VIBRA: l'informazione non si
+     perde, bussa e basta. */
+  function bottoneLente() {
+    if (!game.charms || !game.charms.ivScanner) return "";
+    const on = scannerOn();
+    const vibra = !on && ivInteressanti();
+    const titolo = on ? "Scanner IV acceso — tocca per spegnerlo"
+      : vibra ? "Questo ha IV che ti servono: tocca per vedere quali"
+              : "Scanner IV spento — tocca per accenderlo";
+    return `<button class="lente-btn${on ? " on" : ""}${vibra ? " vibra" : ""}"
+      data-act="lente" title="${titolo}" aria-label="${titolo}">🔍</button>`;
+  }
+
+  /* Tutti e sei i valori, col numero. Stesso riquadro degli sbalzi. */
+  function apriIV(f) {
+    chiudiStadi();
+    const scena = document.getElementById("scene");
+    if (!scena || !f) return;
+    const mie = bestIVsFor(f.speciesId) || null;
+    const righe = IV_KEYS.map(k => {
+      const v = (f.ivs || {})[k] || 0, mio = mie ? (mie[k] || 0) : null;
+      const cls = v === IV_MAX ? "perfetto" : (mio !== null && v > mio) ? "su" : "";
+      return `<div class="sp-riga ${cls}">
+        <span class="sp-nome">${IV_NOME[k]}</span>
+        <span class="sp-stadio">${v}</span>
+        <span class="sp-molt">${mie ? "tuo " + mio : "—"}</span></div>`;
+    }).join("");
+    const pop = document.createElement("div");
+    pop.id = "stat-pop";
+    pop.innerHTML = `<div class="sp-tit">🔍 IV di ${f.name}</div>${righe}
+      <div class="sp-nota">${mie ? "a destra il migliore che hai già registrato"
+                                : "non hai mai catturato questa specie"}</div>`;
+    pop.onclick = (e) => { e.stopPropagation(); chiudiStadi(); };
+    scena.appendChild(pop);
+    scena.addEventListener("click", chiudiStadi, { once: true, capture: true });
+  }
+
   function renderHpPanel(el, fighter, ov) {
     const hp = ov ? ov.hp : fighter.hp;
     const maxHp = ov ? ov.maxHp : fighter.maxHp;
@@ -6485,7 +6598,8 @@
       <div class="hp-text">${Math.max(0, hp)} / ${maxHp}</div>
       ${barraExp(fighter)}
       ${fighter.ability ? `<div class="ability-line">${fighter.ability.it}</div>` : ""}
-      ${badgeStadi(fighter, ov && ov.stages)}`;
+      ${badgeStadi(fighter, ov && ov.stages)}
+      ${badgeIV(fighter)}`;
     /* Il bersaglio del dito e' la RIGA intera, non il singolo chip: i chip
        sono alti 18 px e da soli non si prendono. */
     const riga = el.querySelector(".stat-badges");
@@ -6493,6 +6607,8 @@
       e.stopPropagation();            // non far avanzare anche la narrazione
       apriStadi(fighter);
     };
+    const rigaIv = el.querySelector(".iv-badges");
+    if (rigaIv) rigaIv.onclick = (e) => { e.stopPropagation(); apriIV(fighter); };
   }
 
   /* Barra dell'ESPERIENZA — solo per i TUOI Pokemon, come nei giochi veri.
@@ -6702,7 +6818,7 @@
     const tfRow = tf
       ? `<div class="back-row"><button class="btn transform-btn" data-act="transform">${tf === "mega" ? "✨ MEGAEVOLVI" : "🔴 GIGAMAXIZZA"}</button></div>` : "";
     cmd().innerHTML = `
-      <div class="prompt-line">Cosa deve fare ${(chi || game.player).name}?${game.double ? ` <b>(${game.chooser === 1 ? "2°" : "1°"})</b>` : ""} <span class="hud">· ${alive}/${game.party.length} · 🔴${totalBalls()}${game.theftballs ? " 🕶" + game.theftballs : ""} · ₽${game.money} · 🍀<b style="color:${luckColor(runLuck())}">${LUCK_RANK[runLuck()]}</b></span></div>
+      <div class="prompt-line has-menu"><span class="pl-testo">Tocca a <b>${(chi || game.player).name}</b>${game.double ? ` (${game.chooser === 1 ? "2°" : "1°"})` : ""}</span><span class="hud">${alive}/${game.party.length} · 🔴${totalBalls()}${game.theftballs ? " 🕶" + game.theftballs : ""} · ₽${game.money} · 🍀<b style="color:${luckColor(runLuck())}">${LUCK_RANK[runLuck()]}</b></span><span class="pl-tasti">${bottoneLente()}<button class="menu-btn" data-act="menu" aria-label="Menu">☰</button></span></div>
       <div class="grid2">
         <button class="btn main-fight" data-act="fight">Lotta</button>
         <button class="btn main-bag"   data-act="ball">Ball</button>
@@ -6728,6 +6844,14 @@
     cmd().querySelector('[data-act="ball"]').onclick  = showBallMenu;
     cmd().querySelector('[data-act="team"]').onclick = () => renderParty("switch");
     cmd().querySelector('[data-act="run"]').onclick  = () => gameOver("RUN");
+    cmd().querySelector('[data-act="menu"]').onclick = showRunMenu;
+    const lente = cmd().querySelector('[data-act="lente"]');
+    if (lente) lente.onclick = () => {
+      meta.ivOn = !scannerOn();     // acceso <-> spento, e si ricorda
+      saveMeta();
+      renderScene();                // i chip compaiono o spariscono
+      showMainMenu();               // e la lente cambia stato
+    };
   }
 
   // Lista squadra. mode "switch" (dal menu, con Indietro) o "force" (dopo un KO,
@@ -7146,6 +7270,7 @@
 
     if (caught) {
       const mon = makeFighter(enemy.speciesId, enemy.level, { shiny: enemy.shiny, shinyVar: enemy.shinyVar, ivs: enemy.ivs, variant: enemy.variant, abilIndex: enemy.abilIndex, gender: enemy.gender });
+      ereditaPs(mon, enemy);        // i PS che aveva quando la ball si e' chiusa
       const stolen = !!enemy.trainer;
       accogliPokemon(mon, log, stolen ? "🕶 Rubato!" : "Preso!");
       registerCaught(enemy.speciesId, enemy.shiny, enemy.ivs, log, enemy.variant, enemy.abilIndex, enemy.nature, enemy.shinyVar, enemy.gender);
@@ -7736,6 +7861,53 @@
     return `rev ${r} · ${dove}`;
   }
 
+  /* ======================================================================
+     MENU DELLA RUN
+
+     Nell'originale c'e' un pulsante MENU sempre raggiungibile, e da li' si
+     arriva anche alle Macchine Uova: le uova si comprano in qualsiasi momento,
+     non solo dalla schermata iniziale. Da noi il pulsante sta nella riga della
+     domanda («Cosa deve fare X?»), cioe' compare esattamente quando si puo'
+     usare: e' l'unico momento in cui il gioco sta aspettando te.
+
+     ⚠️ Uscendo dal menu va rimessa la fase a mano: le schermate meta la
+     cambiano ("GACHA", "EGGS") e senza ripristinarla i comandi non rispondono
+     piu'. */
+  function chiudiMenuRun() {
+    hideMeta();
+    game.phase = "CHOICE";
+    renderScene();
+    showMainMenu();
+  }
+
+  function showRunMenu() {
+    game.phase = "MENU";
+    const eggs = meta.eggs.length;
+    showMetaScreen(`
+      <div class="meta-title">Menu</div>
+      <div class="meta-stats"><span>Ondata ${game.wave}</span><span>🎟 ${meta.vouchers} voucher</span><span>🥚 ${eggs}</span></div>
+      <div class="me-opts">
+        <button class="me-opt" data-a="gacha"><span class="me-opt-l">🎰 Macchine Uova</span>
+          <span class="me-opt-s">${meta.vouchers ? `${meta.vouchers} voucher da spendere` : "nessun voucher: li danno i boss"}</span></button>
+        <button class="me-opt" data-a="uova"><span class="me-opt-l">🥚 Le mie Uova</span>
+          <span class="me-opt-s">${eggs ? `${eggs} in incubazione` : "nessun uovo in incubazione"}</span></button>
+        <button class="me-opt" data-a="esci"><span class="me-opt-l">💾 Salva ed esci</span>
+          <span class="me-opt-s">la run resta nello slot ${game.slot} · si riprende dall'ondata ${game.wave}</span></button>
+        <button class="me-opt" data-a="back"><span class="me-opt-l">↩ Torna alla lotta</span></button>
+      </div>`);
+    metaEl().querySelector('[data-a="gacha"]').onclick = () => showGacha(null, showRunMenu);
+    metaEl().querySelector('[data-a="uova"]').onclick = () => showEggs(showRunMenu);
+    metaEl().querySelector('[data-a="esci"]').onclick = () => {
+      /* ⚠️ Il salvataggio automatico scrive PRIMA di incrementare l'ondata
+         (§26), quindi lo slot contiene "ondate completate": uscendo di qui si
+         riprende dall'ondata in corso, rigiocandola con un avversario nuovo.
+         E' lo stesso avviso che da' l'originale. */
+      clearTimeout(game.timer);
+      showHome();
+    };
+    metaEl().querySelector('[data-a="back"]').onclick = chiudiMenuRun;
+  }
+
   function showHome() {
     game.phase = "HOME";
     clearTimeout(game.timer);
@@ -7823,7 +7995,10 @@
 
   /* Le tre macchine dell'originale, una sotto l'altra. `result` è l'uovo
      appena uscito, se si arriva qui da un tiro. */
-  function showGacha(result) {
+  /* `dove` = dove si torna con Indietro. Serve perche' ora il gacha si apre
+     anche DA DENTRO una run (dal menu), e da li' bisogna rientrare in lotta,
+     non finire sulla Home abbandonando la partita. */
+  function showGacha(result, dove) {
     game.phase = "GACHA";
     const canPull = meta.vouchers > 0;
     const evid = specieInEvidenza();
@@ -7852,12 +8027,12 @@
       meta.vouchers--;
       const egg = pullEgg(b.dataset.g);
       saveMeta();
-      showGacha(egg);
+      showGacha(egg, dove);
     });
-    metaEl().querySelector('[data-a="back"]').onclick = showHome;
+    metaEl().querySelector('[data-a="back"]').onclick = dove || showHome;
   }
 
-  function showEggs() {
+  function showEggs(dove) {
     game.phase = "EGGS";
     const list = meta.eggs.length
       ? `<div class="egg-list">${meta.eggs.slice().sort((a, b) => a.waves - b.waves).map(e =>
