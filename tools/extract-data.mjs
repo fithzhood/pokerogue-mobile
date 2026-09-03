@@ -197,13 +197,29 @@ function extractMoves() {
       effectChance: chance,        // -1 = nessuno
       priority: priority || 0,
       charging: cls === "ChargingAttackMove" || cls === "ChargingSelfStatusMove",
-      contact: category === "PHYSICAL",   // euristica: il fisico fa contatto
+      contact: category === "PHYSICAL" && !/\.makesContact\(\s*false\s*\)/.test(chunk),
       /* FLAG che servono al SOSTITUTO: le mosse SONORE lo attraversano (il
          fantoccio non tappa le orecchie) e alcune lo ignorano per definizione
          (Turbine, Boato: non colpiscono, spingono). Nell'originale sono
          `MoveFlags.SOUND_BASED` e `MoveFlags.IGNORE_SUBSTITUTE`. */
       sonora: /\.soundBased\(\)/.test(chunk),
       bucaSub: /\.ignoresSubstitute\(\)/.test(chunk),
+      /* FAMIGLIE di mosse. Servono alle abilita' che ne potenziano una sola:
+         Ferropugno i pugni, Ferromascella i morsi, Affilama i tagli, e cosi'
+         via. Nell'originale sono `MoveFlags`, un flag per famiglia. */
+      pugno:  /\.punchingMove\(\)/.test(chunk),
+      morso:  /\.bitingMove\(\)/.test(chunk),
+      taglio: /\.slicingMove\(\)/.test(chunk),
+      onda:   /\.pulseMove\(\)/.test(chunk),
+      vento:  /\.windMove\(\)/.test(chunk),
+      danza:  /\.danceMove\(\)/.test(chunk),
+      sfera:  /\.ballBombMove\(\)/.test(chunk),
+      polvere: /\.powderMove\(\)/.test(chunk),
+      /* CONTATTO vero, non l'euristica «fisico = contatto»: nell'originale il
+         contatto e' un flag suo, e mosse come Terremoto o Sostituto sono
+         fisiche senza toccare nessuno. Lo legge `.makesContact(false)`, che
+         SPEGNE il flag — acceso di suo per le mosse fisiche. */
+      contattoNo: /\.makesContact\(\s*false\s*\)/.test(chunk),
       target,                             // MoveTarget dell'originale (§39)
       gen,
       attrs,

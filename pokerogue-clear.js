@@ -839,6 +839,24 @@
     return 1;
   }
 
+  /* 🔴 Le forme SCEGLIIBILI nella schermata starter.
+     Si registravano («Nuova forma: Acqua!») e poi non servivano a niente: la
+     squadra si componeva sempre con la forma di partenza. Un Tauros di Paldea
+     Acqua catturato restava una riga nel contatore.
+     Come per abilità e nature, si guarda cosa hai già incontrato; la prima
+     forma dell'elenco è sempre disponibile, o le specie a piu' forme non ne
+     avrebbero nessuna finche' non ne trovi una. */
+  function formeSbloccate(k) {
+    const forms = VARIANTS[k];
+    if (!forms || forms.length < 2) return [];
+    // le forme che dipendono da sesso/natura non si scelgono: le decide altro
+    if (FORM_BY_GENDER.has(k) || k === "TOXTRICITY") return [];
+    const viste = (meta.formsSeen && meta.formsSeen[S[k].dex]) || {};
+    const quante = Math.max(1, collectableForms(k));
+    const pool = forms.slice(0, quante);
+    return pool.filter((f, i) => i === 0 || !f.key || viste[f.key]);
+  }
+
   // Il "collezionismo" delle forme resta: meta.formsSeen è indicizzato per dex
   // (così i salvataggi già esistenti continuano a valere).
   function registerForm(dex, formKey) {
@@ -2246,6 +2264,13 @@
                    accumulo: 0, bide: null };
     f._lansat = false;
     f.fainted = false;
+    /* Da quanti turni e' in campo, e cosa ha gia' usato da quando e' entrato.
+       Servono alle mosse con una CONDIZIONE di tempo (vedi `CONDIZIONI`):
+       Bruciapelo vale solo appena entrato, Ultimascelta solo dopo aver usato
+       tutto il resto. Stanno fuori da `volatile` no: dentro, cosi' si azzerano
+       da sole rientrando nella ball — che e' esattamente la regola. */
+    f.volatile.turniInCampo = 0;
+    f.volatile.usate = [];
     /* Curardore e Lunardanza hanno lasciato una promessa sul lato: chi entra
        adesso la riscuote (PS pieni e niente problemi di stato). Viene PRIMA
        delle trappole, come nell'originale. */
@@ -2349,6 +2374,8 @@
       // calcolo delle statistiche, non basta assegnarla dopo
       const mon = makeFighter(e.k, START_LEVEL, { shiny: e.shiny, nature: e.nature,
                                                  shinyVar: e.shinyVar || 0, gender: e.gender,
+                                                 // la forma scelta nella scheda: `undefined` = decidila tu
+                                                 variant: e.formKey || undefined,
                                                  ivs: bestIVsFor(e.k) || rollIVs(), ignoreArena: true });
       mon.luck = dexLuck(e.k);       // starter: fortuna dal DEX (§33)
       if (e.ability && ABIL[e.ability]) {
@@ -4481,9 +4508,30 @@
           <div class="pd-hp">${Math.max(0, p.hp)}/${p.maxHp} PS</div>
         </button>`;
     }).join("");
+    /* 🔴 Si sceglieva chi buttare fuori senza poter guardare chi ENTRA:
+       solo il nome e il livello. Adesso c'e' la sua scheda in cima — sprite,
+       tipi, abilita', natura e IV — perche' e' l'informazione che serve per
+       decidere, ed era l'unica che mancava. */
+    const tipiN = mon.types.map(t => `<span class="ticon t-${t}"></span>`).join("");
+    const chipIvN = (mon.ivs ? IV_KEYS.filter(k => (mon.ivs[k] || 0) === IV_MAX) : [])
+      .map(k => `<span class="iv-chip perfetto">${IV_SIGLA[k]}★</span>`).join("");
+    const arrivato = `<div class="pd-card arrivato">
+        <div class="pd-top">
+          <span class="pd-name">${miniIcon(mon.dex, 1.5)}${mon.shiny ? cromStella(mon.shinyVar) : ""}${mon.name.replace("✨", "")}</span>
+          <span class="pd-lv">Lv.${mon.level}</span>
+        </div>
+        <div class="pd-types">${tipiN}
+          ${mon.ability ? `<span class="pd-ab">${mon.ability.it}</span>` : ""}
+          ${mon.nature ? `<span class="pd-ab pd-nat">${natureLabel(mon)}</span>` : ""}
+        </div>
+        <div class="pd-types">${mon.moves.map(m => `<span class="pd-ab">${M[m.id].it}</span>`).join("")}</div>
+        ${chipIvN ? `<div class="iv-badges">${chipIvN}</div>` : ""}
+      </div>`;
     showMetaScreen(`
       <div class="meta-title" style="font-size:clamp(19px,5.6vw,30px)">Squadra al completo</div>
-      <div class="meta-sub">chi cede il posto a <b>${mon.name}</b> (Lv.${mon.level})? Chi esce va al PC.</div>
+      <div class="meta-sub">è arrivato <b>${mon.name}</b>: chi gli cede il posto? Chi esce va al PC.</div>
+      ${arrivato}
+      <div class="meta-sub" style="margin:.6vh 0">la tua squadra</div>
       <div class="pd-list">${cards}</div>
       <div class="meta-actions"><button class="meta-btn ghost" data-act="pc">📦 Manda ${mon.name} al PC</button></div>`);
     const chiudi = (testo) => { hideMeta(); queueMessages([testo], poi); };
@@ -5529,10 +5577,6 @@
       // roba che vale un turno solo e va spenta comunque sia andata
       f.volatile.magiccoat = false; f.volatile.snatch = false;
       f.volatile.centro = false; f.volatile.elettro = false;
-      if (f.volatile.disable && --f.volatile.disable.turni <= 0) {
-        log.push(`${f.name} torna a poter usare ${M[f.volatile.disable.id].it}.`);
-        f.volatile.disable = null;
-      }
     }
     // le protezioni di squadra durano un turno; il vincolo fatato due
     if (game.lati) for (const c of ["mio", "suo"]) {
@@ -5794,6 +5838,8 @@
     const veto = mossaChiamata ? null : mossaVietata(actor, move, moveInst);
     if (veto) { messages.push(veto); return; }
     actor.volatile.lastMove = moveInst.id;   // serve a Ripeti e Attaccalite
+    // elenco di cosa ha usato da quando e' entrato: lo legge Ultimascelta
+    if (actor.volatile.usate && !actor.volatile.usate.includes(moveInst.id)) actor.volatile.usate.push(moveInst.id);
     /* ⚠️ Copione deve vedere la mossa PRECEDENTE, non se stesso: la memoria
        si aggiorna solo dopo che la mossa è stata risolta (in fondo), non qui.
        Aggiornandola subito, Copione trovava sempre "COPIONE" e falliva sempre. */
@@ -5927,6 +5973,16 @@
       return;
     }
 
+    /* 1-nonies. La mossa ha una CONDIZIONE? Se non e' soddisfatta fallisce,
+       consumando il PP come nei giochi veri. */
+    if (CONDIZIONI[move.id] && !CONDIZIONI[move.id](actor, foe, move)) {
+      moveInst.pp = Math.max(0, moveInst.pp - 1);
+      messages.push(`${actor.name} usa ${move.it}!`);
+      stessoMomento(messages, "Ma non ha funzionato!");
+      actor.volatile.fallita = true;        // lo legge Pestone
+      return;
+    }
+
     // 2. consuma PP e annuncia
     moveInst.pp = Math.max(0, moveInst.pp - 1);
     /* Indice dell'annuncio: e' QUI che va appesa l'animazione della mossa,
@@ -5948,6 +6004,7 @@
       if (Math.random() * 100 >= chance) { stessoMomento(messages, `${actor.name} ha mancato il bersaglio!`); return; }
     }
 
+    actor.volatile.fallita = false;   // e' partita: Pestone torna a potenza normale
     // 4. danno (se e' una mossa d'attacco)
     let landed = true;
     if (move.category !== "STATUS" && move.power > 0) {
@@ -6090,6 +6147,37 @@
     FINAL_GAMBIT: (a) => a.hp,
   };
 
+  /* 🔴 MOSSE CON UNA CONDIZIONE. Certe mosse non funzionano sempre: hanno
+     una regola sul QUANDO. Nell'originale e' un `.condition(...)` a parte dai
+     mattoncini, e l'estrattore prende solo i `.attr(...)`: da noi arrivavano
+     senza nessun vincolo e funzionavano ogni volta.
+     Bruciapelo, per dirne una, si poteva usare a ogni turno: una mossa che fa
+     tentennare a colpo sicuro con priorita' +3, per tutta la lotta.
+     Ognuna risponde «si» o «no»; il «no» fa fallire la mossa consumandone il
+     PP, come nei giochi veri. */
+  const CONDIZIONI = {
+    // solo al PRIMO turno da quando si e' entrati in campo
+    FAKE_OUT:         a => a.volatile.turniInCampo === 0,
+    FIRST_IMPRESSION: a => a.volatile.turniInCampo === 0,
+    MAT_BLOCK:        a => a.volatile.turniInCampo === 0,
+    /* Sbigattacco va a segno solo se il bersaglio sta per ATTACCARE: adesso
+       che la coda del turno e' leggibile (`game._coda`) si puo' sapere. */
+    SUCKER_PUNCH: (a, f) => {
+      const q = game._coda || [];
+      const az = q.find((x, k) => k > game._codaI && x.actor === f);
+      return !!(az && M[az.move.id] && M[az.move.id].category !== "STATUS");
+    },
+    // Ultimascelta: solo dopo aver usato TUTTE le altre mosse
+    LAST_RESORT: a => a.moves.length > 1
+      && a.moves.every(m => m.id === "LAST_RESORT" || (a.volatile.usate || []).includes(m.id)),
+    // Rutto: serve avere mangiato una bacca
+    BELCH: a => !!a.volatile.bacciaFinita,
+    // Mangiasogni: solo su chi dorme
+    DREAM_EATER: (a, f) => f.status === "SLEEP",
+    // Russare: si usa DORMENDO (e infatti non ci si arriva da svegli)
+    SNORE: a => a.status === "SLEEP",
+  };
+
   /* Potenza calcolata. Le formule sono quelle dei giochi. */
   const POTENZA_VARIABILE = {
     // per PESO del bersaglio (kg)
@@ -6111,6 +6199,14 @@
     HARD_PRESS:  (a, d) => Math.max(1, Math.floor(100 * d.hp / d.maxHp)),
     // per quante volte il bersaglio si è potenziato
     PUNISHMENT: (a, d) => Math.min(200, 60 + 20 * Object.values(d.stages).filter(v => v > 0).reduce((s, v) => s + v, 0)),
+    /* 🔴 Tre potenze che dipendono dal MOMENTO, non da un numero: nei dati
+       hanno la potenza base e nessuno le raddoppiava mai. */
+    // Contropiede: doppio se si agisce DOPO il bersaglio (l'ha gia' usata)
+    PAYBACK: (a, d) => (d.volatile && d.volatile.lastMove ? 100 : 50),
+    // Acrobazia: doppia se non si tiene niente
+    ACROBATICS: a => (Object.keys(a.held || {}).length || Object.keys(a.berries || {}).length) ? 55 : 110,
+    // Pestone: doppio se la mossa precedente e' fallita
+    STOMPING_TANTRUM: a => (a.volatile && a.volatile.fallita ? 150 : 75),
     // per PP rimasti (l'ultimo colpo è devastante)
     TRUMP_CARD: (a, _d, m) => { const pp = (a.moves.find(x => x.id === m.id) || {}).pp || 0;
       return pp >= 4 ? 40 : pp === 3 ? 50 : pp === 2 ? 60 : pp === 1 ? 80 : 200; },
@@ -6888,6 +6984,17 @@
        funzione gira su ogni combattente: ci si aggancia al giocatore, che c'e'
        in tutte le strade del turno (singolo, doppio, cambio, lancio di ball). */
     if (f === game.player) scalaLati(messages);
+    /* 🔴 I contatori a TURNI stavano nella coda di `risolviTurno`, che pero'
+       non e' l'unica strada: cambiare Pokemon o lanciare una ball consuma il
+       turno passando altrove, e li' non scendevano affatto. Inibitore poteva
+       cosi' restare acceso per sempre — bastava non attaccare.
+       `endOfTurnResidual` invece la chiamano TUTTE le strade: e' qui che vanno. */
+    if (f.volatile.turniInCampo != null) f.volatile.turniInCampo++;
+    if (f.volatile.disable && --f.volatile.disable.turni <= 0) {
+      const tornata = M[f.volatile.disable.id];
+      f.volatile.disable = null;
+      messages.push(`${f.name} può di nuovo usare ${tornata ? tornata.it : "quella mossa"}.`);
+    }
     if (f.fainted) return;
     // TENTACOLOCK: ogni turno un pezzo di Difesa e Difesa Speciale in meno
     if (f.volatile.octolock > 0) applyStatStage(f, ["DEF", "SPDEF"], -1, messages, true);
@@ -9185,6 +9292,27 @@
   const fastest = () => bestBy("spd");
   const strongest = () => aliveParty().reduce((a, b) => (b.level > a.level ? b : a), aliveParty()[0]);
 
+  /* 🔴 UN POKEMON CHE ARRIVA DA UN INCONTRO.
+     Sette incontri (il Venditore, l'Allevatrice, la Zona Safari, Avarizia,
+     Oricorio, Greedent...) ti regalavano o vendevano un Pokemon facendo due
+     cose sbagliate:
+       · a squadra piena finiva DRITTO NEL BOX, senza nemmeno fartelo vedere;
+       · nel dex ci finiva a mano (`meta.unlocked[k] = 1`) o per niente, quindi
+         niente messaggio «sbloccato come starter», niente caramella, niente
+         abilita'/natura/sesso registrati, e soprattutto niente CAPOSTIPITE:
+         prendere un evoluto non sbloccava lo starter da cui viene.
+     Adesso passano tutti di qui, che fa esattamente quello che fa una
+     cattura: `registerCaught` per il dex e `accogliPokemon` per il posto.
+     I messaggi tornano indietro a chi chiama, che li accoda al suo. */
+  function arrivaDaIncontro(mon, testo) {
+    const msgs = [];
+    registerCaught(mon.speciesId, mon.shiny, mon.ivs, msgs, mon.variant,
+                   mon.abilIndex, mon.nature, mon.shinyVar, mon.gender, false);
+    accogliPokemon(mon, msgs, "");
+    saveMeta();
+    return [testo].concat(msgs.map(m => (typeof m === "string" ? m : m.text))).join("\n");
+  }
+
   // Un Pokemon avversario per l'incontro: livello dell'ondata, con moltiplicatore
   function encFoe(speciesId, mult, opts) {
     const lvl = Math.max(START_LEVEL, Math.round(enemyLevelFor(game.wave) * (mult || 1)));
@@ -9562,12 +9690,10 @@
                 while (p.berries[k] > 0 && tolte < 4) { p.berries[k]--; tolte++; }
                 if (p.berries[k] <= 0) delete p.berries[k];
               }
-              if (game.party.length < PARTY_MAX) { game.party.push(e._mon); return `Offri ${tolte} bacche: ${e._mon.name} decide di seguirti!`; }
-              game.box.push(e._mon); return `Offri ${tolte} bacche: ${e._mon.name} ti segue (va nel box, squadra piena).`; } },
+              return arrivaDaIncontro(e._mon, `Offri ${tolte} bacche: ${e._mon.name} decide di seguirti!`); } },
           { label: "Fattelo amico", sub: `${v.name} prova a comunicare`, run() {
               if (v.stats.spatk >= e._mon.stats.spatk) {
-                if (game.party.length < PARTY_MAX) { game.party.push(e._mon); return `${v.name} lo tranquillizza: ${e._mon.name} si unisce a te!`; }
-                game.box.push(e._mon); return `${v.name} lo tranquillizza: ${e._mon.name} va nel box (squadra piena).`;
+                return arrivaDaIncontro(e._mon, `${v.name} lo tranquillizza: ${e._mon.name} si fida di te!`);
               }
               return `${e._mon.name} non si fida e scappa via.`; } },
         ];
@@ -9596,8 +9722,7 @@
               const n = Math.max(1, Math.floor(e._rubate / 2));
               return `Il Greedent ci pensa su e te ne restituisce ${encBerries(n)}.`; } },
           { label: "Lasciagli le Bacche", sub: "gli piacerai…", run() {
-              if (game.party.length < PARTY_MAX) { game.party.push(e._mon); return "Il Greedent è commosso dalla tua generosità e ti segue!"; }
-              game.box.push(e._mon); return "Il Greedent ti segue (va nel box, squadra piena)."; } },
+              return arrivaDaIncontro(e._mon, "Il Greedent è commosso dalla tua generosità e ti segue!"); } },
         ];
       },
     },
@@ -9679,8 +9804,7 @@
               insegnaTm(tm);
               return `Impari i passi dell'Oricorio: ${M[tm].it}!`; } },
           { label: "Mostragli una Danza", sub: "gli piacerai", run() {
-              if (game.party.length < PARTY_MAX) { game.party.push(e._mon); return "L'Oricorio è entusiasmato dalla tua danza e ti segue!"; }
-              game.box.push(e._mon); return "L'Oricorio ti segue (va nel box, squadra piena)."; } },
+              return arrivaDaIncontro(e._mon, "L'Oricorio è entusiasmato dalla tua danza e ti segue!"); } },
         ];
       },
     },
@@ -9764,9 +9888,7 @@
               game.money -= e._costo;
               game.balls += 10;
               const preso = makeFighter(specieDaIncontro(null), Math.max(START_LEVEL, enemyLevelFor(game.wave)), { shiny: rollShiny() });
-              if (!meta.unlocked[preso.speciesId]) { meta.unlocked[preso.speciesId] = preso.shiny ? 2 : 1; saveMeta(); }
-              if (game.party.length < PARTY_MAX) game.party.push(preso); else game.box.push(preso);
-              return `Giornata proficua: 10 Poké Ball e ${preso.name} catturato nella Zona Safari!`; } },
+              return arrivaDaIncontro(preso, `Giornata proficua: 10 Poké Ball e ${preso.name} catturato nella Zona Safari!`); } },
           { label: "Vai via", run: () => "Il biglietto è troppo caro per oggi." },
         ];
       },
@@ -9814,13 +9936,29 @@
             cond: () => game.money >= e._price,
             run() {
               game.money -= e._price;
+              /* 🔴 «Pokemon RARO a un prezzo d'occasione»: prima era un
+                 esemplare qualunque, e per quel prezzo non aveva senso.
+                 Adesso ha SEMPRE qualcosa che non troveresti in giro — uno dei
+                 tre, pescato a caso: cromatico, abilità nascosta, o una mossa
+                 da uovo già imparata. */
+              const dono = e._karp ? 0 : Math.floor(Math.random() * 3);
+              const nascosta = dono === 1 && S[e._mon].abilities.hidden;
               const mon = makeFighter(e._mon, Math.max(START_LEVEL, enemyLevelFor(game.wave) - 2),
-                                      { shiny: e._karp ? true : rollShiny() });
-              if (!meta.unlocked[e._mon] || (mon.shiny && meta.unlocked[e._mon] < 2)) {
-                meta.unlocked[e._mon] = mon.shiny ? 2 : 1; saveMeta();
+                                      { shiny: e._karp || dono === 0 || rollShiny(),
+                                        abilIndex: nascosta ? 2 : undefined });
+              let bonus = "";
+              if (nascosta) bonus = `Ha l'abilità nascosta ${mon.ability.it}!`;
+              else if (dono === 2) {
+                const em = (EGGM[e._mon] || []).filter(id => M[id] && !mon.moves.some(x => x.id === id));
+                if (em.length) {
+                  const id = rndOf(em);
+                  if (mon.moves.length >= 4) mon.moves[3] = { id, pp: M[id].pp, maxPp: M[id].pp };
+                  else mon.moves.push({ id, pp: M[id].pp, maxPp: M[id].pp });
+                  bonus = `Conosce già la mossa da uovo ${M[id].it}!`;
+                }
               }
-              if (game.party.length < PARTY_MAX) { game.party.push(mon); return `Affare fatto! ${mon.name} si unisce alla squadra!`; }
-              game.box.push(mon); return `Affare fatto! ${mon.name} va nel box (squadra piena).`; } },
+              if (!bonus && mon.shiny) bonus = "Ed è pure cromatico!";
+              return arrivaDaIncontro(mon, `Affare fatto! ${bonus}`); } },
           { label: "Vai via", run: () => "Rifiuti l'offerta." },
         ];
       },
@@ -9915,10 +10053,8 @@
           label: S[k].it, sub: "allevalo e ricevi un uovo",
           run() {
             const mon = makeFighter(k, Math.max(START_LEVEL, enemyLevelFor(game.wave) - 4), { shiny: rollShiny() });
-            if (!meta.unlocked[k]) { meta.unlocked[k] = mon.shiny ? 2 : 1; saveMeta(); }
-            if (game.party.length < PARTY_MAX) game.party.push(mon); else game.box.push(mon);
             encEgg(1);
-            return `Ti prendi cura di ${mon.name}! L'allevatrice ti regala anche un buono uovo.`;
+            return arrivaDaIncontro(mon, `Ti prendi cura di ${mon.name}! L'allevatrice ti regala anche un buono uovo.`);
           },
         })).concat([{ label: "Vai via", run: () => "Non è il momento di allevare cuccioli." }]);
       },
@@ -10091,8 +10227,10 @@
       <div class="meta-actions"><button class="meta-btn primary" data-act="ok">Continua</button></div>`);
     metaEl().querySelector('[data-act="ok"]').onclick = () => {
       hideMeta(); renderScene(); tickEggs(null);
-      // un incontro puo' aver insegnato una MT: prima la sostituzione mossa
-      processLearns(nextWave);
+      /* ⚠️ `chiediPostoInSquadra` mancava del tutto in questa strada: un
+         Pokemon ottenuto da un incontro con la squadra piena finiva nel box
+         senza dire niente. Ora la schermata di scelta compare anche qui. */
+      processLearns(() => chiediPostoInSquadra(nextWave));
     };
   }
 
@@ -10434,8 +10572,13 @@
        poi si disegna identica alla comune sarebbe una bugia. */
     const haLivree = !!cromTerna("front", S[k].dex, null);
     const livreaMax = haLivree ? ((meta.shinyVar && meta.shinyVar[k]) || 0) : 0;
+    const formePool = formeSbloccate(k);
+    const formeTutte = (VARIANTS[k] && !FORM_BY_GENDER.has(k) && k !== "TOXTRICITY")
+      ? VARIANTS[k].slice(0, Math.max(1, collectableForms(k))) : [];
     starterCfg = {
       k, shiny, pkrs,
+      formePool, formeTutte,
+      formKey: formePool.length ? (formePool[0].key || null) : null,
       gender: sessoPool[0],
       sessoPool,
       shinyVar: livreaMax,
@@ -10497,7 +10640,12 @@
     const forma = FORM_BY_GENDER.has(c.k) ? formAt(c.k, c.gender === "FEMALE" ? 1 : 0) : null;
     const cutPrice = costCutPrice(c.k);
     const bs = (forma && forma.baseStats) ? forma.baseStats : sp.baseStats;
-    const tipi = (forma && forma.types) ? forma.types : sp.types;
+    /* ⚠️ I tipi seguono la FORMA scelta, non solo quella legata al sesso:
+       un Tauros di Paldea Acquatica è Lotta/Acqua, e la scheda deve dirlo
+       mentre lo scegli, non dopo averlo schierato. */
+    const formaScelta = c.formKey ? formByKey(c.k, c.formKey) : null;
+    const formaMostrata = forma || formaScelta;
+    const tipi = (formaMostrata && formaMostrata.types) ? formaMostrata.types : sp.types;
     const statBar = (lab, v) => `<div class="stat-row"><span class="stat-lab">${lab}</span><div class="stat-track"><div class="stat-fill" style="width:${Math.min(100, v / STAT_MAX * 100)}%"></div></div><span class="stat-val">${v}</span></div>`;
     /* Tutte e tre le abilità sono in elenco, ma quelle non ancora sbloccate
        sono chiuse col lucchetto: si vede cosa c'è da conquistare. */
@@ -10564,6 +10712,19 @@
               title="${libera ? "" : "trovane uno per sbloccarlo"}">${libera ? "" : "🔒 "}${m ? "♂ maschio" : "♀ femmina"}</button>`;
           }).join("")
           + (c.sessoPool.length < 2 ? `<span class="sd-nota">l'altro si sblocca trovandolo (anche una sua evoluzione)</span>` : "");
+    /* FORMA — solo per le specie che ne hanno più d'una e non legata al sesso.
+       Quelle non ancora incontrate stanno col lucchetto, come sesso e natura:
+       si vede che esistono e che vanno conquistate. */
+    const formaRiga = (c.formeTutte && c.formeTutte.length > 1)
+      ? c.formeTutte.map(f => {
+          const key = f.key || null;
+          const libera = c.formePool.some(x => (x.key || null) === key);
+          return `<button class="chip forma-chip ${(c.formKey || null) === key ? "on" : ""} ${libera ? "" : "chiusa"}"
+            data-forma="${key || ""}" ${libera ? "" : "disabled"}
+            title="${libera ? "" : "trovane uno per sbloccarla"}">${libera ? "" : "🔒 "}${f.it || formNameOf(c.k, key) || "base"}</button>`;
+        }).join("")
+      : "";
+
     /* LIVREA — appare solo se di quella specie hai un cromatico. La fortuna NON
        dipende da quale scegli: viene dal dex (§33), quindi giocarlo normale non
        ti costa niente. Va detto, o sembra un difetto. */
@@ -10592,6 +10753,7 @@
           : `<button class="chip candy-btn" data-cp="1" ${candyOf(c.k) >= passivePrice(c.k) ? "" : "disabled"}>Sblocca passiva · 🍬${passivePrice(c.k)}</button>`}
       </span></div>
       <div class="sd-riga"><span class="sd-lab">Sesso</span><span class="sd-chips">${sessoRiga}</span></div>
+      ${formaRiga ? `<div class="sd-riga"><span class="sd-lab">Forma</span><span class="sd-chips">${formaRiga}</span></div>` : ""}
       ${livreaRiga ? `<div class="sd-riga"><span class="sd-lab">Livrea</span><span class="sd-chips">${livreaRiga}</span></div>` : ""}
       <div class="sd-riga"><span class="sd-lab">Abilità</span><span class="sd-chips">${abils}</span></div>
       ${c.info && c.info.tipo === "ab" ? snippetAbilita(c.info.id) : ""}
@@ -10620,7 +10782,7 @@
        e compagnia il sesso È una forma, e per le 98 specie con `genderDiffs` la
        femmina ha il suo file. */
     loadFighterSprite({ dex: sp.dex, speciesId: c.k, shiny: c.shiny, shinyVar: c.shinyVar,
-                        gender: c.gender, formKey: forma ? forma.key : null, variant: null }, "front")
+                        gender: c.gender, formKey: formaMostrata ? formaMostrata.key : null, variant: null }, "front")
       .then(s => {
         const el = document.getElementById("sdSprite"); if (!el || !s) return;
         const k = Math.min(1.7, 104 / s.frame.h, 104 / s.frame.w);
@@ -10647,6 +10809,10 @@
       saveMeta(); renderStarterDetail();
     };
     metaEl().querySelectorAll("[data-sex]").forEach(b => b.onclick = () => { c.gender = b.dataset.sex; renderStarterDetail(); });
+    metaEl().querySelectorAll("[data-forma]").forEach(b => b.onclick = () => {
+      if (b.disabled) return;
+      c.formKey = b.dataset.forma || null; renderStarterDetail();
+    });
     metaEl().querySelectorAll("[data-liv]").forEach(b => b.onclick = () => {
       const v = parseInt(b.dataset.liv, 10);
       c.shiny = v >= 0; c.shinyVar = v >= 0 ? v : 0;
@@ -10669,7 +10835,8 @@
     metaEl().querySelector('[data-act="go"]').onclick = () => {
       // aggiunge alla squadra iniziale (sistema a punti), poi torna alla scelta
       starterTeam.push({ k: c.k, ability: c.ability, nature: c.nature, moves: c.moves.slice(),
-                         shiny: c.shiny, shinyVar: c.shinyVar, gender: c.gender, pkrs: c.pkrs });
+                         shiny: c.shiny, shinyVar: c.shinyVar, gender: c.gender, pkrs: c.pkrs,
+                         formKey: c.formKey || null });
       tornaAllaGrigliaStarter();
     };
   }
@@ -10720,6 +10887,17 @@
     const amt = Math.max(Math.floor(p.maxHp * percent / 100), points);
     p.hp = Math.min(p.maxHp, p.hp + Math.ceil(amt * healMult()));
   }
+  // C'e' qualche statistica ANDATA GIU'? (i bonus non contano)
+  const haCali = p => !!p && Object.values(p.stages || {}).some(v => v < 0);
+  /* Azzera i soli stadi NEGATIVI. Ritorna quanti ne ha tolti, cosi' chi chiama
+     puo' raccontarlo. */
+  function togliCali(p) {
+    if (!p) return 0;
+    let n = 0;
+    for (const k in p.stages) if (p.stages[k] < 0) { p.stages[k] = 0; n++; }
+    return n;
+  }
+
   // Predicati per i bersagli validi
   const canHeal   = p => !p.fainted && p.hp < p.maxHp;
   const isDown    = p => p.fainted;
@@ -11025,6 +11203,16 @@
       apply: p => { const mv = rndOf(mosseDimenticate(p)); insegnaTm(mv, p); } },
 
     /* ===================== ULTRA ====================== */
+    /* Toglie SOLO i cali, i bonus restano. Serve quando esci da una lotta
+       conciato male: gli sbalzi restano addosso finche' non rientri nella
+       ball, e rientrare vuol dire perdere anche quelli buoni.
+       ⚠️ `avail` lo fa comparire fra i premi solo quando c'e' davvero
+       qualcosa da togliere: un premio che non fa niente e' peggio di un
+       premio che non c'e'. All'emporio invece sta sempre sullo scaffale. */
+    { tier: "ULTRA", weight: 5, id: "riequilibrante", label: "Riequilibrante",
+      desc: "azzera i cali di statistica (i bonus restano)", icon: "riequilibrante",
+      target: "run", avail: () => haCali(game.player),
+      apply: () => togliCali(game.player) },
     { tier: "ULTRA", weight: 6, id: "ultraballs", label: "Ultra Ball ×5", desc: "cattura ×2", icon: "ub", ball: true,
       target: "run", apply: () => { game.ultraballs += 5; } },
     { tier: "ULTRA", weight: 9, id: "typeboost", label: "Strumento di tipo", desc: "held: +20% alle mosse di un tipo", icon: "charcoal",
@@ -12047,6 +12235,11 @@
     x_speed: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgBAMAAACBVGfHAAAAIVBMVEUAAAAgICAgampKnJxapKRqzc2UnJys5ubV5ube//////8pPwKVAAAAAXRSTlMAQObYZgAAAKpJREFUeF5joC9gFBRAFRBLS0QRYcxIW5mIoqA1alWaALICl1VLwxACgiJlXqtcwxLh8q7lRrOWl5jDBYRUwqdLugMFkBRUFoaYBjfCBEzDp4uXiJhGCMAEFFUrC8OdgArgKsrVS0SdK+C2iobPBCoIMWSAC1TOLFV1DhFAEpgeahpigiRQXhpsFKKCEBAJDTU2dFFE8pmxsbERUAcCCBsbCwqiBp8gA30BAGrtJrnF5vaHAAAAAElFTkSuQmCC",
     x_accuracy: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgBAMAAACBVGfHAAAAIVBMVEUAAAAgICBzMWKkUpSsYpzNc72clJzutN7m1eb/5vb///+Q1cqMAAAAAXRSTlMAQObYZgAAAKpJREFUeF5joC9gFBRAFRBLS0QRYcxIW5mIoqA1alWaALICl1VLwxACgiJlXqtcwxLh8q7lRrOWl5jDBYRUwqdLugMFkBRUFoaYBjfCBEzDp4uXiJhGCMAEFFUrC8OdgArgKsrVS0SdK+C2iobPBCoIMWSAC1TOLFV1DhFAEpgeahpigiRQXhpsFKKCEBAJDTU2dFFE8pmxsbERUAcCCBsbCwqiBp8gA30BAGrtJrnF5vaHAAAAAElFTkSuQmCC",
     dire_hit: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgBAMAAACBVGfHAAAAIVBMVEUAAAAgICB7OQi0gzHNlDHmvVqklJT/1YPu1b3/5s3///+wuCDOAAAAAXRSTlMAQObYZgAAAKpJREFUeF5joC9gFBRAFRBLS0QRYcxIW5mIoqA1alWaALICl1VLwxACgiJlXqtcwxLh8q7lRrOWl5jDBYRUwqdLugMFkBRUFoaYBjfCBEzDp4uXiJhGCMAEFFUrC8OdgArgKsrVS0SdK+C2iobPBCoIMWSAC1TOLFV1DhFAEpgeahpigiRQXhpsFKKCEBAJDTU2dFFE8pmxsbERUAcCCBsbCwqiBp8gA30BAGrtJrnF5vaHAAAAAElFTkSuQmCC",
+    /* Riequilibrante: e' la Cura totale con la tinta spostata al VERDE.
+       ⚠️ Non al blu, che sarebbe stata la scelta ovvia: nei badge il blu vuol
+       dire "statistica in calo", e un oggetto che i cali li TOGLIE non puo'
+       avere il colore di quello che combatte. */
+    riequilibrante: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAABlElEQVR42u2WoUsDURzHP3MHs81XZLP4LhhcGLyVsWWTWsQ1o8VmsA7D8B+wXbEKgs3ZZGAZWDwwuCB6jwUFy4JBwTDDzbk5J/fuNkS4L1y478Hv+/v93vfLO4gR44+RmFQhKWV38F1rHai2NSnhE++sz+1wCPZFN0gTVtRpvwu7nTt4ekcGrGVFnXZI2H31iYw1eQ9IKbvCW8Fhd7xwT1yuPQb2gFED+noRACWWRoTl9jP6fMFIHGDG5AiUWALwxRsvQ9/00XwoE89Ezl+j7Z95xoLjB4SnRiI5vRg22lDyhQEoWbjeDcpTYBMohsYb2BCXw4RIwmrKf3IplJ3HocbUNpC8FZAdILIWzFk9j+RwqLHD/nQ84Fbr3Oc2+2YEUHYeJXJciVPc5jXFTsVoIKMNqIMSbrX+Reyle6m4pdhaD2UjcxPupaH1hioXAHCoUaQS2sfRYxgR/6sBk3j9mw0YmbDYXIfl2fEp6RmzY7uBL6TAG9BaJ+RWAlpvPzahygU6tmskHuqf8LeLxkQ4RowYn/gA+ISH0AIsmB0AAAAASUVORK5CYII=",
     big_mushroom: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgBAMAAACBVGfHAAAAIVBMVEUAAAAgICDVOSCLe3v/c1ru1Ur25mK0pKT/pIPezc3u3t666kKVAAAAAXRSTlMAQObYZgAAAIxJREFUeF5jGGggKCiAEGAUFBRUynBECAi5uoR0ZCgiFHi0uIZ4dCAEhDpaXF08mhBmiHS4uLh0IAu4uIa4RgB1IARCXUKbkAREQ1zARiAEXFxdOhQFULR0NAkXIpyh5pLRoWheKQAX0OjoUBIun4UQyOhoUhSvXIUQAPIFGGctRJjhBLIB4XsEezABAGkLHpxJELo6AAAAAElFTkSuQmCC",
   };
   const itemIcon = n => ITEM_DATAURI[n] || `assets/ui/items/${n}.png`;
@@ -12271,7 +12464,8 @@
     [{ id: "superpotion", mult: 0.45 }, { id: "fullheal", mult: 1 }],
     [{ id: "elisir", mult: 1 }, { id: "maxether", mult: 1 }],
     // ⚠️ il Fungo della memoria mancava: nell'originale sta proprio qui, a x4
-    [{ id: "hyperpotion", mult: 0.8 }, { id: "maxrevive", mult: 2.75 }, { id: "mushroom", mult: 4 }],
+    [{ id: "hyperpotion", mult: 0.8 }, { id: "maxrevive", mult: 2.75 }, { id: "mushroom", mult: 4 },
+     { id: "riequilibrante", mult: 1.4 }],
     [{ id: "maxpotion", mult: 1.5 }, { id: "maxelisir", mult: 2.5 }],
     [{ id: "fullrestore", mult: 2.25 }],
     [{ id: "sacredash", mult: 10 }],
@@ -12399,7 +12593,8 @@
   const STATO_ERA = { BURN: "scottato", PARALYSIS: "paralizzato", SLEEP: "addormentato",
                       POISON: "avvelenato", FREEZE: "congelato" };
   const fotoMon = p => p ? { hp: p.hp, ko: p.fainted, st: p.status,
-                             pp: p.moves.reduce((n, m) => n + m.pp, 0) } : null;
+                             pp: p.moves.reduce((n, m) => n + m.pp, 0),
+                             cali: Object.values(p.stages || {}).filter(v => v < 0).length } : null;
   function raccontaEffetto(p, prima) {
     if (!p || !prima) return null;
     const righe = [];
@@ -12408,6 +12603,8 @@
     if (prima.st && !p.status) righe.push(`${p.name} non è più ${STATO_ERA[prima.st] || "malato"}!`);
     const pp = p.moves.reduce((n, m) => n + m.pp, 0) - prima.pp;
     if (pp > 0) righe.push(`${p.name} recupera ${pp} PP!`);
+    const caliOra = Object.values(p.stages || {}).filter(v => v < 0).length;
+    if (prima.cali > caliOra) righe.push(`${p.name} si scrolla di dosso i cali di statistica!`);
     return righe.length ? righe.join("\n") : null;
   }
   /* Mette in coda il racconto della cura. `pre` e' l'istantanea del campo PRIMA

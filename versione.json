@@ -1,11 +1,11 @@
 {
- "rev": 141,
+ "rev": 143,
  "assetsRev": 4,
- "generato": "2026-09-03 07:38:45",
+ "generato": "2026-09-03 07:56:04",
  "files": {
   "pokerogue-app.html": "9e6074593b438aff",
   "pokerogue.css": "54ed4f4c4166c3ae",
-  "pokerogue.js": "2790d6ddf45cf4ae",
+  "pokerogue.js": "a4e86acea3b42c46",
   "data/abilities.json": "06df74b60da95c91",
   "data/anims-index.json": "09bada2adeafabab",
   "data/biomes.json": "5a1cf737d23ec9ef",
@@ -16,7 +16,7 @@
   "data/forms.json": "b6f6f0492ed4b5ac",
   "data/icons.json": "4b31ddc75e9acd4a",
   "data/learnsets.json": "06d497643a6830e0",
-  "data/moves.json": "c65341548f8a240a",
+  "data/moves.json": "aec2e7aec2e63892",
   "data/species.json": "70c4fe2a7aec1969",
   "data/tms.json": "3e4ffbe729728a24",
   "data/typechart.json": "dd34de34b3980c17",
