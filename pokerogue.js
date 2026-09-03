@@ -840,6 +840,24 @@
     return 1;
   }
 
+  /* 🔴 Le forme SCEGLIIBILI nella schermata starter.
+     Si registravano («Nuova forma: Acqua!») e poi non servivano a niente: la
+     squadra si componeva sempre con la forma di partenza. Un Tauros di Paldea
+     Acqua catturato restava una riga nel contatore.
+     Come per abilità e nature, si guarda cosa hai già incontrato; la prima
+     forma dell'elenco è sempre disponibile, o le specie a piu' forme non ne
+     avrebbero nessuna finche' non ne trovi una. */
+  function formeSbloccate(k) {
+    const forms = VARIANTS[k];
+    if (!forms || forms.length < 2) return [];
+    // le forme che dipendono da sesso/natura non si scelgono: le decide altro
+    if (FORM_BY_GENDER.has(k) || k === "TOXTRICITY") return [];
+    const viste = (meta.formsSeen && meta.formsSeen[S[k].dex]) || {};
+    const quante = Math.max(1, collectableForms(k));
+    const pool = forms.slice(0, quante);
+    return pool.filter((f, i) => i === 0 || !f.key || viste[f.key]);
+  }
+
   // Il "collezionismo" delle forme resta: meta.formsSeen è indicizzato per dex
   // (così i salvataggi già esistenti continuano a valere).
   function registerForm(dex, formKey) {
@@ -2357,6 +2375,8 @@
       // calcolo delle statistiche, non basta assegnarla dopo
       const mon = makeFighter(e.k, START_LEVEL, { shiny: e.shiny, nature: e.nature,
                                                  shinyVar: e.shinyVar || 0, gender: e.gender,
+                                                 // la forma scelta nella scheda: `undefined` = decidila tu
+                                                 variant: e.formKey || undefined,
                                                  ivs: bestIVsFor(e.k) || rollIVs(), ignoreArena: true });
       mon.luck = dexLuck(e.k);       // starter: fortuna dal DEX (§33)
       if (e.ability && ABIL[e.ability]) {
@@ -10569,8 +10589,13 @@
        poi si disegna identica alla comune sarebbe una bugia. */
     const haLivree = !!cromTerna("front", S[k].dex, null);
     const livreaMax = haLivree ? ((meta.shinyVar && meta.shinyVar[k]) || 0) : 0;
+    const formePool = formeSbloccate(k);
+    const formeTutte = (VARIANTS[k] && !FORM_BY_GENDER.has(k) && k !== "TOXTRICITY")
+      ? VARIANTS[k].slice(0, Math.max(1, collectableForms(k))) : [];
     starterCfg = {
       k, shiny, pkrs,
+      formePool, formeTutte,
+      formKey: formePool.length ? (formePool[0].key || null) : null,
       gender: sessoPool[0],
       sessoPool,
       shinyVar: livreaMax,
@@ -10632,7 +10657,12 @@
     const forma = FORM_BY_GENDER.has(c.k) ? formAt(c.k, c.gender === "FEMALE" ? 1 : 0) : null;
     const cutPrice = costCutPrice(c.k);
     const bs = (forma && forma.baseStats) ? forma.baseStats : sp.baseStats;
-    const tipi = (forma && forma.types) ? forma.types : sp.types;
+    /* ⚠️ I tipi seguono la FORMA scelta, non solo quella legata al sesso:
+       un Tauros di Paldea Acquatica è Lotta/Acqua, e la scheda deve dirlo
+       mentre lo scegli, non dopo averlo schierato. */
+    const formaScelta = c.formKey ? formByKey(c.k, c.formKey) : null;
+    const formaMostrata = forma || formaScelta;
+    const tipi = (formaMostrata && formaMostrata.types) ? formaMostrata.types : sp.types;
     const statBar = (lab, v) => `<div class="stat-row"><span class="stat-lab">${lab}</span><div class="stat-track"><div class="stat-fill" style="width:${Math.min(100, v / STAT_MAX * 100)}%"></div></div><span class="stat-val">${v}</span></div>`;
     /* Tutte e tre le abilità sono in elenco, ma quelle non ancora sbloccate
        sono chiuse col lucchetto: si vede cosa c'è da conquistare. */
@@ -10699,6 +10729,19 @@
               title="${libera ? "" : "trovane uno per sbloccarlo"}">${libera ? "" : "🔒 "}${m ? "♂ maschio" : "♀ femmina"}</button>`;
           }).join("")
           + (c.sessoPool.length < 2 ? `<span class="sd-nota">l'altro si sblocca trovandolo (anche una sua evoluzione)</span>` : "");
+    /* FORMA — solo per le specie che ne hanno più d'una e non legata al sesso.
+       Quelle non ancora incontrate stanno col lucchetto, come sesso e natura:
+       si vede che esistono e che vanno conquistate. */
+    const formaRiga = (c.formeTutte && c.formeTutte.length > 1)
+      ? c.formeTutte.map(f => {
+          const key = f.key || null;
+          const libera = c.formePool.some(x => (x.key || null) === key);
+          return `<button class="chip forma-chip ${(c.formKey || null) === key ? "on" : ""} ${libera ? "" : "chiusa"}"
+            data-forma="${key || ""}" ${libera ? "" : "disabled"}
+            title="${libera ? "" : "trovane uno per sbloccarla"}">${libera ? "" : "🔒 "}${f.it || formNameOf(c.k, key) || "base"}</button>`;
+        }).join("")
+      : "";
+
     /* LIVREA — appare solo se di quella specie hai un cromatico. La fortuna NON
        dipende da quale scegli: viene dal dex (§33), quindi giocarlo normale non
        ti costa niente. Va detto, o sembra un difetto. */
@@ -10727,6 +10770,7 @@
           : `<button class="chip candy-btn" data-cp="1" ${candyOf(c.k) >= passivePrice(c.k) ? "" : "disabled"}>Sblocca passiva · 🍬${passivePrice(c.k)}</button>`}
       </span></div>
       <div class="sd-riga"><span class="sd-lab">Sesso</span><span class="sd-chips">${sessoRiga}</span></div>
+      ${formaRiga ? `<div class="sd-riga"><span class="sd-lab">Forma</span><span class="sd-chips">${formaRiga}</span></div>` : ""}
       ${livreaRiga ? `<div class="sd-riga"><span class="sd-lab">Livrea</span><span class="sd-chips">${livreaRiga}</span></div>` : ""}
       <div class="sd-riga"><span class="sd-lab">Abilità</span><span class="sd-chips">${abils}</span></div>
       ${c.info && c.info.tipo === "ab" ? snippetAbilita(c.info.id) : ""}
@@ -10755,7 +10799,7 @@
        e compagnia il sesso È una forma, e per le 98 specie con `genderDiffs` la
        femmina ha il suo file. */
     loadFighterSprite({ dex: sp.dex, speciesId: c.k, shiny: c.shiny, shinyVar: c.shinyVar,
-                        gender: c.gender, formKey: forma ? forma.key : null, variant: null }, "front")
+                        gender: c.gender, formKey: formaMostrata ? formaMostrata.key : null, variant: null }, "front")
       .then(s => {
         const el = document.getElementById("sdSprite"); if (!el || !s) return;
         const k = Math.min(1.7, 104 / s.frame.h, 104 / s.frame.w);
@@ -10782,6 +10826,10 @@
       saveMeta(); renderStarterDetail();
     };
     metaEl().querySelectorAll("[data-sex]").forEach(b => b.onclick = () => { c.gender = b.dataset.sex; renderStarterDetail(); });
+    metaEl().querySelectorAll("[data-forma]").forEach(b => b.onclick = () => {
+      if (b.disabled) return;
+      c.formKey = b.dataset.forma || null; renderStarterDetail();
+    });
     metaEl().querySelectorAll("[data-liv]").forEach(b => b.onclick = () => {
       const v = parseInt(b.dataset.liv, 10);
       c.shiny = v >= 0; c.shinyVar = v >= 0 ? v : 0;
@@ -10804,7 +10852,8 @@
     metaEl().querySelector('[data-act="go"]').onclick = () => {
       // aggiunge alla squadra iniziale (sistema a punti), poi torna alla scelta
       starterTeam.push({ k: c.k, ability: c.ability, nature: c.nature, moves: c.moves.slice(),
-                         shiny: c.shiny, shinyVar: c.shinyVar, gender: c.gender, pkrs: c.pkrs });
+                         shiny: c.shiny, shinyVar: c.shinyVar, gender: c.gender, pkrs: c.pkrs,
+                         formKey: c.formKey || null });
       tornaAllaGrigliaStarter();
     };
   }

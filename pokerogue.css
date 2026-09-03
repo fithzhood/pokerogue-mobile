@@ -1140,6 +1140,8 @@ html, body {
 .sesso-chip.m.on { background: #2f5fa8; border-color: #4d86dd; }
 .sesso-chip.f.on { background: #a83f6e; border-color: #e06a9c; }
 .liv-chip .crom-stella { vertical-align: -3px; margin-right: 2px; }
+/* Forma scelta nella scheda starter: stessa pulsantiera di sesso e livrea. */
+.forma-chip.on { background: #2f7f6a; border-color: #4fd0a8; }
 .sd-abrow { font-size: clamp(11px, 3vw, 14px); opacity: .9; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .chip {
   border: none; border-radius: 999px; background: rgba(255,255,255,.12); color: var(--ink);
