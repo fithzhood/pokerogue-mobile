@@ -1470,6 +1470,13 @@ button.pd-card:not(:disabled):active { background: rgba(255,255,255,.14); }
 /* Natura nel dettaglio squadra: si distingue dalle abilità */
 .pd-ab.pd-nat { background: rgba(200, 150, 60, .22); color: #e8c078; }
 
+/* La scheda di chi e' appena arrivato, in cima alla scelta del posto. */
+.pd-card.arrivato {
+  border: 2px solid #6ee79b; background: rgba(110, 231, 155, .12);
+  cursor: default; margin-bottom: .4vh;
+}
+.pd-card.arrivato .iv-badges { justify-content: flex-start; margin-top: 4px; }
+
 /* Canvas delle animazioni delle mosse (frame veri di PokeRogue, griglia 96x96).
    🔴 SONO DUE, e non e' un doppione. Ogni grafica del dato originale ha una
    `priority`: 1 e 3 vogliono stare DAVANTI ai Pokemon, 0 e 2 DIETRO. Con un

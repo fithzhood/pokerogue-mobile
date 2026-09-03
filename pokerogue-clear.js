@@ -4033,6 +4033,23 @@
     for (const k in game.tempBoost) if (--game.tempBoost[k] <= 0) { delete game.tempBoost[k]; if (game.tempBoostN) delete game.tempBoostN[k]; }
     // contatore del tesoro di Gimmighoul: cresce a ogni ondata vinta
     for (const p of game.party) if (p.speciesId === "GIMMIGHOUL") p.treasure = (p.treasure || 0) + 1;
+    /* 🔴 RACCOLTA (Pickup). Anche questa aveva `attrs: []` e non faceva
+       nulla, pur essendo su 35 specie. Nell'originale
+       (`PostBattleLootAbAttr`) a lotta VINTA raccoglie UNO degli oggetti che
+       gli avversari caduti stavano tenendo. Da noi il bottino è quello che
+       teneva l'avversario appena battuto.
+       ⚠️ Solo un oggetto e solo un raccoglitore per ondata: con sei Pokemon
+       in squadra, altrimenti, si svuoterebbe l'inventario del nemico. */
+    const bottino = game.enemy && game.enemy.held ? Object.keys(game.enemy.held) : [];
+    if (bottino.length) {
+      const chi = game.party.find(p => !p.fainted && p.ability && p.ability.id === "PICKUP");
+      if (chi) {
+        const preso = bottino[Math.floor(Math.random() * bottino.length)];
+        addHeld(chi, preso);
+        if (--game.enemy.held[preso] <= 0) delete game.enemy.held[preso];
+        stessoMomento(messages, `🧹 ${chi.ability.it}: ${chi.name} raccoglie ${nomeHeld(preso)}!`);
+      }
+    }
     // fiocco: aggiorna il record di ondate raggiunte con questo starter
     if (game.starterSpecies) {
       const cur = meta.starterBest[game.starterSpecies] || 0;
@@ -4408,7 +4425,7 @@
         const mon = makeFighter(m.speciesId, m.level, { shiny: m.shiny, shinyVar: m.shinyVar, ivs: m.ivs, variant: m.variant, abilIndex: m.abilIndex, gender: m.gender });
         ereditaPs(mon, m);
         accogliPokemon(mon, msgs, "🕶 Rubato!");
-        registerCaught(m.speciesId, m.shiny, m.ivs, msgs, m.variant, m.abilIndex, m.nature, m.shinyVar, m.gender);
+        registerCaught(m.speciesId, m.shiny, m.ivs, msgs, m.variant, m.abilIndex, m.nature, m.shinyVar, m.gender, m.boss);
       } else msgs.push(`${m.name} è sfuggito alla Clepto Ball!`);
       renderScene();
       queueMessages(msgs, () => chiediPostoInSquadra(() => openShop()));
@@ -4486,10 +4503,34 @@
     };
   }
 
+  /* 🔴 QUANTE CARAMELLE. Prima era sempre +1 a cattura e +3 a schiusa, a
+     prescindere da tutto. Nell'originale (`setPokemonSpeciesCaught`) la
+     formula è `shinyBonus × eggOrBossBonus`:
+       · normale                 → 1
+       · CROMATICO                → 5, e la livrea raddoppia: 5 / 10 / 20
+       · da UOVO o da BOSS        → ×2
+     Quindi un cromatico epico da uovo vale 40 caramelle, non 3. È proprio
+     quello che rende sensato dare la caccia ai cromatici invece di trattarli
+     come una figurina.
+     ⚠️ La schiusa normale scende da 3 a 2: leggermente meno di prima, ma
+     tutto il resto sale moltissimo. */
+  function caramelleDa(shiny, shinyVar, daUovoOBoss) {
+    const bonusCrom = shiny ? 5 * Math.pow(2, shinyVar || 0) : 1;
+    return bonusCrom * (daUovoOBoss ? 2 : 1);
+  }
+  function daiCaramelle(speciesId, quante, messages, coda) {
+    meta.candy = meta.candy || {};
+    meta.candy[speciesId] = (meta.candy[speciesId] || 0) + quante;
+    const riga = `🍬 +${quante} Caramell${quante === 1 ? "a" : "e"} ${S[speciesId].it} (totale ${meta.candy[speciesId]})`;
+    if (coda) coda.push(riga);
+    else if (messages) stessoMomento(messages, riga);
+    return quante;
+  }
+
   // Registra una specie catturata nel meta: starter sbloccato, caramella, IV migliori.
   /* ⚠️ `variant` qui è la FORMA (Unown-B, Rotom Lavaggio…), `shinyVar` è la
      LIVREA cromatica. Due cose diverse con nomi vicini: attenzione. */
-  function registerCaught(speciesId, shiny, ivs, messages, variant, abilIndex, nature, shinyVar, gender) {
+  function registerCaught(speciesId, shiny, ivs, messages, variant, abilIndex, nature, shinyVar, gender, boss) {
     if (variant && registerForm(S[speciesId].dex, variant) && messages) {
       const tot = collectableForms(speciesId);
       const got = Object.keys(meta.formsSeen[S[speciesId].dex]).length;
@@ -4535,9 +4576,7 @@
         if (sv > 0) messages.push(`💠 Livrea ${CROM_IT[sv]} di ${S[root].it}: come starter ora vale ${sv + 1} punti di fortuna`);
       }
     }
-    meta.candy = meta.candy || {};
-    meta.candy[speciesId] = (meta.candy[speciesId] || 0) + 1;
-    stessoMomento(messages, `🍬 +1 Caramella ${S[speciesId].it} (totale ${meta.candy[speciesId]})`);
+    daiCaramelle(speciesId, caramelleDa(shiny, shinyVar, boss), messages);
     if (recordIVs(speciesId, ivs)) stessoMomento(messages, `📈 Nuovi IV migliori per ${S[speciesId].it}!`);
     /* L'abilità che AVEVA questo esemplare si sblocca per la specie: da qui in
        poi la puoi scegliere quando lo schieri come starter. La nascosta capita
@@ -4604,7 +4643,7 @@
       ereditaPs(mon, enemy);        // i PS che aveva quando la ball si e' chiusa
       accogliPokemon(mon, messages, "Preso!");
       // meta-progressione: starter sbloccato + caramella + IV migliori
-      registerCaught(enemy.speciesId, enemy.shiny, enemy.ivs, messages, enemy.variant, enemy.abilIndex, enemy.nature, enemy.shinyVar, enemy.gender);
+      registerCaught(enemy.speciesId, enemy.shiny, enemy.ivs, messages, enemy.variant, enemy.abilIndex, enemy.nature, enemy.shinyVar, enemy.gender, enemy.boss);
     } else {
       messages.push(`Oh no! ${enemy.name} si è liberato!`);
     }
@@ -6544,7 +6583,22 @@
         case "statStage": {
           const suDiSe = statSuDiSe(move, a);
           const tgt = suDiSe ? actor : foe;
-          if (isStatus || suDiSe || (ch > 0 && Math.random() * 100 < ch)) applyStatStage(tgt, a.stats, a.stages, messages, suDiSe);
+          /* 🔴 La percentuale vale ANCHE per gli effetti su di sé.
+             Prima `suDiSe` scavalcava il tiro di dado e scattavano SEMPRE:
+             Ventargenteo alzava tutte e cinque le statistiche a ogni colpo
+             invece che una volta su dieci. Toccava 9 mosse (Alacciaio,
+             Ferrartigli, Forzantica 10%, Meteorpugno 20%, Ventargenteo 10%,
+             Raggioscossa 70%, Funestovento 10%, Voldifuoco 50%,
+             Diamantempesta 50%): tutte troppo forti, alcune moltissimo.
+             ⚠️ Il bypass serviva per un motivo vero, ma un altro: i cali
+             GARANTITI che una mossa si autoinfligge (Vampata −2 A.Sp, Zuffa
+             −1 Dif/D.Sp, Dragobolide...). Quelli nei dati hanno
+             `effectChance: -1`, cioe' nessuna percentuale dichiarata — ed è
+             esattamente li' che il bypass deve restare. */
+          const passa = isStatus ? true
+            : ch > 0 ? (Math.random() * 100 < ch)
+            : suDiSe;
+          if (passa) applyStatStage(tgt, a.stats, a.stages, messages, suDiSe);
           break;
         }
         case "protect":   applyProtect(actor, messages, a.endure); break;
@@ -6837,6 +6891,23 @@
     if (f.fainted) return;
     // TENTACOLOCK: ogni turno un pezzo di Difesa e Difesa Speciale in meno
     if (f.volatile.octolock > 0) applyStatStage(f, ["DEF", "SPDEF"], -1, messages, true);
+    /* 🔴 COGLIBACCHE (Harvest). Nei dati ha `attrs: []` e non faceva
+       assolutamente niente, come le mosse della §47. A fine turno rimette la
+       bacca appena consumata: metà delle volte, ma SEMPRE col sole — la regola
+       dell'originale (`PostTurnRestoreBerryAbAttr`, rate 1 col sole, 0.5 con
+       tutto il resto).
+       Si appoggia a `volatile.bacciaFinita`, la stessa memoria che serve a
+       Riciclo: era gia' li', mancava solo chi la leggesse. */
+    if (f.ability && f.ability.id === "HARVEST" && f.volatile.bacciaFinita) {
+      const k = f.volatile.bacciaFinita;
+      const certa = weatherKind() === "SUN";
+      if (BERRY_DATA[k] && (certa || Math.random() < 0.5)) {
+        f.volatile.bacciaFinita = null;
+        f.berries = f.berries || {};
+        f.berries[k] = (f.berries[k] || 0) + 1;
+        messages.push(`${f.ability.it} di ${f.name} fa ricrescere la ${BERRY_DATA[k].it}!`);
+      }
+    }
     // held: Avanzi — rigenera 1/16 dei PS max a fine turno (impilabile)
     if (f.held && f.held.leftovers && f.hp < f.maxHp) {
       f.hp = Math.min(f.maxHp, f.hp + Math.max(1, Math.floor(f.maxHp * f.held.leftovers / 16)));
@@ -7153,8 +7224,13 @@
   // C'e' qualcosa che varrebbe la pena guardare, fra chi ho davanti?
   const ivInteressanti = () => enemiesOnField().some(f => f && f.ivs && ivNotevoli(f).length);
 
-  function badgeIV(f) {
-    if (!scannerOn() || !f || !f.ivs || !isEnemySide(f)) return "";
+  /* `forza`: mostra i chip anche a lente SPENTA. Lo usa la schermata di
+     cattura, dove l'informazione serve per decidere e non c'e' spazio per
+     andarsela a cercare. Il possesso del Rilevatore resta obbligatorio: e' un
+     oggetto che si compra, non un regalo. */
+  function badgeIV(f, forza) {
+    const acceso = forza ? !!(game.charms && game.charms.ivScanner) : scannerOn();
+    if (!acceso || !f || !f.ivs || !isEnemySide(f)) return "";
     const notevoli = ivNotevoli(f).slice(0, 3);
     const chip = notevoli.length
       ? notevoli.map(x => `<span class="iv-chip ${x.v === IV_MAX ? "perfetto" : "meglio"}"
@@ -7926,8 +8002,40 @@
        lasciavi stare, senza poter guardare niente.
        Gli IV stanno QUI dentro invece che dietro un pulsante: la scena è
        coperta dall'overlay, quindi la riga sul riquadro PS non si vedrebbe. */
-    const ivRiga = scannerOn() && game.enemy.ivs
-      ? `<div class="cap-iv">${badgeIV(game.enemy) || ""}</div>` : "";
+    /* 🔴 Per decidere se spendere l'ULTIMA ball non basta sapere la
+       percentuale: serve sapere se è roba che ti manca. Tre righe, tutte e tre
+       cose che il gioco già sa e non diceva:
+         · se la specie è mai stata catturata (e cosa sbloccherebbe);
+         · che abilità ha questo esemplare;
+         · se quell'abilità ce l'hai già fra quelle scegliibili nello starter.
+       L'ultima è la più utile delle tre: un doppione non vale una ball, una
+       NASCOSTA (1 su 256) vale quasi sempre la pena. */
+    const e = game.enemy;
+    const radice = rootOf(e.speciesId);
+    const maiPreso = !meta.unlocked[e.speciesId];
+    const radiceNuova = !giaStarter(radice);
+    const cromNuovo = e.shiny && (meta.unlocked[radice] || 0) < 2;
+    const rigaDex = maiPreso
+      ? `<div class="cap-riga nuovo">📖 Mai catturato${radiceNuova
+           ? ` · sblocca <b>${S[radice].it}</b> come starter` : ""}</div>`
+      : `<div class="cap-riga">📖 Già nel dex${cromNuovo ? "" : ""}</div>`;
+    const rigaCrom = cromNuovo
+      ? `<div class="cap-riga nuovo">✨ Prima livrea cromatica di ${S[radice].it}</div>` : "";
+    /* L'abilità si confronta con quelle SCEGLIIBILI (`abilitaSbloccate`), non
+       con la maschera grezza: e' quello che vedrai davvero nella schermata
+       starter, ed e' la domanda a cui si vuole rispondere. */
+    const ab = e.ability;
+    const abGiaMia = ab && abilitaSbloccate(radice).includes(ab.id);
+    const nascosta = e.abilIndex === 2;
+    const rigaAb = ab
+      ? `<div class="cap-riga ${abGiaMia ? "" : "nuovo"}">🧬 ${ab.it}${
+          nascosta ? ' <span class="cap-hidden">NASCOSTA</span>' : ""} — ${
+          abGiaMia ? "già disponibile nello starter" : "<b>nuova per lo starter</b>"}</div>`
+      : "";
+    // Qui lo scanner è SEMPRE acceso: la lente spenta non nasconde nulla.
+    const chipIv = e.ivs ? badgeIV(e, true) : "";
+    const ivRiga = `<div class="cap-info">${rigaDex}${rigaCrom}${rigaAb}${
+      chipIv ? `<div class="cap-iv">${chipIv}</div>` : ""}</div>`;
     showMetaScreen(`
       <div class="meta-title" style="font-size:clamp(19px,5.6vw,30px)">Ultima ball!</div>
       <div class="meta-sub">${game.enemy.name} è a terra: hai un solo tiro per prenderlo</div>
@@ -8033,7 +8141,7 @@
       ereditaPs(mon, enemy);        // i PS che aveva quando la ball si e' chiusa
       const stolen = !!enemy.trainer;
       accogliPokemon(mon, log, stolen ? "🕶 Rubato!" : "Preso!");
-      registerCaught(enemy.speciesId, enemy.shiny, enemy.ivs, log, enemy.variant, enemy.abilIndex, enemy.nature, enemy.shinyVar, enemy.gender);
+      registerCaught(enemy.speciesId, enemy.shiny, enemy.ivs, log, enemy.variant, enemy.abilIndex, enemy.nature, enemy.shinyVar, enemy.gender, enemy.boss);
       enemy.fainted = true;                        // esce dal campo
       game.capturedThisWave = true;                // niente seconda offerta a fine lotta
       if (stolen) {
@@ -8753,24 +8861,58 @@
   /* `dove` = dove si torna con Indietro. Serve perche' ora il gacha si apre
      anche DA DENTRO una run (dal menu), e da li' bisogna rientrare in lotta,
      non finire sulla Home abbandonando la partita. */
+  /* LE MACCHINE DEL GACHA, una per tipo, appiattite dai file dell'originale
+     (`gacha_eggs` + `gacha_<tipo>` + `gacha_glass`, ritagliate a 106×131).
+     ⚠️ Stanno qui come data URI e non in `assets/`: gli asset NON viaggiano
+     con l'aggiornamento a caldo, e un file nuovo si vedrebbe solo rifacendo
+     l'APK. Sono 5 KB l'una, un prezzo onesto per non dover ricompilare. */
+  const GACHA_IMG = {
+    MOVE: "data:image/png;base64,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",
+    SHINY: "data:image/png;base64,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",
+    LEGENDARY: "data:image/png;base64,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"
+  };
+
+  /* Quale macchina sta sul palco. Si ricorda l'ultima usata: dopo un tiro si
+     torna a vedere QUELLA, non sempre la prima. */
+  let gachaScelto = "MOVE";
+
   function showGacha(result, dove) {
     game.phase = "GACHA";
     const canPull = meta.vouchers > 0;
     const evid = specieInEvidenza();
+    if (result && result.tipo) gachaScelto = result.tipo;
+    /* 🔴 Prima l'uovo appena preso RESTAVA sul palco fino al tiro dopo, e
+       della macchina non c'era traccia: sembrava una schermata di inventario,
+       non un gacha. Adesso la macchina c'è sempre, l'uovo esce da lei e con
+       «Continua» sparisce, lasciando la macchina pronta per il prossimo. */
+    const tipoPalco = result ? result.tipo : gachaScelto;
+    const macchina = `<div class="gacha-macchina${result ? " scuote" : ""}"
+        style="background-image:url('${GACHA_IMG[tipoPalco] || GACHA_IMG.MOVE}')">
+        ${result ? `<span class="gacha-uovo egg-sprite egg-${result.tier}"></span>` : ""}
+      </div>`;
     const stage = result
-      ? `<span class="egg-sprite big shake egg-${result.tier}"></span>
+      ? `${macchina}
          <div class="gacha-result">È un <span class="tier-${result.tier}">Uovo ${EGG_TIERS[result.tier].it}</span>!</div>
          <div class="meta-sub">dal ${GACHA[result.tipo].emoji} ${GACHA[result.tipo].it} · si schiude superando ${result.waves} ondate</div>`
-      : `<span class="egg-sprite big" style="opacity:.55"></span>
+      : `${macchina}
          <div class="meta-sub">Scegli la macchina: cambia cosa è più probabile che l'uovo ti dia.</div>`;
-    const macchine = Object.keys(GACHA).map(k => {
-      const sub = k === "LEGENDARY" && evid
-        ? `in evidenza oggi: <b>${S[evid].it}</b>` : GACHA[k].sub;
-      return `<button class="meta-btn gacha macchina" data-g="${k}" ${canPull ? "" : "disabled"}>
-          <span class="mac-tit">${GACHA[k].emoji} ${GACHA[k].it}</span>
-          <span class="mac-sub">${sub}</span>
-        </button>`;
-    }).join("");
+    /* Col risultato a schermo non si rimostrano le tre macchine: si offre di
+       rifare lo STESSO tiro, o di togliere l'uovo di mezzo. */
+    const macchine = result
+      ? `<button class="meta-btn gacha macchina" data-g="${result.tipo}" ${canPull ? "" : "disabled"}>
+           <span class="mac-tit">🎰 Ancora ${GACHA[result.tipo].emoji}</span>
+           <span class="mac-sub">${canPull ? "un altro tiro alla stessa macchina" : "non hai più voucher"}</span>
+         </button>
+         <button class="meta-btn ghost" data-a="chiudi">
+           <span class="mac-tit">✓ Continua</span></button>`
+      : Object.keys(GACHA).map(k => {
+        const sub = k === "LEGENDARY" && evid
+          ? `in evidenza oggi: <b>${S[evid].it}</b>` : GACHA[k].sub;
+        return `<button class="meta-btn gacha macchina" data-g="${k}" ${canPull ? "" : "disabled"}>
+            <span class="mac-tit">${GACHA[k].emoji} ${GACHA[k].it}</span>
+            <span class="mac-sub">${sub}</span>
+          </button>`;
+      }).join("");
     showMetaScreen(`
       <div class="meta-title">Gacha Uova</div>
       <div class="meta-stats"><span>🎟 ${meta.vouchers} voucher</span></div>
@@ -8779,11 +8921,14 @@
       <div class="meta-actions"><button class="meta-btn ghost" data-a="back">Indietro</button></div>`);
     metaEl().querySelectorAll(".macchina").forEach(b => b.onclick = () => {
       if (meta.vouchers <= 0) return;
+      gachaScelto = b.dataset.g;
       meta.vouchers--;
       const egg = pullEgg(b.dataset.g);
       saveMeta();
       showGacha(egg, dove);
     });
+    const chiudi = metaEl().querySelector('[data-a="chiudi"]');
+    if (chiudi) chiudi.onclick = () => showGacha(null, dove);   // via l'uovo, torna la macchina
     metaEl().querySelector('[data-a="back"]').onclick = dove || showHome;
   }
 
@@ -8884,8 +9029,46 @@
     const nato = (game.pendingHatches || []).shift();
     if (!nato) { done(); return; }
     animaSchiusa(nato, () => {
-      queueMessages(nato.extra || [], () => processHatches(done));
+      queueMessages(nato.extra || [], () => offriNato(nato, () => processHatches(done)));
     });
+  }
+
+  /* 🔴 Il nato può SCENDERE IN CAMPO, non solo finire nel dex.
+     ⚠️ Qui si è scelto di allontanarsi dall'originale, dove una schiusa
+     sblocca la specie come starter e basta: il Pokemon non entra nella run in
+     corso. Il proprietario lo vuole utilizzabile subito, ed è una richiesta
+     sua — se un giorno sembrasse troppo generoso, il punto da toccare è questo.
+     Entra al livello dell'ondata, come farebbe un selvatico catturato adesso:
+     al livello 1 dell'originale, a metà run, sarebbe solo un peso. */
+  function offriNato(nato, poi) {
+    if (!nato.nato || !game.player || !S[nato.sp]) { poi(); return; }
+    const pieno = game.party.length >= PARTY_MAX;
+    const sp = S[nato.sp];
+    showMetaScreen(`
+      <div class="meta-title" style="font-size:clamp(19px,5.6vw,30px)">${sp.it}${nato.shiny ? " ✨" : ""} è nato!</div>
+      <div class="meta-sub">${pieno
+        ? "la squadra è al completo: può aspettarti nel box"
+        : "vuoi portarlo con te in questa run?"}</div>
+      <div class="cap-info">
+        <div class="cap-riga nuovo">🥚 IV da uovo: il meglio di due tiri</div>
+      </div>
+      <div class="meta-actions two-col">
+        <button class="meta-btn primary" data-act="si">${pieno ? "📦 Nel box" : "➕ In squadra"}</button>
+        <button class="meta-btn ghost" data-act="no">Lascia stare</button>
+      </div>`);
+    const chiudi = () => { hideMeta(); poi(); };
+    metaEl().querySelector('[data-act="no"]').onclick = chiudi;
+    metaEl().querySelector('[data-act="si"]').onclick = () => {
+      const lvl = Math.max(START_LEVEL, enemyLevelFor(game.wave));
+      const mon = makeFighter(nato.sp, lvl, {
+        shiny: nato.shiny, shinyVar: nato.shinyVar,
+        ivs: nato.nato.ivs, abilIndex: nato.nato.abilIndex,
+      });
+      if (nato.nato.nature) { mon.nature = nato.nato.nature; recomputeStats(mon); }
+      const dove = game.party.length < PARTY_MAX ? (game.party.push(mon), "squadra") : (game.box.push(mon), "box");
+      hideMeta();
+      queueMessages([`${mon.name} si unisce a te (${dove === "squadra" ? "in squadra" : "nel box"})!`], poi);
+    };
   }
 
   function tickEggs(messages) {
@@ -8894,6 +9077,7 @@
     for (const egg of meta.eggs) { egg.waves--; if (egg.waves <= 0) hatched.push(egg); }
     if (hatched.length) {
       meta.eggs = meta.eggs.filter(e => e.waves > 0);
+      game.pendingHatches = game.pendingHatches || [];
       for (const egg of hatched) {
         const tipo = egg.tipo || "MOVE";
         /* SPECIE: il gacha LEGGENDARIO, su un uovo di tier leggendario, ha il
@@ -8925,29 +9109,33 @@
         const livreaMigliore = shiny && shinyVar > (meta.shinyVar[sp] || 0);
         if (livreaMigliore) meta.shinyVar[sp] = shinyVar;
         meta.stats.hatched++;
-        meta.candy = meta.candy || {};
-        meta.candy[sp] = (meta.candy[sp] || 0) + 3;   // le uova danno più caramelle
+        // stessa formula della cattura, col ×2 dell'uovo (vedi `caramelleDa`)
+        const dolci = caramelleDa(shiny, shinyVar, true);
+        daiCaramelle(sp, dolci);
         /* La NOTIZIA della nascita non va nella narrazione: se ne occupa
            `processHatches`, che le dà una schermata con l'uovo che si apre.
            Qui si prepara solo cosa dire DOPO. */
+        const dolciTxt = `🍬 +${dolci} caramell${dolci === 1 ? "a" : "e"}`;
         const extra = [eraNuovo
-          ? `${S[sp].it} è sbloccato come starter! 🍬 +3 caramelle`
+          ? `${S[sp].it} è sbloccato come starter! ${dolciTxt}`
           : primoCromatico
             // lo starter c'era gia': di nuovo c'e' la LIVREA, non lo starter
-            ? `${S[sp].it} ✨ è il tuo primo cromatico di questa specie! 🍬 +3 caramelle`
-            : `🍬 +3 caramelle ${S[sp].it} (totale ${meta.candy[sp]})`];
+            ? `${S[sp].it} ✨ è il tuo primo cromatico di questa specie! ${dolciTxt}`
+            : `${dolciTxt} ${S[sp].it} (totale ${meta.candy[sp]})`];
         if (livreaMigliore && shinyVar > 0 && !primoCromatico) {
           stessoMomento(extra, `💠 Livrea ${CROM_IT[shinyVar]}: come starter ora vale ${shinyVar + 1} punti di fortuna`);
         }
         /* ABILITÀ NASCOSTA: 1 su 192, come `GACHA_EGG_HA_RATE`. È l'altra via
            per sbloccarla, oltre a catturare un esemplare che ce l'ha. */
-        if (S[sp].abilities.hidden && Math.floor(Math.random() * GACHA_EGG_HA_RATE) === 0) {
+        const conHA = S[sp].abilities.hidden && Math.floor(Math.random() * GACHA_EGG_HA_RATE) === 0;
+        if (conHA) {
           const nuova = registraAbilita(rootOf(sp), 2);
           if (nuova) stessoMomento(extra, `🔓✨ È nato con l'abilità NASCOSTA: ${nuova.it} sbloccata per ${S[sp].it}!`);
         }
         /* Anche il nato ha la sua NATURA, e nascendo la sblocca per la specie:
            è l'altra via per riempire la scheda, oltre alle catture. */
-        const natNata = registraNatura(rootOf(sp), rollNature());
+        const natNata0 = rollNature();
+        const natNata = registraNatura(rootOf(sp), natNata0);
         if (natNata) stessoMomento(extra, `🌱 È nato di natura ${natNata}: sbloccata per ${S[sp].it}!`);
         /* Anche il SESSO del nato entra nel dex: è l'altra via per sbloccare
            quello raro, oltre a catturarlo. */
@@ -8963,8 +9151,15 @@
             ? `🥚✨ ${S[sp].it} ha imparato la mossa da uovo RARA ${em.it}!`
             : `🥚 ${S[sp].it} ha imparato la mossa da uovo ${em.it}!`);
         }
-        game.pendingHatches = game.pendingHatches || [];
-        game.pendingHatches.push({ sp, shiny, shinyVar, tipo, tier: egg.tier, extra });
+        /* Chi è nato, per davvero: serve a costruirlo se lo si vuole in
+           squadra (vedi `offriNato`). Gli IV sono il MEGLIO di due tiri, come
+           nell'originale (`Math.max(ret.ivs[s], secondaryIvs[s])`): è il
+           vantaggio vero delle uova rispetto a una cattura qualsiasi. */
+        const a = rollIVs(), b = rollIVs(), ivsNato = {};
+        for (const k in a) ivsNato[k] = Math.max(a[k], b[k]);
+        recordIVs(sp, ivsNato);
+        game.pendingHatches.push({ sp, shiny, shinyVar, tipo, tier: egg.tier, extra,
+                                   nato: { ivs: ivsNato, nature: natNata0, abilIndex: conHA ? 2 : null } });
       }
     }
     saveMeta();
@@ -9143,9 +9338,17 @@
         { label: "Negozio di Vitamine", sub: "2 vitamine", run() {
             const p = rndOf(aliveParty()); boostBase(p, meRandStat()); boostBase(p, meRandStat());
             return `Due vitamine in saldo: ${p.name} si potenzia!`; } },
-        { label: "Negozio di strumenti per la Lotta", sub: "2 Poteslot", run() {
-            game.tempBoost[meRandStat()] = 5; game.tempBoost[meRandStat()] = 5;
-            return "Prendi due Poteslot: la squadra parte avvantaggiata per 5 ondate!"; } },
+        /* 🔴 Diceva ancora «Poteslot»: e' il vecchio nome sbagliato degli
+           STRUMENTI X, corretto ovunque tranne qui.
+           ⚠️ E pescava da `meRandStat()`, che comprende i PS: un potenziamento
+           ai PS non esiste (`stages` non ha `hp`) e quel ramo regalava un
+           turno di niente. Gli strumenti X hanno le LORO statistiche, PS
+           escluso e precisione compresa: `XITEM_KEYS`. */
+        { label: "Negozio di strumenti per la Lotta", sub: "2 strumenti X", run() {
+            const a = rndOf(XITEM_KEYS), b = rndOf(XITEM_KEYS);
+            game.tempBoost[a] = 5; game.tempBoost[b] = 5;
+            const nomi = a === b ? XITEMS[a].it : `${XITEMS[a].it} e ${XITEMS[b].it}`;
+            return `Approfitti dell'offerta: ${nomi} per 5 ondate!`; } },
         { label: "Negozio di Pokéball", sub: "un bel po' di ball", run() {
             game.balls += 5; game.greatballs += 3; game.ultraballs += 2;
             return "Riempi lo zaino: 5 Poké Ball, 3 Mega Ball e 2 Ultra Ball!"; } },

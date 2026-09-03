@@ -487,7 +487,20 @@ html, body {
    — per questo "niente di meglio" e' grigio e senza fondo pieno. */
 /* Gli IV nella schermata dell'ultima ball: piu' grandi che sul riquadro PS,
    perche' li' sono un promemoria e qui sono la ragione per cui stai decidendo. */
-.cap-iv { display: flex; justify-content: center; margin: .4vh 0 1vh; }
+/* Blocco informativo della schermata «Ultima ball»: dex, abilita', IV.
+   Righe corte e centrate: si legge in un colpo d'occhio, che e' il punto. */
+.cap-info { display: flex; flex-direction: column; align-items: center; gap: .5vh; margin: .6vh 0 1vh; }
+.cap-riga {
+  font-size: clamp(12px, 3.2vw, 15px); text-align: center; opacity: .78;
+  background: rgba(255,255,255,.06); border-radius: 999px; padding: 4px 12px;
+}
+.cap-riga.nuovo { opacity: 1; background: rgba(110,231,155,.16); color: #8ef0b4; }
+.cap-riga b { color: inherit; }
+.cap-hidden {
+  background: #b06cff; color: #fff; border-radius: 4px;
+  padding: 1px 5px; font-size: .82em; font-weight: 800; letter-spacing: .3px;
+}
+.cap-iv { display: flex; justify-content: center; margin: 0; }
 .cap-iv .iv-badges { justify-content: center; }
 .cap-iv .iv-chip { font-size: 11px; padding: 4px 7px; }
 
@@ -918,6 +931,37 @@ html, body {
 .egg-big.shake { animation: eggshake .5s ease infinite; }
 @keyframes eggshake { 0%,100%{transform:rotate(0)} 25%{transform:rotate(-12deg)} 75%{transform:rotate(12deg)} }
 .gacha-result { font-size: clamp(16px, 4.6vw, 22px); font-weight: 700; }
+
+/* LA MACCHINA DEL GACHA. Sprite dell'originale appiattito (eggs+telaio+vetro),
+   tenuto in proporzione 106:131 e ingrandito a pixel interi. */
+.gacha-macchina {
+  position: relative;
+  width: clamp(120px, 40vw, 200px); aspect-ratio: 106 / 131;
+  background-repeat: no-repeat; background-position: center; background-size: contain;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 8px 14px rgba(0,0,0,.45));
+  /* spazio sotto per l'uovo che esce: costante, cosi' il palco non salta
+     quando compare (e la scritta del risultato non ci finisce sopra) */
+  margin-bottom: 28px;
+}
+.gacha-macchina.scuote { animation: gachaScuote .55s ease; }
+@keyframes gachaScuote {
+  0%,100% { transform: translateX(0) rotate(0); }
+  18% { transform: translateX(-3px) rotate(-1.2deg); }
+  46% { transform: translateX(3px) rotate(1.2deg); }
+  74% { transform: translateX(-2px) rotate(-.6deg); }
+}
+/* L'uovo esce dallo sportello in basso: parte piccolo da dentro e cade fuori. */
+.gacha-uovo {
+  position: absolute; left: 50%; bottom: -20px;
+  width: 46px; height: 50px; background-size: 227px auto;
+  animation: uovoEsce .55s cubic-bezier(.3,1.5,.5,1) both;
+}
+@keyframes uovoEsce {
+  from { opacity: 0; transform: translate(-50%, -46px) scale(.35); }
+  60%  { opacity: 1; }
+  to   { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
 
 /* tier colori */
 .tier-COMMON { color: #cfd6e0; } .tier-RARE { color: #6cc1ff; }
@@ -1400,8 +1444,14 @@ button.pd-card:not(:disabled):active { background: rgba(255,255,255,.14); }
    e questa aggiungeva solo `top`, quindi la barra del nemico si stirava per
    TUTTA l'altezza della scena (541px). Con `flex-wrap` la seconda riga di
    icone finiva a meta' schermo, in mezzo ai Pokemon. */
+/* 🔴 Stava a `right: 4px; top: 4px`, cioe' proprio nell'angolo: sui
+   telefoni con gli spigoli arrotondati (e col foro della fotocamera) le icone
+   finivano tagliate a meta'. Le stesse variabili di sicurezza che gia' usa il
+   riquadro PS avversario qui non c'erano affatto. */
 .held-bar.enemy {
-  left: auto; right: 4px; top: 4px; bottom: auto;
+  left: auto; bottom: auto;
+  right: calc(var(--safe-x) + 8px);
+  top: calc(var(--safe-top) + 10px);
   justify-content: flex-end; align-content: flex-start;
 }
 .held-bar .hi {
