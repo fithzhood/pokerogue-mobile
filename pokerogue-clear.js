@@ -3864,8 +3864,14 @@
       const parti = () => {
         if (partito || annullato) return;
         partito = true;
+        /* 🔴 La riga «tocca per continuare» si NASCONDE, non si toglie.
+           Con `remove()` spariva dal flusso: l'overlay e' una colonna
+           centrata con gli spazi, quindi tutto si riassestava — il Pokemon
+           scendeva e il tasto Interrompi saltava su di un pezzo, proprio
+           mentre ci stavi per mettere il dito.
+           `visibility: hidden` la fa sparire lasciando il suo posto. */
         const pr = ov.querySelector(".evo-prompt");
-        if (pr) pr.remove();
+        if (pr) pr.style.visibility = "hidden";
         // un respiro prima del primo lampo: non deve cominciare nello stesso
         // istante in cui alzi il dito
         tmr = setTimeout(passo, 380);
@@ -6837,8 +6843,20 @@
       if (foe.volatile.sub > 0 && !move.sonora && !move.bucaSub) {
         foe.volatile.sub -= dealt; done++;
         for (const t of scudoMsg) messages.push(t);
-        if (foe.volatile.sub <= 0) { foe.volatile.sub = 0; messages.push(`Il sostituto di ${foe.name} si sgretola!`); }
-        else messages.push(`Il sostituto di ${foe.name} incassa il colpo!`);
+        if (foe.volatile.sub <= 0) {
+          foe.volatile.sub = 0;
+          messages.push(`Il sostituto di ${foe.name} si sgretola!`);
+          /* 🔴 QUANDO IL FANTOCCIO CADE, LA MOSSA FINISCE.
+             Prima i colpi rimasti proseguivano sul Pokemon VERO: Semitraglia
+             rompeva il sostituto al primo colpo e con gli altri quattro
+             stendeva chi ci stava dietro — cioe' il Sostituto peggiorava la
+             situazione invece di migliorarla.
+             Nei giochi veri i colpi successivi di una mossa multipla non
+             toccano il bersaglio: il fantoccio ha fatto il suo, e chi
+             attacca ha finito. */
+          break;
+        }
+        messages.push(`Il sostituto di ${foe.name} incassa il colpo!`);
         continue;
       }
       total += dealt; lastEff = res.effectiveness; if (res.crit) anyCrit = true; done++;
@@ -12910,6 +12928,106 @@
     });
   }
 
+  /* 🔴 LA PIETRA SI USA SUBITO.
+     Prima prendere il Filo di Unione come premio lo infilava in un magazzino
+     (`game.stones`) e basta: l'evoluzione bisognava andarsela a cercare con un
+     tasto a parte, e se non ci pensavi la pietra restava li' per sempre. Un
+     premio che non fa niente quando lo prendi non sembra un premio.
+     Adesso appena lo scegli ti chiede su CHI usarlo, e l'evoluzione parte.
+     ⚠️ Se dici di no si torna all'EMPORIO col premio ancora da scegliere:
+     `back` è la stessa strada del tasto Indietro, quindi il premio non si
+     consuma e ne puoi prendere un altro. */
+  function chiEvolveCon(pietra) {
+    const out = [];
+    game.party.forEach(mon => {
+      if (mon.fainted) return;
+      for (const e of (S[mon.speciesId].evolutions || [])) {
+        if (e.item === pietra && evoUsabile(e) && evoConditionOk(mon, e)) out.push({ mon, to: e.to });
+      }
+    });
+    return out;
+  }
+  /* Come per le pietre: la MT la si consegna SUBITO, e a chi decidi tu.
+     Prima `insegnaTm` prendeva `chiPuoImparare(moveId)[0]`, cioe' il PRIMO
+     della lista: la mossa finiva addosso a qualcuno a caso senza chiedere. */
+  function usaMtSubito(pick, done, back) {
+    const mv = M[pick.tm];
+    const puo = chiPuoImparare(pick.tm);
+    const tit = `MT ${mv.it}`;
+    if (!puo.length) {
+      showMetaScreen(`
+        <div class="meta-title" style="font-size:clamp(19px,5.6vw,30px)">${tit}</div>
+        <div class="meta-sub">Nessuno in squadra può impararla.</div>
+        <div class="meta-actions"><button class="meta-btn ghost" data-act="back">↩ Scegli un altro premio</button></div>`);
+      metaEl().querySelector('[data-act="back"]').onclick = back;
+      return;
+    }
+    const righe = puo.map((p, i) => {
+      /* Dire in anticipo se dovra' DIMENTICARE qualcosa: e' l'informazione che
+         serve per scegliere, e senza si scopriva solo dopo. */
+      const pieno = p.moves.length >= 4;
+      return `<button class="me-opt" data-i="${i}">
+        <span class="me-opt-l">${miniIcon(p.dex, 1.2)}${p.name}</span>
+        <span class="me-opt-s">Lv.${p.level} · ${pieno ? "dovrà dimenticare una mossa" : "ha ancora spazio"}</span></button>`;
+    }).join("");
+    showMetaScreen(`
+      <div class="meta-title" style="font-size:clamp(19px,5.6vw,30px)">${tit}</div>
+      <div class="meta-sub"><span class="ticon t-${mv.type}"></span> ${mv.effect || "A chi la insegni?"}</div>
+      <div class="me-opts">${righe}
+        <button class="me-opt" data-act="back">
+          <span class="me-opt-l">↩ A nessuno</span>
+          <span class="me-opt-s">torna all'emporio e scegli un altro premio</span></button></div>`);
+    metaEl().querySelectorAll(".me-opt[data-i]").forEach(b => b.onclick = () => {
+      insegnaTm(pick.tm, puo[parseInt(b.dataset.i, 10)]);
+      done();
+    });
+    metaEl().querySelector('[data-act="back"]').onclick = back;
+  }
+
+  function usaPietraSubito(pick, done, back) {
+    const pietra = pick.stone;
+    const evos = chiEvolveCon(pietra);
+    const nome = (STONE_DATA[pietra] || {}).it || "la pietra";
+    if (!evos.length) {
+      // non serve a nessuno: si torna indietro senza consumare il premio
+      showMetaScreen(`
+        <div class="meta-title" style="font-size:clamp(19px,5.6vw,30px)">${nome}</div>
+        <div class="meta-sub">Nessuno in squadra può usarla adesso.</div>
+        <div class="meta-actions"><button class="meta-btn ghost" data-act="back">↩ Scegli un altro premio</button></div>`);
+      metaEl().querySelector('[data-act="back"]').onclick = back;
+      return;
+    }
+    const righe = evos.map((e, i) =>
+      `<button class="me-opt" data-i="${i}">
+        <span class="me-opt-l">${miniIcon(e.mon.dex, 1.2)}${e.mon.name} → ${S[e.to].it}</span>
+        <span class="me-opt-s">Lv.${e.mon.level}</span></button>`).join("");
+    showMetaScreen(`
+      <div class="meta-title" style="font-size:clamp(19px,5.6vw,30px)">${nome}</div>
+      <div class="meta-sub">Su chi vuoi usarla?</div>
+      <div class="me-opts">${righe}
+        <button class="me-opt" data-act="back">
+          <span class="me-opt-l">↩ Su nessuno</span>
+          <span class="me-opt-s">torna all'emporio e scegli un altro premio</span></button></div>`);
+    metaEl().querySelectorAll(".me-opt[data-i]").forEach(b => b.onclick = () => {
+      const e = evos[parseInt(b.dataset.i, 10)];
+      hideMeta(); renderScene();
+      animaEvoluzione(e.mon, e.to, (proseguito) => {
+        /* Fermare l'evoluzione a meta' equivale a dire «su nessuno»: la pietra
+           non si spende e il premio resta da scegliere. */
+        if (!proseguito) {
+          renderScene();
+          queueMessages([`Cosa?! ${e.mon.name} ha smesso di evolversi!`], back);
+          return;
+        }
+        const msgs = [];
+        evolve(e.mon, e.to, msgs);
+        renderScene();
+        queueMessages(msgs, done);
+      });
+    });
+    metaEl().querySelector('[data-act="back"]').onclick = back;
+  }
+
   // Schermata "usa una pietra": elenca le evoluzioni disponibili; scegline una.
   function showEvolvePicker(back) {
     const evos = compatibleStoneEvos();
@@ -13067,6 +13185,10 @@
       preCura = null;
       done();
     };
+    /* Le pietre evolutive non finiscono in tasca: si usano ORA (vedi
+       `usaPietraSubito`), e dire di no riporta all'emporio. */
+    if (item.dyn === "stone" && pick.stone) { usaPietraSubito(pick, done, back); return; }
+    if (item.dyn === "tm" && pick.tm) { usaMtSubito(pick, done, back); return; }
     if (item.target === "mon") {
       chooseTarget(pick, p => {
         // gli oggetti "su una mossa" chiedono ANCHE quale

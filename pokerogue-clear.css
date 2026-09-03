@@ -192,7 +192,9 @@ html, body {
   margin-top: 4px; font-size: clamp(12px, 3.2vw, 15px); opacity: .75;
   display: flex; align-items: center; gap: 6px;
 }
-.evo-prompt[hidden] { display: none; }
+/* ⚠️ Nascosta ma NON tolta dal flusso: se sparisce davvero, la colonna
+   centrata dell'overlay si riassesta e sprite e pulsanti si spostano. */
+.evo-prompt[hidden] { display: flex; visibility: hidden; }
 #evo-overlay {
   position: fixed; inset: 0; z-index: 40;
   /* ⚠️ OPACO, non velato: con un fondo semitrasparente i riquadri PS e
@@ -225,7 +227,14 @@ html, body {
   40%  { filter: brightness(1.6) drop-shadow(0 0 26px #fff); transform: scale(1.08); }
   100% { filter: drop-shadow(0 0 12px rgba(160,190,255,.55)); transform: scale(1); }
 }
-.evo-testo { font-size: clamp(15px, 4.4vw, 22px); font-weight: 700; text-align: center; text-shadow: 0 2px 6px #000; }
+/* Altezza riservata a DUE righe: il testo cambia a meta' animazione
+   («X si sta evolvendo…» -> «Y!») e i due nomi possono andare a capo in modo
+   diverso. Riservando lo spazio, il cambio non muove nulla. */
+.evo-testo {
+  font-size: clamp(15px, 4.4vw, 22px); font-weight: 700; text-align: center;
+  text-shadow: 0 2px 6px #000;
+  min-height: 2.6em; display: flex; align-items: center; justify-content: center;
+}
 /* SCHIUSA: l'uovo dondola sempre più stretto, si crepa e lascia il posto al nato */
 .hatch-egg { filter: drop-shadow(0 0 12px rgba(255,255,255,.35)); }
 .hatch-egg.scuote { animation: uovoScuote .42s ease-in-out; }
