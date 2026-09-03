@@ -4092,10 +4092,14 @@ controllo «riesce ad agire?» la scartava sempre. Va intercettata **prima** di
 controllo: rifarlo vorrebbe dire tirare due volte i dadi di paralisi e
 confusione, e scalare due volte il contatore del sonno.
 
-### 47.6 ⚠️ Cosa NON e' come nell'originale
+### 47.6 ⚠️ Cosa NON era come nell'originale — SUPERATA, vedi §48
 
-Tutte e 127 fanno qualcosa e nessuna sbaglia, ma **queste sono semplificate** e
-vanno sapute prima di andarle a «correggere» pensando che siano rotte:
+⚠️ **Questa tabella è storia.** Quasi tutte queste voci sono state rifatte
+per bene subito dopo (§48): sette sono state sistemate, una si e' rivelata
+sbagliata (i cambi forzati sono differiti anche nell'originale) e una era
+detta male (Schizzo è già permanente). **Per sapere cosa è davvero diverso
+oggi, leggi la §48.5, non questa.** Si tiene perché racconta com'era il
+primo passaggio e perché:
 
 | mossa | com'e' da noi | com'e' davvero |
 |---|---|---|
@@ -4133,3 +4137,152 @@ transcript della sessione; l'ultima esecuzione ha dato **0 errori, 0 mosse
 mute**. Le uniche che rispondono «Ma non ha funzionato!» sono quelle a cui
 mancava davvero il presupposto: squadra di un solo Pokemon, PS pieni, nessun
 oggetto, lotta in singolo.
+
+---
+
+## 48. Le semplificazioni della §47.6, rifatte per bene (rev 128-133)
+
+Domanda: «non capisco perché tutte quelle cose che non sono come nell'originale.
+non puoi fixarle?». Risposta onesta: quasi tutte sì — le avevo lasciate
+semplificate perché stavo chiudendo un lotto grosso di notte, non perché fossero
+impossibili. Sotto, una per una, con quello che è servito.
+
+### 48.1 Una si smentiva da sola
+
+**«I cambi forzati avvengono a fine turno, non nell'istante della mossa.»**
+Non era una semplificazione: **anche l'originale li rimanda**. In
+`ForceSwitchOutAttr` il cambio non parte subito, va in coda con
+`queueDeferred`, che (vedi `phase-tree.ts`, `addPhase(phase, defer)`) lo infila
+in un livello che gira **dopo le altre mosse del turno**.
+
+L'unica differenza vera era che da noi girava anche dopo i **danni residui**: il
+veleno lo prendeva chi usciva invece di chi entrava. Adesso i cambi si eseguono
+dentro `risolviTurno`, fra le mosse e i residui — il punto esatto dell'originale.
+
+⚠️ Il turno è stato spezzato in due: `risolviTurno` (le azioni) e
+`codaDelTurno` (residui, meteo, terreno, ripuliture). Serve perché l'auto-cambio
+del giocatore apre la schermata squadra e la coda deve **aspettare la sua
+scelta**. `staffettaVerso` è il punto in cui il turno riprende.
+
+### 48.2 Le sei rifatte
+
+| mossa | prima | adesso |
+|---|---|---|
+| **Turbine, Boato** (sul tuo) | entrava il primo della panchina | entra uno **a caso**, come `randBattleSeedInt` sugli indici disponibili |
+| **Staffetta, Teletrasporto, Monito, Tagliacoda** | entrava il primo della panchina | **lo scegli tu**: si apre la squadra con scritto «chi entra si tiene gli sbalzi» |
+| **Turbine, Boato** (su un selvatico) | fallivano | il selvatico **scappa** e la lotta finisce **senza premi né esperienza** — è `BattleEndPhase(false)` + `NewBattlePhase` |
+| **Sostituto** | incassava solo il danno | para **tutto** quello che arriva da fuori: danno, stati, cali. Lo attraversano le mosse **sonore** e quelle che lo ignorano per definizione |
+| **Trasformazione** | copiava numeri e mosse | copia **anche l'aspetto**: specie, sprite, nome, cromatico |
+| **Precedenza** | pescava una mossa a caso | legge la mossa che l'avversario **sta per usare**, e picchia il **+50%** |
+| **Riciclo** | falliva sempre | restituisce l'**ultima bacca consumata** in quella lotta |
+
+### 48.3 Il flag che mancava nei dati
+
+Il Sostituto fatto bene ha bisogno di sapere **quali mosse lo attraversano**:
+nell'originale sono `MoveFlags.SOUND_BASED` (il fantoccio non tappa le orecchie)
+e `MoveFlags.IGNORE_SUBSTITUTE` (Turbine e Boato non colpiscono, spingono).
+`data/moves.json` non li aveva: l'estrattore prendeva i `.attr(...)` ma non i
+flag.
+
+Aggiunte due righe a `tools/extract-data.mjs`:
+
+```js
+sonora:  /\.soundBased\(\)/.test(chunk),
+bucaSub: /\.ignoresSubstitute\(\)/.test(chunk),
+```
+
+**34 mosse sonore** e **40 che ignorano il sostituto**. `DATA_V` → 23.
+
+⚠️ Nello stesso file c'è ancora una **euristica sbagliata**: `contact:
+category === "PHYSICAL"`. Nell'originale è un flag suo, e mosse come Terremoto
+o Sostituto sono fisiche **senza** contatto. Tocca abilità come Corpodifuoco e i
+Presartigli. Non è stata toccata in questo giro: è un lavoro a parte, e adesso
+che i flag si sanno estrarre costa poco.
+
+### 48.4 🔴 La trappola che si è ripresentata due volte
+
+`nextWave()` chiama `salvaRun()` **prima** di `fineBattaglia()`. Quindi tutto
+quello che «si annulla a fine lotta» viene salvato **ancora acceso**:
+
+* un Ditto trasformato in Charizard si sarebbe salvato **Charizard per sempre**;
+* un Pokemon con gli oggetti messi da parte dalla **Magicozona** si sarebbe
+  salvato con `held: {}` e nessuno sarebbe più andato a ripescarli — oggetti
+  persi davvero.
+
+Il secondo caso esisteva già dal lotto 4 e non l'avevo visto. La rete sta in
+cima a `nextWave`, prima del salvataggio:
+
+```js
+for (const p of game.party) { annullaTrasformazione(p); riaccendiOggetti(p); }
+```
+
+**Regola da ricordare**: qualunque cosa si metta «da parte» durante una lotta va
+rimessa a posto in tre punti — rientro nella ball, fine battaglia, **e cima di
+`nextWave`**. I primi due da soli non bastano.
+
+### 48.5 Cosa resta diverso (poco, e detto)
+
+| cosa | com'è | perché |
+|---|---|---|
+| **Fielepunte, 2° strato** | non aggiunge niente | serve il **veleno grave**, cioè un sesto stato accanto a scottatura/paralisi/sonno/veleno/gelo: tocca badge, salvataggio, cure e danni residui. È un lavoro a sé, non un ritocco |
+| **Magicozona, Divieto** | mettono gli oggetti **da parte** (`_heldOff`) | l'originale li lascia al posto loro e ne blocca gli effetti. Il risultato in campo è identico; il prezzo è la rete di sicurezza della §48.4, che **non va tolta** |
+| **Cortesia, Spintone in singolo** | dicono «non ha funzionato» | anche l'originale le lascia scegliere e le fa fallire: non è una differenza |
+| **Schizzo** | permanente | ✅ verificato: `monSalva` copia `p.moves`, quindi la mossa copiata resta nel salvataggio. La §47.6 diceva il contrario, sbagliando |
+
+### 48.6 Tre segnalazioni arrivate mentre si lavorava
+
+**🔴 Le Menta non sbloccavano la natura.** Cambiavano `p.nature` e basta.
+Nell'originale `PokemonNatureChangeModifier` chiama `unlockSpeciesNature`: la
+natura entra nel **dex** e da lì in poi la puoi scegliere quando schieri quella
+specie. È proprio il modo di collezionarle senza andare a caccia di esemplari.
+Ora la Menta chiama `registraNatura(rootOf(...))` come fanno cattura e schiusa,
+e lo annuncia: «🌱 Nuova natura sbloccata per X: Decisa».
+
+⚠️ Per dirlo è servita una voce nuova in `game.pendingLearns`: `{ soloTesto }`,
+un messaggio senza nessuna mossa da imparare. `processLearns` la riconosce.
+
+**🔴 Le cure non si vedevano.** Si comprava una Pozione e non succedeva niente a
+schermo: la barra era **già piena** quando l'emporio si chiudeva, e nessuno
+diceva quanto avesse curato. Adesso `grantItem` fotografa il Pokemon **prima** e
+**dopo** e racconta la differenza — PS, stato, PP — con la **barra che sale**.
+
+⚠️ Due cose non ovvie:
+* l'animazione funziona perché l'evento porta con sé il fotogramma di **prima**
+  (`e.pre`): `nextEvent` disegna quello, suona `COMMON_HEALTH_UP` e solo alla
+  fine applica l'istantanea nuova. È lo stesso meccanismo delle mosse;
+* il ramo dell'**emporio** azzerava `pendingLearns` (serve per le caramelle
+  comprate) e con esso buttava via il racconto — cioè proprio il caso più
+  comune. Ora le cure si mettono da parte prima dell'azzeramento.
+
+Si guarda prima/dopo invece di far dire la sua a ogni oggetto: così vale anche
+per quelli che aggiungeremo poi.
+
+**🔴 Le liste ripartivano da capo.** Aprire la scheda di un Pokemon e tornare
+indietro ridisegna la lista da zero, e lo scroller ripartiva dall'inizio: con
+oltre mille caselle di starter voleva dire riscorrere tutto ogni volta.
+
+Sistemato in **due** schermate, che hanno **due scroller diversi**:
+* **starter** → `.starter-dex`, che ha un `overflow-y` suo;
+* **squadra** → `#meta`, il pannello intero.
+
+⚠️ Solo tornando da una **scheda**: cambiando filtro o ricerca la lista è
+un'altra e ripartire da metà non avrebbe senso.
+⚠️ La posizione va rimessa **dopo** l'impaginazione, non subito: appena riempito
+l'`innerHTML` l'altezza non c'è ancora e lo `scrollTop` verrebbe tagliato a
+zero. Da qui il doppio colpo, subito e al fotogramma dopo.
+
+### 48.7 Come si ricollauda
+
+Il ciclo su tutte e 127 le mosse speciali, con lo stato azzerato fra una e
+l'altra (vedi §47.7), dopo tutto questo dà ancora **0 errori**.
+
+Provate a mano, in partita:
+
+```js
+__provaMossa("SUBSTITUTE", "e"); __provaMossa("GROWL");    // sonora: passa
+__provaMossa("SUBSTITUTE", "e"); __provaMossa("TAIL_WHIP"); // non sonora: parata
+__provaMossa("TRANSFORM");        // cambia anche lo sprite
+```
+
+Turbine, Boato, Staffetta e le cure vanno provati **giocando**: passano dalla
+coda del turno e dalla schermata squadra, che la sonda non attraversa.

@@ -198,6 +198,12 @@ function extractMoves() {
       priority: priority || 0,
       charging: cls === "ChargingAttackMove" || cls === "ChargingSelfStatusMove",
       contact: category === "PHYSICAL",   // euristica: il fisico fa contatto
+      /* FLAG che servono al SOSTITUTO: le mosse SONORE lo attraversano (il
+         fantoccio non tappa le orecchie) e alcune lo ignorano per definizione
+         (Turbine, Boato: non colpiscono, spingono). Nell'originale sono
+         `MoveFlags.SOUND_BASED` e `MoveFlags.IGNORE_SUBSTITUTE`. */
+      sonora: /\.soundBased\(\)/.test(chunk),
+      bucaSub: /\.ignoresSubstitute\(\)/.test(chunk),
       target,                             // MoveTarget dell'originale (§39)
       gen,
       attrs,

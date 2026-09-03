@@ -1086,6 +1086,8 @@
     // held: Boost di Tipo impilabile (+20% l'uno)
     const hb = attacker.held && attacker.held.typeboost && attacker.held.typeboost[move.type];
     if (hb) power *= 1 + 0.2 * hb;
+    // PRECEDENZA: il colpo soffiato all'avversario picchia il 50% in piu'
+    if (attacker.volatile && attacker.volatile.precedenza) power *= 1.5;
     // METEO: Sole potenzia il Fuoco e smorza l'Acqua, la Pioggia il contrario
     power *= weatherMoveMult(move.type);
     // TERRENO: +30% al tipo del campo (solo se chi attacca tocca terra)
@@ -2266,6 +2268,7 @@
      toglie soltanto la cura delle decine (`curaSquadraDecina`). */
   function richiamaNellaBall(f) {
     if (!f) return;
+    annullaTrasformazione(f); // chi era trasformato torna se stesso
     revertForm(f);            // mega/gigamax durano solo una battaglia
     f.stages = { atk: 0, def: 0, spatk: 0, spdef: 0, spd: 0, acc: 0, eva: 0 };
   }
@@ -2280,7 +2283,7 @@
     // effetti di campo a tempo: valgono per la lotta, non per la run
     game.fangata = 0; game.doccia = 0; game.gravita = 0;
     game.distorto = 0; game.mirabil = 0; game.magica = 0; game.plasma = 0;
-    for (const x of game.party.concat(onField())) riaccendiOggetti(x);
+    for (const x of game.party.concat(onField())) { riaccendiOggetti(x); annullaTrasformazione(x); }
     for (const p of game.party) revertForm(p);
   }
 
@@ -3325,6 +3328,12 @@
   }
 
   function nextWave() {
+    /* ⚠️ PRIMA del salvataggio: `salvaRun` sta poche righe sotto, e `fineBattaglia`
+       (che rimette a posto) gira DOPO. Salvare adesso un Pokemon ancora
+       trasformato lo bloccherebbe cosi' per sempre, e uno con gli oggetti
+       messi da parte dalla Magicozona li perderebbe: nel salvataggio finirebbe
+       `held: {}` e nessuno andrebbe piu' a ripescarli. */
+    for (const p of game.party) { annullaTrasformazione(p); riaccendiOggetti(p); }
     pulisciBallScena();      // il campo riparte pulito
     liberaDallaBall();       // e nessuno resta chiuso dentro per un'animazione monca
     /* SALVATAGGIO AUTOMATICO (§26): si scrive PRIMA di incrementare, quindi lo
@@ -3860,6 +3869,14 @@
   function processLearns(done) {
     const item = game.pendingLearns.shift();
     if (!item) { done(); return; }
+    /* Voce di SOLO TESTO: non c'e' nessuna mossa da imparare, e' un annuncio
+       (per ora lo usa la Menta, che sblocca una natura nel dex). */
+    if (item.soloTesto) { queueMessages([item.soloTesto], () => processLearns(done)); return; }
+    /* Voce di CURA: la barra deve salire, non comparire già piena. L'evento
+       porta con sé il fotogramma di PRIMA (`pre`) e l'animazione di recupero:
+       `nextEvent` disegna il prima, suona l'animazione e solo alla fine applica
+       l'istantanea nuova — cioe' fa salire la barra sotto gli occhi. */
+    if (item.cura) { suonaCure([item.cura], () => processLearns(done)); return; }
     if (item.testo) {
       const t = item.testo;
       item.testo = null;                       // gia' detto: non ripeterlo
@@ -5431,6 +5448,48 @@
       resolveAction(act.actor, foe, act.move, log);
     }
     game._coda = null;
+
+    /* CAMBI FORZATI. Si eseguono QUI: dopo le mosse del turno e PRIMA dei danni
+       residui — e' lo stesso punto dell'originale, che li mette in coda con
+       `queueDeferred`. Chi entra adesso non prende le mosse di questo turno ma
+       prende veleno, meteo e trappole, come nei giochi veri.
+       ⚠️ Non si possono eseguire nell'istante in cui la mossa parte: le azioni
+       ancora da risolvere tengono in mano il Pokemon in campo, e sostituirlo
+       sotto i piedi le farebbe colpire un fantasma. */
+    if (game.cambioForzato && game.cambioForzato.length) {
+      const richieste = game.cambioForzato; game.cambioForzato = null;
+      for (const r of richieste) eseguiCambioForzato(r, log);
+      /* Il selvatico e' scappato e non c'e' nessun altro: la lotta finisce
+         qui, SENZA premi — come `BattleEndPhase(false)` dell'originale. */
+      if (game.fugaSelvatica) {
+        game.fugaSelvatica = false;
+        fineBattaglia();
+        playEvents(log.events, nextWave);
+        return;
+      }
+    }
+    /* AUTO-CAMBIO del giocatore (Staffetta, Teletrasporto, Monito, Tagliacoda):
+       il ricambio lo sceglie LUI, quindi il turno si ferma e riprende dopo.
+       ⚠️ Il log va suonato adesso e il resto del turno riparte con un log
+       NUOVO: `playEvents` riparte sempre dall'inizio dell'array che riceve, e
+       riusare questo vorrebbe dire risentire tutto il turno da capo. */
+    if (game.cambioScelto) {
+      const r = game.cambioScelto; game.cambioScelto = null;
+      const disponibili = game.party.some(p => !p.fainted && p !== game.player && p !== game.player2);
+      if (disponibili && r.chi && !r.chi.fainted) {
+        game.staffetta = r;
+        playEvents(log.events, () => { game.phase = "STAFFETTA"; renderParty("staffetta"); });
+        return;
+      }
+    }
+
+    codaDelTurno(log);
+  }
+
+  /* La CODA del turno: danni residui, meteo, terreno, e tutto quello che dura
+     un turno solo. Sta a parte perche' un auto-cambio la fa aspettare finche'
+     il giocatore non ha scelto chi mandare. */
+  function codaDelTurno(log) {
     for (const f of onField()) endOfTurnResidual(f, log);
     tickWeather(log);            // il meteo scade
     tickTerrain(log);            // e anche il terreno
@@ -5586,18 +5645,6 @@
 
   // Dopo un turno: KO? vittoria? cambio forzato?
   function afterTurn() {
-    /* CAMBI FORZATI (Turbine, Boato, Staffetta, Zampata, Monito, Teletrasporto).
-       ⚠️ Si eseguono QUI, a turno finito, non nell'istante in cui la mossa
-       parte: le azioni ancora da risolvere tengono in mano un riferimento al
-       Pokemon in campo, e sostituirlo a metà turno le farebbe colpire un
-       fantasma. Nell'originale il cambio è immediato, ma in una finestra di un
-       turno la differenza non si vede. */
-    if (game.cambioForzato && game.cambioForzato.length) {
-      const richieste = game.cambioForzato; game.cambioForzato = null;
-      const log = makeLog();
-      for (const r of richieste) eseguiCambioForzato(r, log);
-      if (log.events.length) { renderScene(); playEvents(log.events, afterTurn); return; }
-    }
     registraExpNemici();       // prima di togliere i caduti dal campo
     renderScene();
     /* BOSS FINALE: la fase finisce quando cade l'ULTIMO SCUDO — è la
@@ -5838,6 +5885,21 @@
       }
     }
 
+    /* 1-octies. SOSTITUTO del bersaglio. Il fantoccio para TUTTO quello che
+       arriva da fuori: danno, stati, cali di statistica. Lo attraversano solo
+       le mosse SONORE (il fantoccio non tappa le orecchie) e quelle che per
+       definizione lo ignorano — Turbine, Boato: non colpiscono, spingono.
+       Sono i flag `sonora` e `bucaSub`, estratti da `MoveFlags.SOUND_BASED` e
+       `MoveFlags.IGNORE_SUBSTITUTE` dell'originale (vedi `hitsSubstitute`). */
+    const colpisceSub = foe !== actor && foe.volatile.sub > 0
+      && !move.sonora && !move.bucaSub && !BERSAGLIO_SU_DI_SE.has(move.target);
+    if (colpisceSub && move.category === "STATUS") {
+      moveInst.pp = Math.max(0, moveInst.pp - 1);
+      messages.push(`${actor.name} usa ${move.it}!`);
+      messages.push(`Il sostituto di ${foe.name} para tutto!`);
+      return;
+    }
+
     // 2. consuma PP e annuncia
     moveInst.pp = Math.max(0, moveInst.pp - 1);
     /* Indice dell'annuncio: e' QUI che va appesa l'animazione della mossa,
@@ -5930,7 +5992,8 @@
     game.ultimaMossa = moveInst.id;
 
     // 5. effetti (mattoncini). Se la mossa da danno non e' andata a segno, niente effetti.
-    if (landed) applyMoveAttrs(actor, foe, move, messages);
+    // chi ha incassato e' il fantoccio: gli effetti secondari non passano
+    if (landed && !colpisceSub) applyMoveAttrs(actor, foe, move, messages);
   }
 
   /* ======================================================================
@@ -6336,7 +6399,7 @@
       /* SOSTITUTO: il fantoccio incassa al posto suo finché regge. Il Pokemon
          vero non perde neanche un PS, quindi niente `_justHit` e niente
          bacche: per il motore è come se il colpo non fosse arrivato. */
-      if (foe.volatile.sub > 0) {
+      if (foe.volatile.sub > 0 && !move.sonora && !move.bucaSub) {
         foe.volatile.sub -= dealt; done++;
         for (const t of scudoMsg) messages.push(t);
         if (foe.volatile.sub <= 0) { foe.volatile.sub = 0; messages.push(`Il sostituto di ${foe.name} si sgretola!`); }
@@ -6717,6 +6780,8 @@
     if (!(game.charms.berryPouch && Math.random() < 0.3 * Math.min(1, game.charms.berryPouch))) {
       f.berries[kind]--;
       if (f.berries[kind] <= 0) delete f.berries[kind];
+      // se ne ricorda RICICLO, che e' l'unica mossa che la riporta indietro
+      if (f.volatile) f.volatile.bacciaFinita = kind;
     }
     messages.push(`${f.name} usa la ${b.it}!`);
   }
@@ -7452,6 +7517,24 @@
     };
   }
 
+  /* 🔴 Dove eravamo arrivati nella lista squadra.
+     Aprire la scheda di un Pokemon e tornare indietro RIDISEGNA la lista da
+     zero, e il pannello (#meta, che e' lo scroller) ripartiva da capo: con sei
+     Pokemon e le schede lunghe voleva dire riscorrere ogni volta per arrivare
+     al quinto. Si segna la posizione all'andata e si rimette al ritorno.
+     ⚠️ Va rimessa DOPO che il browser ha impaginato, non subito: appena
+     riempito l'innerHTML l'altezza non c'e' ancora e lo scrollTop verrebbe
+     tagliato a zero. Da qui il doppio colpo, subito e al fotogramma dopo. */
+  let scrollSquadra = 0;        // l'ultima posizione vista
+  let ripristinaScroll = null;  // valorizzata solo quando si TORNA da una scheda
+  function rimettiScroll() {
+    const y = ripristinaScroll; ripristinaScroll = null;
+    const m = metaEl();
+    if (y == null) { m.scrollTop = 0; return; }
+    m.scrollTop = y;
+    requestAnimationFrame(() => { m.scrollTop = y; });
+  }
+
   // Lista squadra. mode "switch" (dal menu, con Indietro) o "force" (dopo un KO,
   // obbligatorio). Ogni voce mostra nome, Lv, barra HP, stato.
   /* Scelta del Pokemon da mandare in campo — A SCHERMO INTERO (overlay #meta).
@@ -7666,14 +7749,15 @@
     const boxLine = game.box.length ? `<div class="meta-sub">Box: ${game.box.length} Pokémon in deposito</div>` : "";
     /* Nel cambio FORZATO non si torna indietro: qualcuno deve scendere in campo.
        In «check» (dal negozio) si torna al negozio, e c'è lo spostamento oggetti. */
-    const backRow = mode === "force" ? ""
+    const backRow = (mode === "force" || mode === "staffetta") ? ""
       : mode === "check"
         ? `<div class="meta-actions ${puoSpostare() ? "two-col" : ""}">
              ${puoSpostare() ? `<button class="meta-btn gacha" data-act="sposta">🎒 Sposta oggetti</button>` : ""}
              <button class="meta-btn ghost" data-act="back">↩ Indietro</button></div>`
         : `<div class="meta-actions"><button class="meta-btn ghost" data-act="back">↩ Indietro</button></div>`;
-    const title = mode === "force" ? "Chi mandi in campo?" : mode === "check" ? "La tua Squadra" : "Cambia Pokémon";
-    const sub = mode === "force" ? "il tuo Pokémon è esausto"
+    const title = (mode === "force" || mode === "staffetta") ? "Chi mandi in campo?" : mode === "check" ? "La tua Squadra" : "Cambia Pokémon";
+    const sub = mode === "staffetta" ? "chi entra si tiene gli sbalzi di statistica"
+      : mode === "force" ? "il tuo Pokémon è esausto"
       : mode === "check" ? "tocca un Pokémon per vedere la sua scheda"
       : "tocca chi deve scendere in campo";
     showMetaScreen(`
@@ -7687,7 +7771,9 @@
        serve a guardare, e a mandare in campo ci pensa un tasto dedicato dentro
        la scheda. Vale anche nel cambio FORZATO: è proprio lì che vuoi vedere
        chi stai mandando allo sbaraglio. */
+    rimettiScroll();
     metaEl().querySelectorAll(".pd-card[data-i]").forEach(b => b.onclick = () => {
+      scrollSquadra = metaEl().scrollTop;      // da qui si riprendera' al ritorno
       showMonScheda(parseInt(b.dataset.i, 10), mode);
     });
     if (mode === "switch") metaEl().querySelector('[data-act="back"]').onclick = () => { hideMeta(); showMainMenu(); };
@@ -7815,13 +7901,17 @@
     metaEl().querySelectorAll("[data-info-mv]").forEach(b => b.onclick = () => info("mv", b.dataset.infoMv));
     metaEl().querySelectorAll("[data-info-ab]").forEach(b => b.onclick = () => info("ab", b.dataset.infoAb));
     metaEl().querySelectorAll("[data-info-held]").forEach(b => b.onclick = () => info("held", parseInt(b.dataset.infoHeld, 10)));
-    metaEl().querySelector('[data-act="back"]').onclick = () => { schedaInfo = null; renderParty(mode); };
+    metaEl().querySelector('[data-act="back"]').onclick = () => {
+      schedaInfo = null; ripristinaScroll = scrollSquadra; renderParty(mode);
+    };
     const go = metaEl().querySelector('[data-act="go"]');
     /* ⚠️ Dal negozio non si schiera: non c'è una lotta in corso in cui mandare
        qualcuno. Il tasto non c'è proprio, invece di esserci spento. */
     if (puoScendere && go) go.onclick = () => {
       hideMeta();
-      if (mode === "force") forceSwitchTo(i); else playerSwitch(i);
+      if (mode === "force") forceSwitchTo(i);
+      else if (mode === "staffetta") staffettaVerso(i);
+      else playerSwitch(i);
     };
   }
 
@@ -10017,6 +10107,19 @@
     return list.sort(by[f.sort] || by.dex);
   }
 
+  /* 🔴 Dove eravamo arrivati nella griglia degli starter.
+     Aprire la scheda di un Pokemon e tornare indietro ridisegna la lista da
+     zero, e con oltre mille caselle voleva dire riscorrere tutto ogni volta.
+     Si segna la posizione all'andata e la si rimette al ritorno.
+     ⚠️ Solo tornando da una SCHEDA: cambiando filtro o ricerca la lista è
+     un'altra, e ripartire da metà non avrebbe senso.
+     ⚠️ Lo scroller e' `.starter-dex`, che ha un `overflow-y` suo — non `#meta`.
+     E si rimette DOPO l'impaginazione: appena riempito l'innerHTML l'altezza
+     non c'e' ancora e lo scrollTop verrebbe tagliato a zero. */
+  let scrollStarter = 0;
+  let ripristinaStarter = false;
+  function tornaAllaGrigliaStarter() { ripristinaStarter = true; renderStarterSelect(); }
+
   function renderStarterSelect() {
     const pool = starterFiltered();
     const pkrs = pokerusToday();
@@ -10095,7 +10198,17 @@
         const nq = metaEl().querySelector("#fq"); if (nq) { nq.focus(); nq.selectionStart = nq.value.length; }
       }, 250); };
     }
+    const dex = metaEl().querySelector(".starter-dex");
+    if (dex) {
+      if (ripristinaStarter) {
+        const y = scrollStarter;
+        dex.scrollTop = y;
+        requestAnimationFrame(() => { dex.scrollTop = y; });
+      }
+      ripristinaStarter = false;
+    }
     metaEl().querySelectorAll(".starter-cell[data-k]").forEach(b => b.onclick = () => {
+      scrollStarter = dex ? dex.scrollTop : 0;   // da qui si riprende al ritorno
       const k = b.dataset.k;
       const idx = starterTeam.findIndex(e => e.k === k);
       if (idx >= 0) { starterTeam.splice(idx, 1); renderStarterSelect(); return; }   // toggle off
@@ -10366,12 +10479,12 @@
     // le ⓘ aprono/chiudono lo snippet "cosa fa"
     metaEl().querySelectorAll("[data-i-ab]").forEach(b => b.onclick = () => apriInfo("ab", b.dataset.iAb));
     metaEl().querySelectorAll("[data-i-mv]").forEach(b => b.onclick = () => apriInfo("mv", b.dataset.iMv));
-    metaEl().querySelector('[data-act="back"]').onclick = renderStarterSelect;
+    metaEl().querySelector('[data-act="back"]').onclick = tornaAllaGrigliaStarter;
     metaEl().querySelector('[data-act="go"]').onclick = () => {
       // aggiunge alla squadra iniziale (sistema a punti), poi torna alla scelta
       starterTeam.push({ k: c.k, ability: c.ability, nature: c.nature, moves: c.moves.slice(),
                          shiny: c.shiny, shinyVar: c.shinyVar, gender: c.gender, pkrs: c.pkrs });
-      renderStarterSelect();
+      tornaAllaGrigliaStarter();
     };
   }
 
@@ -10766,7 +10879,22 @@
       apply: (p, pk) => insegnaTm(pk.tm) },
     { tier: "ULTRA", weight: 4, id: "mint", label: "Menta", desc: "cambia la natura di un Pokémon", icon: "mint",
       target: "mon", valid: alive, dyn: "nature",
-      apply: (p, pk) => { p.nature = pk.nature; recomputeStats(p); } },
+      /* 🔴 Cambiava la natura e basta. Nell'originale la Menta chiama
+         `unlockSpeciesNature`, cioe' quella natura entra nel DEX e da li' in
+         poi la puoi scegliere quando schieri quella specie come starter — e'
+         proprio il modo di collezionarle senza andare a caccia di esemplari.
+         Come per cattura e schiusa si registra sul CAPOSTIPITE, che e' quello
+         che si schiera (nell'originale sblocca specie + preevoluzioni: per noi
+         `rootOf` e' la stessa cosa). */
+      apply: (p, pk) => {
+        p.nature = pk.nature; recomputeStats(p);
+        const nuova = registraNatura(rootOf(p.speciesId), pk.nature);
+        if (nuova) {
+          saveMeta();
+          game.pendingLearns = game.pendingLearns || [];
+          game.pendingLearns.push({ soloTesto: `🌱 Nuova natura sbloccata per ${S[rootOf(p.speciesId)].it}: ${nuova}` });
+        }
+      } },
 
     /* ===================== ROGUE ====================== */
     { tier: "ROGUE", weight: 6, id: "rogueballs", label: "Rogue Ball ×5", desc: "cattura ×3", icon: "rb", ball: true,
@@ -11182,10 +11310,16 @@
     f.held = {}; f.berries = {};
     msg.push(`Il gas corrode gli oggetti di ${f.name}!`);
   };
+  /* Riciclo riporta indietro l'ULTIMA bacca consumata in questa lotta
+     (`volatile.bacciaFinita`, segnata da `useBerry`). Si azzera rientrando
+     nella ball, come dev'essere. */
   MOSSE_SPECIALI.RECYCLE = (a, f, m, msg) => {
-    /* Da noi le bacche consumate non si tengono da parte, quindi non c'e'
-       niente da riciclare: si dice, invece di far finta. */
-    stessoMomento(msg, "Ma non c'è niente da riciclare!");
+    const k = a.volatile.bacciaFinita;
+    if (!k || !BERRY_DATA[k]) { stessoMomento(msg, "Ma non c'è niente da riciclare!"); return; }
+    a.volatile.bacciaFinita = null;
+    a.berries = a.berries || {};
+    a.berries[k] = (a.berries[k] || 0) + 1;
+    msg.push(`${a.name} ricicla la ${BERRY_DATA[k].it}!`);
   };
   MOSSE_SPECIALI.EMBARGO = (a, f, m, msg) => {
     if (!f || f.fainted) return;
@@ -11349,15 +11483,20 @@
     if (!M[id]) id = "SWIFT";
     usaAltraMossa(a, f, id, msg, `La natura sceglie ${M[id].it}!`);
   };
-  /* Prioricolpo: nell'originale ruba la mossa che l'avversario sta per usare.
-     Da noi la scelta avversaria non e' visibile da qui, quindi si prende una
-     delle sue mosse d'attacco — l'effetto in campo e' lo stesso. */
+  /* PRECEDENZA: ruba la mossa che l'avversario STA PER usare e la lancia
+     prima, col 50% di potenza in piu'. La si legge dalla coda del turno
+     (`game._coda`): se l'avversario ha già agito non c'è niente da anticipare
+     e la mossa fallisce, esattamente come nei giochi veri. */
   MOSSE_SPECIALI.ME_FIRST = (a, f, m, msg) => {
     if (!f || f.fainted) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
-    const pool = f.moves.filter(x => M[x.id] && M[x.id].category !== "STATUS" && !NIENTE_METRONOMO.has(x.id));
-    if (!pool.length) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
-    const id = scegliACaso(pool).id;
-    usaAltraMossa(a, f, id, msg, `${a.name} anticipa ${M[id].it}!`);
+    const q = game._coda || [];
+    const az = q.find((x, k) => k > game._codaI && x.actor === f);
+    if (!az) { stessoMomento(msg, `Ma ${f.name} ha già agito!`); return; }
+    const id = az.move.id;
+    if (!M[id] || M[id].category === "STATUS") { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    a.volatile.precedenza = true;
+    try { usaAltraMossa(a, f, id, msg, `${a.name} anticipa ${M[id].it}!`); }
+    finally { a.volatile.precedenza = false; }
   };
   /* Ordine: il bersaglio rifa' subito l'ultima mossa che ha usato. */
   MOSSE_SPECIALI.INSTRUCT = (a, f, m, msg) => {
@@ -11384,14 +11523,36 @@
   /* Trasformazione: statistiche, tipi, abilita' e mosse dell'avversario.
      I PS restano i propri — come nei giochi veri — e lo sprite non cambia:
      ridisegnarlo vorrebbe dire ricaricare l'atlante a meta' turno. */
+  /* TRASFORMAZIONE: si diventa l'avversario. Statistiche (tranne i PS), tipi,
+     abilita', mosse (a 5 PP l'una) e ANCHE l'aspetto.
+     ⚠️ Cambiare `dex`/`speciesId` su un Pokemon della squadra e' pericoloso:
+     `nextWave` salva la run PRIMA di `fineBattaglia`, e un Ditto salvato da
+     Charizard resterebbe Charizard per sempre. L'originale si tiene sotto
+     `_trasf`, e si annulla rientrando nella ball e a inizio ondata — tre reti
+     invece di una perche' questa e' proprio una di quelle che non si perdona. */
+  function annullaTrasformazione(f) {
+    if (!f || !f._trasf) return;
+    Object.assign(f, f._trasf);
+    f._trasf = null;
+    f.spr = null;
+    loadFighterSprite(f, isEnemySide(f) ? "front" : "back").then(sp => { f.spr = sp; redrawScene(); });
+  }
   MOSSE_SPECIALI.TRANSFORM = (a, f, m, msg) => {
-    if (!f || f.fainted) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    if (!f || f.fainted || a._trasf) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    a._trasf = { speciesId: a.speciesId, dex: a.dex, name: a.name, types: a.types,
+                 stats: a.stats, ability: a.ability, moves: a.moves,
+                 formKey: a.formKey, variant: a.variant, shiny: a.shiny, shinyVar: a.shinyVar };
+    a.speciesId = f.speciesId; a.dex = f.dex; a.name = f.name;
+    a.formKey = f.formKey; a.variant = f.variant;
+    a.shiny = f.shiny; a.shinyVar = f.shinyVar;
     a.types = f.types.slice();
     a.stats = Object.assign({}, f.stats, { hp: a.stats.hp });
     a.stages = Object.assign({}, f.stages);
     a.ability = f.ability;
     a.moves = f.moves.map(x => ({ id: x.id, pp: Math.min(5, M[x.id].pp), maxPp: Math.min(5, M[x.id].pp) }));
-    msg.push(`${a.name} si trasforma in ${f.name}!`);
+    a.spr = null;
+    loadFighterSprite(a, isEnemySide(a) ? "front" : "back").then(sp => { a.spr = sp; redrawScene(); });
+    msg.push(`${a._trasf.name} si trasforma in ${f.name}!`);
   };
 
   /* ---- il sostituto ---------------------------------------------------- */
@@ -11525,47 +11686,38 @@
      svuota a turno concluso. Le azioni ancora da risolvere tengono in mano il
      Pokemon che c'e' adesso, e cambiarlo sotto i piedi le farebbe colpire un
      riferimento morto. */
-  function chiediCambio(chi, stadi, msg, testo) {
+  /* `daSolo` distingue le DUE famiglie, che nell'originale sono due tipi di
+     cambio diversi (`SwitchType.FORCE_SWITCH` contro `SwitchType.SWITCH`):
+       · CACCIATO FUORI (Turbine, Boato)  → il ricambio esce A CASO;
+       · SE NE VA DA SOLO (Staffetta, Teletrasporto, Monito, Tagliacoda)
+         → il ricambio lo SCEGLIE chi gioca. */
+  function chiediCambio(chi, stadi, msg, testo, daSolo) {
     if (!chi || chi.fainted) { stessoMomento(msg, "Ma non ha funzionato!"); return false; }
     if (game.lati && lato(chi).nocambio > 0) { stessoMomento(msg, "Un vincolo fatato lo tiene in campo!"); return false; }
     if (chi.volatile.trap || chi.volatile.ingrain) { stessoMomento(msg, `${chi.name} non riesce a lasciare il campo!`); return false; }
     /* Il ricambio si controlla ADESSO. Senza, si annunciava «X viene spazzato
        via!» e un attimo dopo «ma non c'e' nessuno che lo sostituisca»: due
-       righe che si smentiscono. */
-    const c_e_ricambio = isEnemySide(chi)
+       righe che si smentiscono.
+       ⚠️ Il SELVATICO fa eccezione: non ha ricambio ma non fallisce — scappa,
+       e la lotta finisce (senza premi). */
+    const selvatico = isEnemySide(chi) && !chi.trainer && !chi.trainerMon
+                      && !(game.enemyQueue && game.enemyQueue.length);
+    const c_e_ricambio = selvatico ? true : isEnemySide(chi)
       ? (chi === game.enemy && !!(game.enemyQueue && game.enemyQueue.length))
       : game.party.some(p => !p.fainted && p !== game.player && p !== game.player2);
     if (!c_e_ricambio) { stessoMomento(msg, `Ma non c'è nessuno che possa sostituire ${chi.name}!`); return false; }
-    (game.cambioForzato = game.cambioForzato || []).push({ chi, stadi: !!stadi });
+    const richiesta = { chi, stadi: !!stadi, sub: stadi ? chi.volatile.sub : 0 };
+    // l'auto-cambio del GIOCATORE apre la squadra: la coda del turno lo aspetta
+    if (daSolo && !isEnemySide(chi)) game.cambioScelto = richiesta;
+    else (game.cambioForzato = game.cambioForzato || []).push(richiesta);
     if (testo) msg.push(testo);
     return true;
   }
-  function eseguiCambioForzato(r, log) {
-    const chi = r.chi;
-    if (!chi || chi.fainted) return;
+  /* Fa entrare `riserva` al posto di `chi`, portandosi dietro gli sbalzi e il
+     sostituto se la mossa li passa (Staffetta, Tagliacoda). */
+  function scambiaSulCampo(chi, riserva, r, log) {
     const stadi = r.stadi ? Object.assign({}, chi.stages) : null;
-    const sub = r.stadi ? chi.volatile.sub : 0;      // la Zampata passa il sostituto
-    if (isEnemySide(chi)) {
-      // avversario: si pesca dalla coda dell'allenatore, e lui torna in fondo
-      if (chi !== game.enemy || !game.enemyQueue || !game.enemyQueue.length) {
-        log.push(`Ma non c'è nessuno che possa sostituire ${chi.name}!`); return;
-      }
-      richiamaNellaBall(chi);
-      game.enemyQueue.push(chi);
-      const next = game.enemyQueue.shift();
-      log.push(conBall(`${chi.name} lascia il campo!`, "ritiro", "enemy"));
-      deployEnemy(next, log);
-      entraInCampo(next, log);
-      log.push(conBall(`Tocca a ${next.name}!`, "uscita", "enemy"));
-      if (stadi) next.stages = stadi;
-      if (sub) next.volatile.sub = sub;
-      if (typeof renderTrainerBalls === "function") renderTrainerBalls();
-      renderScene();
-      return;
-    }
-    // squadra del giocatore: il ricambio e' il primo della panchina ancora in piedi
-    const riserva = game.party.find(p => !p.fainted && p !== game.player && p !== game.player2);
-    if (!riserva) { log.push(`Ma non c'è nessuno che possa sostituire ${chi.name}!`); return; }
+    const sub = r.sub || 0;
     const secondo = (chi === game.player2);
     richiamaNellaBall(chi);
     log.push(conBall(`Ritirati, ${chi.name}!`, "ritiro", secondo ? "player2" : "player"));
@@ -11580,23 +11732,79 @@
     renderScene();
   }
 
+  function eseguiCambioForzato(r, log) {
+    const chi = r.chi;
+    if (!chi || chi.fainted) return;
+    if (isEnemySide(chi)) {
+      /* SELVATICO cacciato fuori: non ha ricambio, SCAPPA. Se non resta
+         nessun altro avversario la lotta finisce senza premi — e' quello che
+         fa l'originale (`BattleEndPhase(false)` + `NewBattlePhase`). */
+      if (!chi.trainer && !chi.trainerMon && !(game.enemyQueue && game.enemyQueue.length)) {
+        const altro = chi === game.enemy ? game.enemy2 : game.enemy;
+        log.push(`${chi.name} se la dà a gambe!`);
+        if (chi === game.enemy2) game.enemy2 = null;
+        else if (altro) { game.enemy = altro; game.enemy2 = null; }
+        else game.fugaSelvatica = true;      // non resta nessuno: fine lotta
+        renderScene();
+        return;
+      }
+      // ALLENATORE: ne manda un altro, pescato A CASO fra quelli in panchina
+      if (chi !== game.enemy || !game.enemyQueue || !game.enemyQueue.length) {
+        log.push(`Ma non c'è nessuno che possa sostituire ${chi.name}!`); return;
+      }
+      const stadi = r.stadi ? Object.assign({}, chi.stages) : null;
+      richiamaNellaBall(chi);
+      const i = Math.floor(Math.random() * game.enemyQueue.length);
+      const next = game.enemyQueue.splice(i, 1)[0];
+      game.enemyQueue.push(chi);           // torna in coda, non sparisce
+      log.push(conBall(`${chi.name} lascia il campo!`, "ritiro", "enemy"));
+      deployEnemy(next, log);
+      entraInCampo(next, log);
+      log.push(conBall(`Tocca a ${next.name}!`, "uscita", "enemy"));
+      if (stadi) next.stages = stadi;
+      if (r.sub) next.volatile.sub = r.sub;
+      if (typeof renderTrainerBalls === "function") renderTrainerBalls();
+      renderScene();
+      return;
+    }
+    /* Squadra del giocatore CACCIATA FUORI: il ricambio esce A CASO, come
+       nell'originale (`randBattleSeedInt` sugli indici disponibili). Quando
+       invece se ne va da solo il ricambio lo sceglie lui, e non passa di qui. */
+    const panchina = game.party.filter(p => !p.fainted && p !== game.player && p !== game.player2);
+    if (!panchina.length) { log.push(`Ma non c'è nessuno che possa sostituire ${chi.name}!`); return; }
+    scambiaSulCampo(chi, panchina[Math.floor(Math.random() * panchina.length)], r, log);
+  }
+
+  /* L'auto-cambio del giocatore ha aperto la schermata squadra: qui arriva la
+     sua scelta, e da qui riparte la coda del turno rimasta in sospeso. */
+  function staffettaVerso(index) {
+    if (game.phase !== "STAFFETTA") return;
+    const r = game.staffetta; game.staffetta = null;
+    const riserva = game.party[index];
+    const log = makeLog();
+    if (r && riserva && !riserva.fainted && riserva !== game.player && riserva !== game.player2) {
+      scambiaSulCampo(r.chi, riserva, r, log);
+    }
+    codaDelTurno(log);
+  }
+
   /* Turbine e Boato scacciano l'AVVERSARIO; Staffetta, Zampata, Monito e
      Teletrasporto fanno uscire CHI LI USA. Solo Staffetta e Zampata passano
      gli sbalzi di statistica a chi entra. */
   MOSSE_SPECIALI.WHIRLWIND = (a, f, m, msg) => chiediCambio(f, false, msg, `${f.name} viene spazzato via dal campo!`);
   MOSSE_SPECIALI.ROAR      = (a, f, m, msg) => chiediCambio(f, false, msg, `Il boato caccia ${f.name} dal campo!`);
-  MOSSE_SPECIALI.TELEPORT  = (a, f, m, msg) => chiediCambio(a, false, msg, `${a.name} si teletrasporta via!`);
-  MOSSE_SPECIALI.BATON_PASS = (a, f, m, msg) => chiediCambio(a, true, msg, `${a.name} passa il testimone!`);
+  MOSSE_SPECIALI.TELEPORT  = (a, f, m, msg) => chiediCambio(a, false, msg, `${a.name} si teletrasporta via!`, true);
+  MOSSE_SPECIALI.BATON_PASS = (a, f, m, msg) => chiediCambio(a, true, msg, `${a.name} passa il testimone!`, true);
   MOSSE_SPECIALI.SHED_TAIL = (a, f, m, msg) => {
     const costo = Math.floor(a.maxHp / 4);
     if (a.hp <= costo) { stessoMomento(msg, `${a.name} non ha abbastanza PS!`); return; }
-    if (!chiediCambio(a, true, msg, null)) return;
+    if (!chiediCambio(a, true, msg, null, true)) return;
     a.hp -= costo; a._justHit = true; a.volatile.sub = costo;
     msg.push(`${a.name} lascia un sostituto e si defila!`);
   };
   MOSSE_SPECIALI.PARTING_SHOT = (a, f, m, msg) => {
     if (f && !f.fainted) applyStatStage(f, ["ATK", "SPATK"], -1, msg, false);
-    chiediCambio(a, false, msg, `${a.name} lascia il campo dopo l'ultima parola!`);
+    chiediCambio(a, false, msg, `${a.name} lascia il campo dopo l'ultima parola!`, true);
   };
 
   // Probabilita' del TIER (poi si pesca l'oggetto dentro al tier, coi pesi sopra)
@@ -11997,15 +12205,67 @@
     metaEl().querySelector('[data-act="back"]').onclick = back;
   }
 
+  /* 🔴 Un oggetto curativo non si vedeva per niente: la barra era già
+     piena quando l'emporio si chiudeva, e nessuno diceva cos'era successo.
+     Adesso si guarda il Pokemon PRIMA e DOPO e si racconta la differenza — una
+     sola volta, qui, cosi' vale anche per gli oggetti che aggiungeremo poi
+     invece di dover ricordarsi di scriverlo in ognuno. */
+  const STATO_ERA = { BURN: "scottato", PARALYSIS: "paralizzato", SLEEP: "addormentato",
+                      POISON: "avvelenato", FREEZE: "congelato" };
+  const fotoMon = p => p ? { hp: p.hp, ko: p.fainted, st: p.status,
+                             pp: p.moves.reduce((n, m) => n + m.pp, 0) } : null;
+  function raccontaEffetto(p, prima) {
+    if (!p || !prima) return null;
+    const righe = [];
+    if (prima.ko && !p.fainted) righe.push(`${p.name} torna in forze!`);
+    else if (p.hp > prima.hp) righe.push(`${p.name} recupera ${p.hp - prima.hp} PS!`);
+    if (prima.st && !p.status) righe.push(`${p.name} non è più ${STATO_ERA[prima.st] || "malato"}!`);
+    const pp = p.moves.reduce((n, m) => n + m.pp, 0) - prima.pp;
+    if (pp > 0) righe.push(`${p.name} recupera ${pp} PP!`);
+    return righe.length ? righe.join("\n") : null;
+  }
+  /* Mette in coda il racconto della cura. `pre` e' l'istantanea del campo PRIMA
+     che l'oggetto facesse effetto: `nextEvent` la usa per far partire la barra
+     da li' e vederla salire (e' lo stesso meccanismo delle mosse). */
+  function segnalaCura(p, prima) {
+    const testo = raccontaEffetto(p, prima);
+    if (!testo) return;
+    game.pendingLearns = game.pendingLearns || [];
+    game.pendingLearns.push({ cura: { testo, pre: preCura, lato: onField().includes(p) ? sideOf(p) : null } });
+  }
+  let preCura = null;    // fotografia del CAMPO, presa appena prima di applicare
+
+  /* Suona una o piu' cure di fila e poi chiama `poi`. */
+  function suonaCure(lista, poi) {
+    if (!lista.length) { poi(); return; }
+    const c = lista[0];
+    const log = makeLog();
+    log.push(c.testo);
+    if (c.pre) log.events[0].pre = c.pre;
+    if (c.lato) log.anim("COMMON_HEALTH_UP", c.lato);
+    playEvents(log.events, () => suonaCure(lista.slice(1), poi));
+  }
+
   function grantItem(pick, done, back) {
     const item = pick.item;
+    const conRacconto = (p, esegui) => {
+      preCura = snapEvent("");          // com'era il campo un attimo fa
+      const prima = fotoMon(p);
+      esegui();
+      segnalaCura(p, prima);
+      preCura = null;
+      done();
+    };
     if (item.target === "mon") {
       chooseTarget(pick, p => {
         // gli oggetti "su una mossa" chiedono ANCHE quale
-        if (item.mossa) chooseMove(pick, p, (i) => { item.apply(p, pick, i); done(); }, back);
-        else { item.apply(p, pick); done(); }
+        if (item.mossa) chooseMove(pick, p, (i) => conRacconto(p, () => item.apply(p, pick, i)), back);
+        else conRacconto(p, () => item.apply(p, pick));
       }, back);
-    } else { item.apply(game.player, pick); done(); }
+    } else {
+      // oggetti su TUTTA la squadra (Cenere magica): si racconta l'attivo
+      conRacconto(game.player, () => item.apply(game.player, pick));
+    }
   }
 
   // Ingresso nel negozio (dopo un'ondata): azzera il costo del reroll.
@@ -12100,7 +12360,18 @@
       if (game.money < g.price) return;
       const pk = fillPick(g.item);
       grantItem(pk,
-        () => { game.money -= g.price; game.pendingLearns = []; renderScene(); showReward(picks); },
+        () => {
+          game.money -= g.price;
+          /* ⚠️ Questo ramo azzerava `pendingLearns` (serve per le caramelle
+             comprate) e con esso buttava via anche il racconto della cura, che
+             all'emporio e' proprio il caso piu' comune: si compra una Pozione e
+             non si vedeva succedere niente. Ora si mette da parte prima. */
+          const cure = (game.pendingLearns || []).filter(x => x.cura).map(x => x.cura);
+          game.pendingLearns = [];
+          renderScene();
+          if (cure.length) { hideMeta(); suonaCure(cure, () => showReward(picks)); return; }
+          showReward(picks);
+        },
         () => showReward(picks));
     });
   }
@@ -12424,7 +12695,7 @@
   /* ---------------------------------------------------------------------- */
   /*  AVVIO — carica i dati reali, poi comincia                             */
   /* ---------------------------------------------------------------------- */
-  const DATA_V = 22;   // versione dei dati: alzala a ogni rigenerazione
+  const DATA_V = 23;   // versione dei dati: alzala a ogni rigenerazione
   /* I dati arrivano dallo strato aggiornato se c'e' (vedi pokerogue-boot.js,
      §28), altrimenti dai file locali. `window.PR` esiste solo quando la pagina
      e' stata avviata dal guscio: aprendo i file a mano si ricade sul fetch. */
