@@ -10839,9 +10839,26 @@
      quando si ha voglia di guardare quanto manca, non ogni volta che si compone
      la squadra. Con "Tutto" tornano tutte e 544. */
   const starterFilters = { gen: 0, type: "", stato: "libero", sort: "dex", q: "",
-                           soloPkrs: false, senzaFiocco: false };
+                           soloPkrs: false, senzaFiocco: false,
+                           passiva: "", scontabile: false };
   const SORT_IT = { dex: "Num. Dex", cost: "Costo", name: "Nome", candy: "Caramelle" };
   const STATO_IT = { libero: "Schierabili", tutto: "Tutto", visto: "Visti", ignoto: "Mancanti" };
+  /* Le caramelle si spendono in due cose sole — sbloccare la PASSIVA e ridurre
+     il COSTO — ma per sapere su chi si poteva spendere bisognava aprire le
+     schede una per una. Questi due filtri rispondono alla domanda vera:
+     «su chi posso spendere ADESSO?».
+       · sbloccata   = la passiva ce l'hai già
+       · sbloccabile = non ce l'hai ma le caramelle bastano
+       · bloccata    = non ce l'hai e non bastano */
+  const PASSIVA_IT = { "": "Passiva: tutte", ok: "✅ sbloccata",
+                       pronta: "🍬 sbloccabile", no: "🔒 bloccata" };
+  const passivaStato = k => (meta.passiveOn && meta.passiveOn[k]) ? "ok"
+    : (candyOf(k) >= passivePrice(k) ? "pronta" : "no");
+  // il costo si può ridurre ancora, e le caramelle bastano?
+  const costoScontabile = k => {
+    const p = costCutPrice(k);
+    return p != null && candyOf(k) >= p;
+  };
   function starterFiltered() {
     const f = starterFilters;
     const q = f.q.trim().toLowerCase();
@@ -10859,6 +10876,10 @@
          OGGI?» e «chi non ho ancora fatto?». */
       if (pkrs && !pkrs.includes(k)) return false;
       if (f.senzaFiocco && hasRibbon(k)) return false;
+      /* ⚠️ Passiva e sconto valgono solo su chi puoi davvero schierare: su una
+         sagoma mai incontrata non ha senso parlare di caramelle da spendere. */
+      if (f.passiva && (starterState(k) !== "libero" || passivaStato(k) !== f.passiva)) return false;
+      if (f.scontabile && (starterState(k) !== "libero" || !costoScontabile(k))) return false;
       // La ricerca per nome vale solo su chi il nome ce l'ha scoperto: cercare
       // fra le sagome direbbe come si chiama un Pokémon che non hai ancora
       // incontrato, e la griglia il nome non lo mostra apposta.
@@ -10931,10 +10952,13 @@
         <select id="ftype" class="filter-sel">${opt("", f.type, "Tipo: tutti")}${Object.keys(CHART).map(t => opt(t, f.type, T[t].it)).join("")}</select>
         <select id="fstato" class="filter-sel">${Object.keys(STATO_IT).map(s => opt(s, f.stato, STATO_IT[s])).join("")}</select>
         <select id="fsort" class="filter-sel">${Object.keys(SORT_IT).map(s => opt(s, f.sort, "↕ " + SORT_IT[s])).join("")}</select>
+        <select id="fpassiva" class="filter-sel">${Object.keys(PASSIVA_IT).map(v => opt(v, f.passiva, PASSIVA_IT[v])).join("")}</select>
         <button class="chip filtro-chip${f.soloPkrs ? " on" : ""}" data-fx="soloPkrs"
           title="mostra solo chi ha il Pokérus di oggi">💜 solo Pokérus</button>
         <button class="chip filtro-chip${f.senzaFiocco ? " on" : ""}" data-fx="senzaFiocco"
           title="nascondi quelli che hanno già il fiocco">🎀 senza fiocco</button>
+        <button class="chip filtro-chip${f.scontabile ? " on" : ""}" data-fx="scontabile"
+          title="hai abbastanza caramelle per abbassargli il costo">🍬 costo riducibile</button>
       </div>
       <div class="meta-sub" style="margin:.4vh 0">Sbloccati ${presi}/${tot} · ${pool.length} mostrati · 💜 Pokérus · 🎀 fiocco · ● = costo</div>
       <div class="starter-dex">${cells || '<div class="meta-sub">Nessun Pokémon con questi filtri.</div>'}</div>
@@ -10955,6 +10979,7 @@
     bind("ftype", "type");
     bind("fstato", "stato");
     bind("fsort", "sort");
+    bind("fpassiva", "passiva");
     const q = metaEl().querySelector("#fq");
     if (q) {
       // si ridisegna quando si smette di scrivere, non a ogni tasto: con 1000
