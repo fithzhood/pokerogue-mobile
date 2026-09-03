@@ -6822,9 +6822,17 @@
                     + (actor._lansat ? 2 : 0)
                     + (actor === game.player && game.tempBoost.crit > 0 ? 1 : 0);
     let total = 0, lastEff = 1, anyCrit = false, immune = false, done = 0;
-    // VIGORE guarda i PS PRIMA del colpo: e' «non vai KO in un colpo solo»
-    const daPsPieni = foe.hp >= foe.maxHp;
     for (let h = 0; h < hits; h++) {
+      /* 🔴 VIGORE guarda i PS QUI, PRIMA DI QUESTO COLPO — non prima
+         dell'intera mossa. Con l'istantanea presa fuori dal ciclo restava
+         «era a PS pieni» per tutti e cinque i colpi di Semitraglia, e il
+         Pokemon si salvava OGNI VOLTA: invincibile ai colpi multipli, non
+         aggirato. Con il controllo dal vivo il primo colpo lo lascia a 1 PS e
+         dal secondo muore — che è esattamente cosa fa nei giochi veri
+         (`PreDefendFullHpEndureAbAttr`: `pokemon.isFullHp()` al momento del
+         singolo colpo). Vigore promette di non morire IN UN COLPO, non di non
+         morire. */
+      const daPsPieni = foe.hp >= foe.maxHp;
       if (foe.fainted) break;
       const res = computeDamage(actor, foe, move, { forceCrit: forceCrit || laserPronto, highCrit, critStage: critBonus, potenza });
       if (res.immune) { immune = true; break; }
