@@ -5534,7 +5534,10 @@
          E lo stesso equivoco di Gridodilotta (§44.1): la direzione la da il
          BERSAGLIO DELLA MOSSA, non il parametro foe, che per le mosse senza
          scelta resta l avversario di ufficio. */
-      const suDiSe = BERSAGLIO_SU_DI_SE.has(move.target);
+      /* Maledizione e due mosse in una: da SPETTRO colpisce il bersaglio, da
+         chiunque altro e un buff su di se. Anche l animazione va di conseguenza. */
+      const suDiSe = BERSAGLIO_SU_DI_SE.has(move.target)
+        || (move.id === "CURSE" && !actor.types.includes("GHOST"));
       const chiSubisce = suDiSe ? actor : foe;
       const key = animKeyForMove(move.id);
       prefetchAnim(key);
@@ -5563,6 +5566,34 @@
         scaricaAccumulo(actor, messages);
         stessoMomento(messages, `${actor.name} recupera energie!`);
         if (messages.anim) messages.anim("COMMON_HEALTH_UP", sideOf(actor));
+      }
+    }
+
+    /* 4-quater. MALEDIZIONE. 🔴 Nei dati ha `attrs: []`: nell'originale e' una
+       classe a se' (`CurseAttr`), e l'estrattore non sa tradurla in mattoncini.
+       Risultato: la mossa non faceva assolutamente niente, pur essendoci gia'
+       nel motore sia il volatile `curse` sia il rosicchio di fine turno.
+       Sono DUE mosse in una, come nei giochi veri:
+         · chi la usa e' di tipo SPETTRO -> sacrifica META' dei PS massimi e
+           maledice il bersaglio (1/4 dei suoi PS massimi a ogni fine turno);
+         · chiunque altro -> +1 Attacco, +1 Difesa, −1 Velocita' A SE STESSO.
+       ⚠️ Il bersaglio: `move.target` vale "CURSE", che non sta in nessuno dei
+       due gruppi, quindi `foe` e' l'avversario d'ufficio — giusto per la
+       versione spettro, ignorato del tutto per l'altra. */
+    if (move.id === "CURSE") {
+      if (actor.types.includes("GHOST")) {
+        if (foe.fainted || foe.volatile.curse) {
+          stessoMomento(messages, "Ma non ha funzionato!");
+        } else {
+          const costo = Math.max(1, Math.floor(actor.maxHp / 2));
+          actor.hp = Math.max(0, actor.hp - costo); actor._justHit = true;
+          foe.volatile.curse = true;
+          messages.push(`${actor.name} sacrifica metà dei suoi PS per lanciare una maledizione su ${foe.name}!`);
+          if (actor.hp <= 0) { actor.fainted = true; messages.push(`${actor.name} è esausto!`); }
+        }
+      } else {
+        applyStatStage(actor, ["ATK", "DEF"], 1, messages, true);
+        applyStatStage(actor, ["SPD"], -1, messages, true);
       }
     }
 

@@ -3957,3 +3957,179 @@ Nella versione non-spettro e' un buff su di sé e va ancorata a chi la usa.
 ⚠️ **Da guardare, prima o poi**: quante altre mosse hanno `attrs: []` pur non
 essendo mosse «vuote»? Sono tutte candidate a non fare niente in silenzio, come
 questa. Il modo per trovarle e' interrogare `data/moves.json`, non giocarci.
+
+---
+
+## 47. 🔴 Le 136 mosse che non facevano niente (rev 121-127)
+
+Richiesta: «falle pure tutte, io vado a letto, domattina spero avrai sistemato
+tutto». Questo capitolo racconta un lavoro fatto in una sola sessione lunga, e
+va letto sapendo **anche cosa NON e' stato fatto** — la sezione 47.6.
+
+### 47.1 Il conto esatto
+
+La nota in fondo alla §46.5 chiedeva: «quante altre mosse hanno `attrs: []` pur
+non essendo mosse vuote?». La risposta, interrogando `data/moves.json`:
+
+| | |
+|---|---|
+| mosse di STATO con `attrs: []` | **136** |
+| coppie specie-mossa che le imparano | **2 561** |
+| specie coinvolte | **935** su 1 084 |
+
+Nove erano gia' gestite altrove per nome (`WEATHER_MOVES`, Accumulo,
+Sfoghenergia, Sonnolalia). Le altre **127 non facevano assolutamente niente**:
+si consumavano i PP, si leggeva «X usa Focalenergia!», e finiva li'.
+
+Le piu' diffuse: **Focalenergia** (100 specie), **Altruismo** (81),
+**Crescita** (73), **Riposo** (65), **Maledizione** (65), **Boato** (63),
+**Salvaguardia** (60), **Schermoluce** (57), **Sintesi** (50).
+
+### 47.2 Perche' l'estrattore le perdeva
+
+Nell'originale una mossa e' fatta di **mattoncini** (`attrs`) che l'estrattore
+sa tradurre: `StatStageChangeAttr`, `StatusEffectAttr`, `HealAttr`… Ma le mosse
+che cambiano il **funzionamento del turno** non sono mattoncini: sono classi a
+sé (`ReflectAttr`, `AddArenaTagAttr`, `CurseAttr`, `ForceSwitchOutAttr`,
+`RandomMoveAttr`…). L'estrattore le legge, non le riconosce, e lascia
+`attrs: []`. Da noi diventavano mosse mute.
+
+⚠️ **Non e' un bug dell'estrattore da correggere**: quelle classi hanno un
+comportamento che nessuna tabella di dati puo' descrivere. Vanno scritte a
+mano, ed e' quello che si e' fatto.
+
+### 47.3 Dove vive adesso la roba
+
+**`MOSSE_SPECIALI`** — una tabella `{ ID_MOSSA: funzione }`, dichiarata vicino a
+`entraInCampo` e riempita in fondo al file (le voci hanno bisogno di quasi tutto
+il motore). `resolveAction` la interroga in un punto solo:
+
+```js
+// 4-quater. le mosse che l'estrattore non sa tradurre
+if (MOSSE_SPECIALI[move.id]) MOSSE_SPECIALI[move.id](actor, foe, move, messages);
+```
+
+Ogni voce riceve `(actor, foe, move, messages)`.
+
+⚠️ **La trappola del bersaglio**: per una mossa «su di sé» il motore passa
+comunque l'avversario d'ufficio in `foe` — chi non sceglie un bersaglio non ne
+ha davvero uno. Le voci che agiscono sul lanciatore **devono usare `actor`**.
+Sbagliarlo significa curare o potenziare il nemico, ed e' successo davvero
+(§46.3).
+
+**`game.lati`** — la roba che sta su **un lato del campo** e non su un Pokemon:
+schermi, Salvaguardia, Nebbia, Ventoincoda, Fortuncanto, le quattro protezioni
+di squadra, le trappole d'ingresso (Punte, Fielepunte, Levitoroccia, Rete
+Vischiosa), il Desiderio, la promessa di Curardore. Si azzera a fine lotta
+(`fineBattaglia`), non a fine run.
+
+**Campi di `game`** — la roba che vale per **tutto il campo**: `fangata`,
+`doccia`, `gravita`, `distorto` (Distortozona), `mirabil` (Mirabilzona),
+`magica` (Magicozona), `plasma` (Pioggiaplasma). Scalano in `scalaCampo`, che
+gira una volta per turno dentro `scalaLati`. `cuccagna` invece dura tutta la
+run ed e' nel salvataggio (`CAMPI_RUN`).
+
+**`window.__provaMossa(id, chi)`** — la sonda nuova. Fa usare una mossa
+qualsiasi a chi e' in campo passando da **tutto** il motore, e restituisce le
+righe di log:
+
+```js
+__provaMossa("METRONOME")       // la usa il tuo
+__provaMossa("ROAR", "e")       // la usa l'avversario
+```
+
+E' cosi' che si e' collaudato: 127 mosse in un ciclo solo, con lo stato
+riportato a zero fra una e l'altra. **Zero eccezioni.** `window.__mosse` elenca
+gli handler registrati.
+
+### 47.4 Cosa fanno adesso, per famiglie
+
+| famiglia | mosse | cosa serviva |
+|---|---|---|
+| **schermi e lato** | Riflesso, Schermoluce, Velaurora, Salvaguardia, Nebbia, Fortuncanto, Ventoincoda | `game.lati` + lettura in `computeDamage` (⚠️ un brutto colpo IGNORA gli schermi, o diventano troppo forti) |
+| **trappole d'ingresso** | Punte (3 strati), Fielepunte, Levitoroccia, Rete Vischiosa | `trappoleIngresso(f)` dentro `entraInCampo` |
+| **cure** | Riposo, Sintesi, Lucelunare, Mattindoro, Sabbiaccumulo, Cura Floreale, Rintoccasana, Aromaterapia, Rinfrescata, Divisione, Preghiera Vitale, Curardore, Lunardanza, Desiderio | `curaMeteo` (la quota dipende dal tempo), promessa sul lato per chi entra dopo, Desiderio che matura **due turni** dopo |
+| **brutti colpi** | Focalenergia, Concentrazione, Grido del Drago | `+2 stadi` e critico garantito, letti in `doDamage` |
+| **statistiche** | Crescita, Panciamburo, Animanima, Filettatura, Acupressione, Nebbia Totale, Retromarcia, Copiastat, i sei Scambio/Divisione | lettura e scrittura diretta di `stages` e `stats` |
+| **tipi** | Docciascudo, Polvermagica, Ammaliaterra, Boscomalus, Conversione 1 e 2, Riflettipo, Camuffamento | `cambiaTipo` |
+| **abilita'** | Baratto, Squadra, Ricalco, Trasformazione, Fardelloscambio, Raggio Chiaro, Malaerba, Gastroacido | scambio o annullamento di `ability` |
+| **oggetti** | Raggiro, Rapidscambio, Cediregalo, Gas Corrosivo, Riciclo, Divieto, Magicozona | spostamento di `held`/`berries` |
+| **campo** | Fangata, Docciascudo, Gravita', Distortozona, Mirabilzona, Magicozona, Pioggiaplasma, Cuccagna | contatori su `game` + lettura in `computeDamage` e nel comparatore d'ordine |
+| **vedere e non sbagliare** | Preveggenza, Segugio, Miracolvista, Localizza, Leggimente, Magnetascesa, Telecinesi | `volatile.smascherato`, `volatile.mirino`, `volatile.levita` |
+| **mosse che ne chiamano altre** | Metronomo, Speculmossa, Copione, Assistente, Naturforza, Precedenza, Imposizione, Sonnolalia | `usaAltraMossa`, che rientra in `resolveAction` |
+| **copiare** | Mimica, Schizzo, Trasformazione, Sostituto | riscrittura degli slot mossa, fantoccio che incassa |
+| **togliere mosse** | Inibitore, Dispetto, Esclusiva, Tentacolock | `volatile.disable`, `volatile.imprison`, letti in `mossaVietata` |
+| **portarsi dietro chi ti stende** | Destinobbligato, Rancore | agganciati al KO dentro `doDamage` |
+| **rubare e rimandare** | Magivelo, Scippo | intercettano le mosse di STATO **prima** che partano |
+| **doppio** | Sonoqui, Nubepolline, Riflettore, Bodyguard, Blocco, Truccodifesa, Ribaltappeto, Cortesia, Spintone, Cambiaposto, Blocco Fatato, Cambiocampo | redirezione del bersaglio in `risolviTurno`, protezioni di squadra, riordino della coda |
+| **cambi forzati** | Turbine, Boato, Teletrasporto, Staffetta, Tagliacoda, Monito | lista `game.cambioForzato`, svuotata da `afterTurn` |
+| **niente, per davvero** | Splash, Comparsa, Prendimano, Ora del Te' | dicono che non succede niente — che e' **giusto**, ma prima non lo dicevano nemmeno |
+
+### 47.5 Le tre trappole che sono costate di piu'
+
+**1. Copione guardava se stesso.** `resolveAction` aggiornava
+`game.ultimaMossa = moveInst.id` **prima** di chiamare `MOSSE_SPECIALI`, quindi
+Copione trovava sempre `"COPYCAT"` e falliva sempre. Adesso la memoria si
+salva prima e si aggiorna **dopo** che la mossa e' stata risolta.
+
+**2. I cambi forzati non si possono fare a meta' turno.** Le azioni ancora da
+risolvere tengono **in mano** un riferimento al Pokemon in campo: sostituirlo
+sotto i piedi le fa colpire un fantasma. Vanno in coda (`game.cambioForzato`) e
+`afterTurn` le esegue a turno finito.
+
+⚠️ E il ricambio si controlla **quando la mossa parte**, non quando si esegue:
+la prima versione annunciava «X viene spazzato via!» e un attimo dopo «ma non
+c'e' nessuno che lo sostituisca». Due righe che si smentivano.
+
+**3. Metronomo puo' pescare Metronomo.** Senza un tetto di profondita' il gioco
+si pianta **in silenzio**: nessun errore, nessun messaggio, la schermata resta
+li'. `profonditaMossa` si ferma a 2, e le mosse che chiamano altre mosse sono
+escluse dal sorteggio (`NIENTE_METRONOMO`).
+
+Una quarta, minore ma insidiosa: **Sonnolalia si usa dormendo**, quindi il
+controllo «riesce ad agire?» la scartava sempre. Va intercettata **prima** di
+`canAct`. Stesso motivo per cui le mosse chiamate da un'altra mossa saltano quel
+controllo: rifarlo vorrebbe dire tirare due volte i dadi di paralisi e
+confusione, e scalare due volte il contatore del sonno.
+
+### 47.6 ⚠️ Cosa NON e' come nell'originale
+
+Tutte e 127 fanno qualcosa e nessuna sbaglia, ma **queste sono semplificate** e
+vanno sapute prima di andarle a «correggere» pensando che siano rotte:
+
+| mossa | com'e' da noi | com'e' davvero |
+|---|---|---|
+| **cambi forzati** | avvengono a **fine turno** | avvengono nell'istante della mossa |
+| **Staffetta, Turbine, Boato** (lato tuo) | entra **il primo della panchina** | Staffetta lo fai scegliere a te, Turbine e Boato pescano a caso |
+| **Turbine, Boato** (sul selvatico) | falliscono: non c'e' ricambio | fanno finire la lotta |
+| **Sostituto** | incassa **solo il danno** | para anche stati e cali di statistica |
+| **Trasformazione** | copia statistiche, tipi, abilita', mosse | copia anche **l'aspetto** (da noi lo sprite non cambia: ricaricare l'atlante a meta' turno e' un'altra cosa) |
+| **Precedenza** | usa una mossa d'attacco **a caso** dell'avversario | usa quella che stava per usare, con +50% |
+| **Riciclo** | fallisce sempre | ricicla la bacca consumata (noi non le teniamo da parte) |
+| **Cortesia, Spintone** | funzionano solo in **doppio** | idem, ma da noi in singolo dicono «non ha funzionato» invece di essere impossibili da scegliere |
+| **Fielepunte, 2° strato** | non aggiunge niente | il veleno diventa **grave** (da noi il veleno e' uno solo) |
+| **Mirabilzona** | scambia la **statistica** Dif/Dif.Sp | idem (giusto), ma da noi non tocca gli oggetti che le modificano |
+| **Magicozona, Divieto** | mettono gli oggetti **da parte** | li lasciano al posto loro e ne bloccano gli effetti |
+| **Schizzo** | la mossa resta per tutta la **run** | resta per sempre nel salvataggio |
+
+⚠️ Su **Magicozona e Divieto**: mettere gli oggetti da parte (`_heldOff`) invece
+di controllare venti punti diversi e' comodo ma **fragile**. Se una lotta finisce
+mentre sono spenti, gli oggetti resterebbero spariti per sempre: c'e' una rete
+di sicurezza in `fineBattaglia` che li riaccende tutti. **Non toglierla.**
+
+### 47.7 Come si ricollauda
+
+Da console, in partita:
+
+```js
+Object.keys(__mosse).length            // 127
+__provaMossa("SUBSTITUTE", "e")        // il nemico si fa il fantoccio
+__provaMossa("TACKLE")                 // e il fantoccio incassa
+__game.enemy.volatile.sub              // deve calare, i PS no
+```
+
+Il ciclo completo (tutte e 127 con lo stato azzerato fra una e l'altra) sta nel
+transcript della sessione; l'ultima esecuzione ha dato **0 errori, 0 mosse
+mute**. Le uniche che rispondono «Ma non ha funzionato!» sono quelle a cui
+mancava davvero il presupposto: squadra di un solo Pokemon, PS pieni, nessun
+oggetto, lotta in singolo.

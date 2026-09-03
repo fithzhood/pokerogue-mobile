@@ -409,8 +409,24 @@
                          PSYCHIC_SURGE: "PSYCHIC", MISTY_SURGE: "MISTY",
                          HADRON_ENGINE: "ELECTRIC", SEED_SOWER: "GRASSY" };
   /* "Tocca terra?" — i Volanti e chi ha Levitazione restano fuori dal terreno. */
+  /* MAGICOZONA e DIVIETO spengono gli oggetti tenuti. Invece di controllarlo
+     in venti punti diversi, si mettono da parte: chi non ha oggetti non puo'
+     usarli, e al ritorno se li riprende tutti.
+     ⚠️ Rete di sicurezza in `fineBattaglia`: se una lotta finisce mentre sono
+     spenti, non devono restare spenti per sempre. */
+  function spegniOggetti(f) {
+    if (!f || f._heldOff) return;
+    f._heldOff = { held: f.held || {}, berries: f.berries || {} };
+    f.held = {}; f.berries = {};
+  }
+  function riaccendiOggetti(f) {
+    if (!f || !f._heldOff) return;
+    f.held = f._heldOff.held; f.berries = f._heldOff.berries; f._heldOff = null;
+  }
   function isGrounded(f) {
     if (!f) return false;
+    if (game.gravita > 0) return true;          // la gravita' inchioda tutti a terra
+    if (f.volatile && f.volatile.levita > 0) return false;
     if (f.types.includes("FLYING")) return false;
     if (abAttrs(f).some(a => a.kind === "typeImmunity" && a.moveType === "GROUND")) return false;
     return true;
@@ -1017,7 +1033,16 @@
   // critStage: +prob critico (HighCritAttr).
   function computeDamage(attacker, defender, move, opts) {
     opts = opts || {};
+    /* PIOGGIAPLASMA: le mosse Normali diventano Elettro finche' dura. Va fatto
+       PRIMA della tabella dei tipi, o cambierebbe solo il STAB. */
+    if (game.plasma > 0 && move.type === "NORMAL") move = Object.assign({}, move, { type: "ELECTRIC" });
+    /* ELETTRIZZA: per questo turno, qualunque cosa lanci diventa Elettro. */
+    if (attacker.volatile && attacker.volatile.elettro && move.type !== "ELECTRIC")
+      move = Object.assign({}, move, { type: "ELECTRIC" });
     let eff = typeMultiplier(move.type, defender.types);
+    /* Preveggenza, Segugio, Miracolvista: il bersaglio non ha piu' l'immunita'
+       ai tipi indicati (Spettro contro Normale/Lotta, Buio contro Psico). */
+    if (eff === 0 && defender.volatile && (defender.volatile.smascherato || []).includes(move.type)) eff = 1;
     /* ARCEUS PERFETTO: le sue mosse sono SEMPRE superefficaci. Spunto dalla
        Lastra Legum di Leggende: Arceus, che gli fa assumere il tipo che
        infligge più danno (in PokéRogue l'oggetto esiste ma non fa nulla).
@@ -1032,7 +1057,9 @@
     // Gli stadi arrivano da HighCritAttr, dal Mirino, dalla Baccalangsa e dal Supercolpo.
     const CRIT_ODDS = [1 / 16, 1 / 8, 1 / 2, 1];
     const cs = Math.min(3, (opts.highCrit ? 1 : 0) + (opts.critStage || 0));
-    const crit = opts.forceCrit || Math.random() < CRIT_ODDS[cs];
+    /* Fortuncanto: dal suo lato non si prendono brutti colpi. */
+    const noCrit = latoDi(defender) && (game.lati ? game.lati[latoDi(defender)].luckychant > 0 : false);
+    const crit = !noCrit && (opts.forceCrit || Math.random() < CRIT_ODDS[cs]);
     const atkStage = isPhysical ? attacker.stages.atk : attacker.stages.spatk;
     const defStage = isPhysical ? defender.stages.def : defender.stages.spdef;
     // abilita': moltiplicatori di statistica (es. Grancampione ATK x2, Corposcelto)
@@ -1042,7 +1069,10 @@
     const defAb = abStatMult(defender, isPhysical ? "DEF" : "SPDEF") * evio;
     const atk = (isPhysical ? attacker.stats.atk : attacker.stats.spatk) * stageMult(atkStage) * atkAb
               * tempStatMult(attacker, isPhysical ? "atk" : "spatk");
-    const def = (isPhysical ? defender.stats.def : defender.stats.spdef) * stageMult(crit ? Math.min(0, defStage) : defStage) * defAb
+    /* MIRABILZONA: Difesa e Difesa Speciale si scambiano — la STATISTICA, non
+       gli stadi, come nell'originale. */
+    const statDif = game.mirabil > 0 ? (isPhysical ? "spdef" : "def") : (isPhysical ? "def" : "spdef");
+    const def = defender.stats[statDif] * stageMult(crit ? Math.min(0, defStage) : defStage) * defAb
               * tempStatMult(defender, isPhysical ? "def" : "spdef");
 
     // abilita': boost di potenza per tipo (Aiutofuoco/Erbaiuto a HP bassi, ecc.)
@@ -1073,7 +1103,17 @@
     let abMult = 1;
     for (const a of abAttrs(defender)) if (a.kind === "typeDamageMult" && a.moveType === move.type) abMult *= a.mult;
 
-    dmg = Math.floor(dmg * stab * eff * critMult * rand * burn * abMult);
+    /* SCHERMI: dimezzano il danno che arriva su quel lato — Riflesso il
+       fisico, Schermoluce lo speciale, Velaurora tutti e due.
+       ⚠️ Un brutto colpo li IGNORA, come nei giochi veri: e' il modo di
+       sfondarli, e senza questa riga diventerebbero troppo forti. */
+    const Ld = game.lati ? game.lati[latoDi(defender)] : null;
+    const schermo = (!crit && Ld && (Ld.auroravelo > 0 || (isPhysical ? Ld.reflect > 0 : Ld.lightscreen > 0)))
+      ? 0.5 : 1;
+    /* Fangata e Docciascudo: indeboliscono un tipo per tutto il campo. */
+    const sport = (game.fangata > 0 && move.type === "ELECTRIC") ? (1 / 3)
+                : (game.doccia > 0 && move.type === "FIRE") ? (1 / 3) : 1;
+    dmg = Math.floor(dmg * stab * eff * critMult * rand * burn * abMult * schermo * sport);
     if (dmg < 1) dmg = 1;                          // almeno 1 se non immune
 
     return { damage: dmg, effectiveness: eff, crit, immune: false };
@@ -1106,7 +1146,8 @@
      Strumenti X. Le abilita' legate al meteo (Clorofilla, Nuotovelox...) restano
      fuori: nei dati non portano la condizione, applicarle sempre sarebbe peggio. */
   function velEff(f) {
-    return f.stats.spd * stageMult(f.stages.spd) * tempStatMult(f, "spd");
+    const vento = (game.lati && game.lati[latoDi(f)].tailwind > 0) ? 2 : 1;
+    return f.stats.spd * stageMult(f.stages.spd) * tempStatMult(f, "spd") * vento;
   }
 
   // Moltiplicatore statistica da abilita' (StatMultiplierAbAttr).
@@ -2025,7 +2066,176 @@
 
   // Il Pokemon ENTRA IN CAMPO: si azzera solo cio' che appartiene alla singola
   // battaglia, cioe' i volatili (confusione, protezione, prese, tentennamento).
-  function entraInCampo(f) {
+  /* ======================================================================
+     EFFETTI DI SQUADRA (le "arena tags" dell'originale)
+
+     Non appartengono a un Pokemon ma a un LATO del campo, e restano anche se
+     chi li ha creati rientra nella ball. Due famiglie:
+       · a TEMPO  — schermi, Salvaguardia, Nebbia, Ventoincoda, Fortuncanto:
+                     durano un tot di turni e poi scadono;
+       · TRAPPOLE — Punte, Fielepunte, Levitoroccia, Rete Vischiosa: restano
+                     finche' dura la lotta e colpiscono CHI ENTRA.
+     ⚠️ Si azzerano a fine battaglia (`fineBattaglia`), come nell'originale:
+     sono roba di quella lotta li', non della run. */
+  const latiVuoti = () => ({
+    mio: { reflect: 0, lightscreen: 0, auroravelo: 0, safeguard: 0, mist: 0,
+           luckychant: 0, tailwind: 0, spikes: 0, toxicspikes: 0, stealthrock: 0, stickyweb: 0,
+           /* protezioni di SQUADRA: durano un turno solo e ognuna para una cosa
+              diversa (vedi il blocco 1-bis-bis di `resolveAction`) */
+           wideguard: 0, quickguard: 0, craftyshield: 0, matblock: 0,
+           nocambio: 0 },
+    suo: { reflect: 0, lightscreen: 0, auroravelo: 0, safeguard: 0, mist: 0,
+           luckychant: 0, tailwind: 0, spikes: 0, toxicspikes: 0, stealthrock: 0, stickyweb: 0,
+           /* protezioni di SQUADRA: durano un turno solo e ognuna para una cosa
+              diversa (vedi il blocco 1-bis-bis di `resolveAction`) */
+           wideguard: 0, quickguard: 0, craftyshield: 0, matblock: 0,
+           nocambio: 0 },
+  });
+  // Il lato a cui appartiene un combattente, e quello di fronte.
+  const latoDi = f => (isEnemySide(f) ? "suo" : "mio");
+  const lato = f => (game.lati || (game.lati = latiVuoti()))[latoDi(f)];
+  const latoDiFronte = f => (game.lati || (game.lati = latiVuoti()))[isEnemySide(f) ? "mio" : "suo"];
+  const nomeLato = f => (isEnemySide(f) ? "avversaria" : "tua");
+
+  const SCHERMO_IT = { reflect: "Riflesso", lightscreen: "Schermoluce", auroravelo: "Velaurora",
+                       safeguard: "Salvaguardia", mist: "Nebbia", luckychant: "Fortuncanto",
+                       tailwind: "Ventoincoda" };
+
+  /* Accende un effetto a tempo sul lato di chi usa la mossa. Se c'e' gia', la
+     mossa fallisce: e' quello che fa l'originale, e dirlo evita che sembri un
+     turno buttato senza motivo. */
+  function accendiLato(f, chiave, turni, messages) {
+    const L = lato(f);
+    if (L[chiave] > 0) { stessoMomento(messages, "Ma non ha funzionato!"); return false; }
+    L[chiave] = turni;
+    messages.push(`${SCHERMO_IT[chiave]} protegge la squadra ${nomeLato(f)}!`);
+    return true;
+  }
+
+  /* Scala i contatori di UN turno. ⚠️ Va chiamata una volta sola per turno:
+     `endOfTurnResidual` gira su ogni combattente, quindi si aggancia al solo
+     `game.player`, che c'e' in tutte le strade del turno. */
+  /* Il DESIDERIO matura due turni dopo e cura chi si trova su quel lato in
+     quel momento — anche se non e' chi l'ha espresso: e' proprio il senso
+     della mossa. */
+  function maturaDesideri(messages) {
+    if (!game.lati) return;
+    for (const chi of ["mio", "suo"]) {
+      const L = game.lati[chi];
+      if (!L.wish) continue;
+      if (--L.wish.turni > 0) continue;
+      const quota = L.wish.quota; L.wish = null;
+      const f = chi === "mio" ? game.player : game.enemy;
+      if (!f || f.fainted || f.hp >= f.maxHp) continue;
+      f.hp = Math.min(f.maxHp, f.hp + quota);
+      messages.push(`Il desiderio si avvera: ${f.name} recupera energie!`);
+      if (messages.anim) messages.anim("COMMON_HEALTH_UP", sideOf(f));
+    }
+  }
+
+  /* Gli effetti che riguardano TUTTO il campo (non un lato solo). */
+  const CAMPO_IT = { fangata: "La fangata", doccia: "Il Docciascudo", gravita: "La gravità",
+                     distorto: "La distorsione", mirabil: "La Mirabilzona",
+                     magica: "La Magicozona", plasma: "La pioggia di plasma" };
+  function scalaCampo(messages) {
+    for (const k in CAMPO_IT) {
+      if (game[k] > 0 && --game[k] === 0) {
+        messages.push(`${CAMPO_IT[k]} svanisce.`);
+        if (k === "magica") for (const x of game.party.concat(onField())) riaccendiOggetti(x);
+      }
+    }
+    // Magicozona accesa: anche chi entra dopo trova gli oggetti spenti
+    if (game.magica > 0) for (const x of onField()) spegniOggetti(x);
+    // Divieto e levitazione sono personali
+    for (const x of onField()) {
+      if (!x || !x.volatile) continue;
+      if (x.volatile.embargo > 0) {
+        spegniOggetti(x);
+        if (--x.volatile.embargo === 0) { riaccendiOggetti(x); messages.push(`${x.name} può di nuovo usare il suo oggetto.`); }
+      }
+      if (x.volatile.levita > 0 && --x.volatile.levita === 0) messages.push(`${x.name} torna a terra.`);
+      if (x.volatile.anticura > 0) x.volatile.anticura--;
+    }
+  }
+
+  function scalaLati(messages) {
+    scalaCampo(messages);
+    if (!game.lati) return;
+    maturaDesideri(messages);
+    for (const chi of ["mio", "suo"]) {
+      const L = game.lati[chi];
+      for (const k of ["reflect", "lightscreen", "auroravelo", "safeguard", "mist", "luckychant", "tailwind"]) {
+        if (L[k] > 0 && --L[k] === 0) {
+          messages.push(`${SCHERMO_IT[k]} non fa piu' effetto sulla squadra ${chi === "mio" ? "tua" : "avversaria"}.`);
+        }
+      }
+    }
+  }
+
+  /* TRAPPOLE D'INGRESSO: mordono chi entra in campo. Non toccano chi vola o
+     levita (tranne Levitoroccia, che e' fatta di pietre in aria). */
+  function trappoleIngresso(f, messages) {
+    if (!f || f.fainted || !messages) return;
+    const L = lato(f);
+    const aTerra = isGrounded(f);
+    if (L.stealthrock) {
+      const eff = typeMultiplier("ROCK", f.types);
+      const quota = Math.max(1, Math.floor(f.maxHp * eff / 8));
+      f.hp = Math.max(0, f.hp - quota); f._justHit = true;
+      messages.push(`Le pietre levitanti feriscono ${f.name}!`);
+      if (f.hp <= 0) { f.fainted = true; messages.push(`${f.name} è esausto!`); return; }
+    }
+    if (aTerra && L.spikes) {
+      const frazione = [0, 8, 6, 4][Math.min(3, L.spikes)];
+      f.hp = Math.max(0, f.hp - Math.max(1, Math.floor(f.maxHp / frazione))); f._justHit = true;
+      messages.push(`${f.name} è ferito dalle punte!`);
+      if (f.hp <= 0) { f.fainted = true; messages.push(`${f.name} è esausto!`); return; }
+    }
+    if (aTerra && L.toxicspikes) {
+      /* Un Pokemon di tipo VELENO che tocca terra PORTA VIA le fielepunte:
+         e' cosi' anche nell'originale, ed e' il modo di ripulirle. */
+      if (f.types.includes("POISON")) {
+        L.toxicspikes = 0;
+        messages.push(`${f.name} porta via le fielepunte!`);
+      } else {
+        applyStatus(f, "POISON", messages);
+      }
+    }
+    if (aTerra && L.stickyweb) {
+      applyStatStage(f, ["SPD"], -1, messages, false);
+    }
+  }
+
+  /* ======================================================================
+     MOSSE SPECIALI — quelle che l'estrattore non sa tradurre
+
+     🔴 127 mosse di stato arrivavano con `attrs: []` e non facevano NIENTE:
+     nell'originale non sono fatte di mattoncini ma sono classi a se'
+     (`CurseAttr`, `ReflectAttr`, `AddArenaTagAttr`…), e l'estrattore le perde.
+     Qui c'e' la tabella che le rimette in piedi, una funzione per mossa.
+
+     Ogni voce riceve `(actor, foe, move, messages)` e fa quello che deve.
+     ⚠️ Il `foe` per le mosse "su di se'" e' l'avversario d'ufficio (chi non
+     sceglie il bersaglio non lo ha davvero): le voci che agiscono sul
+     lanciatore devono usare `actor`, non `foe`.
+     ====================================================================== */
+  const MOSSE_SPECIALI = {};
+  window.__mosse = MOSSE_SPECIALI;   // sonda: quali mosse speciali sono in piedi
+  /* Sonda: fa usare una mossa qualsiasi a chi è in campo, passando da TUTTO
+     il motore (divieti, protezioni, animazioni, danno). Serve a collaudare le
+     mosse speciali senza doverle incontrare in partita:
+       __provaMossa("METRONOME")        — la usa il tuo
+       __provaMossa("ROAR", "e")        — la usa l'avversario
+     Restituisce le righe di log che la mossa ha prodotto. */
+  window.__provaMossa = (id, chi) => {
+    const a = chi === "e" ? game.enemy : game.player;
+    const f = a === game.player ? game.enemy : game.player;
+    const log = makeLog();
+    resolveAction(a, f, { id, pp: 5, maxPp: 5 }, log);
+    return log.events.map(e => e.text);
+  };
+
+  function entraInCampo(f, messages) {
     if (!f) return;
     f.volatile = { confusion: 0, flinch: false, protect: null, protectUsi: 0,
                    trap: null, seed: false, seedBy: null, perish: 0, recharge: false,
@@ -2035,6 +2245,18 @@
                    accumulo: 0, bide: null };
     f._lansat = false;
     f.fainted = false;
+    /* Curardore e Lunardanza hanno lasciato una promessa sul lato: chi entra
+       adesso la riscuote (PS pieni e niente problemi di stato). Viene PRIMA
+       delle trappole, come nell'originale. */
+    const L = game.lati ? lato(f) : null;
+    if (messages && L && L.curaProssimo) {
+      L.curaProssimo = false;
+      f.hp = f.maxHp; f.status = null; f.sleepTurns = 0;
+      messages.push(`Il desiderio di ${f.name} si avvera: è come nuovo!`);
+      if (messages.anim) messages.anim("COMMON_HEALTH_UP", sideOf(f));
+    }
+    // le trappole mordono SOLO chi entra a lotta in corso (serve un log)
+    if (messages) trappoleIngresso(f, messages);
   }
 
   /* Il Pokemon RIENTRA NELLA BALL: perde gli stadi — boost e debuff valgono
@@ -2054,6 +2276,11 @@
      CAMBIO: cambiare Pokemon spazzava via il meteo a meta' battaglia. */
   function fineBattaglia() {
     game.weather = null; game.terrain = null;
+    game.lati = latiVuoti();     // schermi e trappole valgono per UNA lotta
+    // effetti di campo a tempo: valgono per la lotta, non per la run
+    game.fangata = 0; game.doccia = 0; game.gravita = 0;
+    game.distorto = 0; game.mirabil = 0; game.magica = 0; game.plasma = 0;
+    for (const x of game.party.concat(onField())) riaccendiOggetti(x);
     for (const p of game.party) revertForm(p);
   }
 
@@ -2078,6 +2305,10 @@
     // e valgono 1 pezzo.
     game.tempBoost = {};
     game.tempBoostN = {};
+    game.lati = latiVuoti();     // schermi e trappole: si azzerano a ogni lotta
+    game.fangata = 0; game.doccia = 0; game.gravita = 0;
+    game.distorto = 0; game.mirabil = 0; game.magica = 0; game.plasma = 0;
+    game.cuccagna = false;       // Cuccagna: dura tutta la run, come l'originale
     game.shopMarkup = 1;      // rincaro dei prezzi (incontro dei rifiuti)
     game.weather = null;      // meteo attivo (dura pochi turni)
     game.terrain = null;      // terreno attivo
@@ -3790,7 +4021,7 @@
     }
     // soldi: piu' per boss e capipalestra. Il Monetamuleto da' +20% per pezzo.
     const base = (wasGym || wasEvilBoss ? 500 : wasBoss ? 260 : 90) + game.wave * 12;
-    const money = Math.floor(base * (1 + 0.2 * (game.charms.amulet || 0)));
+    const money = Math.floor(base * (1 + 0.2 * (game.charms.amulet || 0)) * (game.cuccagna ? 2 : 1));
     game.money += money;
     stessoMomento(messages, `Ricevi ₽${money}!`);
     // i potenziamenti a tempo (Poteslot/Supercolpo) durano 5 ondate
@@ -5173,21 +5404,33 @@
       const pa = M[a.move.id].priority || 0;
       const pb = M[b.move.id].priority || 0;
       if (pa !== pb) return pb - pa;
+      /* DISTORTOZONA: l'ordine si capovolge, i piu' lenti vanno per primi. */
       const va = velEff(a.actor), vb = velEff(b.actor);
-      if (va !== vb) return vb - va;
+      if (va !== vb) return game.distorto > 0 ? va - vb : vb - va;
       return Math.random() - 0.5;
     });
 
     const log = logIniziale || makeLog();
     for (const act of actions) if (act.quick) log.push(`I Rapidartigli di ${act.actor.name} scattano!`);
-    for (const act of actions) {
+    /* Prendinota e Rinvio riordinano la coda MENTRE la si scorre: per farlo
+       devono poterla vedere, e sapere a che punto siamo. */
+    game._coda = actions;
+    for (let i = 0; i < actions.length; i++) {
+      game._codaI = i;
+      const act = actions[i];
       if (act.actor.fainted) continue;                  // niente colpi post-KO
       // se il bersaglio e' caduto nel frattempo, si ripiega sull'altro
       let foe = act.foe;
       if (!foe || foe.fainted) foe = pickFoeFor(act.actor);
       if (!foe) continue;
+      /* ATTIRASGUARDO / NUBEPOLLINE / SPLENDICALCIO: se sul lato del bersaglio
+         qualcuno ha attirato l'attenzione, il colpo va addosso a lui. */
+      const calamita = onField().find(x => x && !x.fainted && x.volatile.centro
+                                        && isEnemySide(x) === isEnemySide(foe));
+      if (calamita && calamita !== act.actor) foe = calamita;
       resolveAction(act.actor, foe, act.move, log);
     }
+    game._coda = null;
     for (const f of onField()) endOfTurnResidual(f, log);
     tickWeather(log);            // il meteo scade
     tickTerrain(log);            // e anche il terreno
@@ -5197,6 +5440,19 @@
       // si azzera solo quando NON la si e' usata (cosi' 1/3^usi funziona)
       if (!f.volatile.protect) f.volatile.protectUsi = 0;
       f.volatile.protect = null;
+      // roba che vale un turno solo e va spenta comunque sia andata
+      f.volatile.magiccoat = false; f.volatile.snatch = false;
+      f.volatile.centro = false; f.volatile.elettro = false;
+      if (f.volatile.disable && --f.volatile.disable.turni <= 0) {
+        log.push(`${f.name} torna a poter usare ${M[f.volatile.disable.id].it}.`);
+        f.volatile.disable = null;
+      }
+    }
+    // le protezioni di squadra durano un turno; il vincolo fatato due
+    if (game.lati) for (const c of ["mio", "suo"]) {
+      const L = game.lati[c];
+      L.wideguard = L.quickguard = L.craftyshield = L.matblock = 0;
+      if (L.nocambio > 0) L.nocambio--;
     }
     playEvents(log.events, afterTurn);
   }
@@ -5219,6 +5475,9 @@
     if (uscente.volatile.ingrain) {
       notAvailable(`${uscente.name} ha messo radici e non può ritirarsi!`); return;
     }
+    if (game.lati && game.lati.mio.nocambio > 0) {
+      notAvailable("Un vincolo fatato tiene tutti in campo!"); return;
+    }
     const log = makeLog();
 
     if (game.double && uscente === game.player2) {
@@ -5226,7 +5485,7 @@
       log.push(conBall(`Ritirati, ${game.player2.name}!`, "ritiro", "player2"));
       richiamaNellaBall(game.player2);
       game.player2 = entrante;
-      entraInCampo(entrante);
+      entraInCampo(entrante, log);
       entrante.spr = null;
       loadFighterSprite(entrante, "back").then(s => { entrante.spr = s; redrawScene(); });
       log.push(conBall(`Vai, ${entrante.name}!`, "uscita", "player2"));
@@ -5266,7 +5525,7 @@
     log.push(conBall(`Ritirati, ${outgoing.name}!`, "ritiro", "player"));
     richiamaNellaBall(outgoing);   // rientrando perde gli stadi (lo stato no)
     setActive(index);
-    entraInCampo(game.player);     // al nuovo si azzerano solo i volatili
+    entraInCampo(game.player, log);   // al nuovo si azzerano i volatili, e le trappole mordono
     game.player.spr = null;
     loadFighterSprite(game.player, "back").then(s => { game.player.spr = s; redrawScene(); });
     log.push(conBall(`Vai, ${game.player.name}!`, "uscita", "player"));
@@ -5327,6 +5586,18 @@
 
   // Dopo un turno: KO? vittoria? cambio forzato?
   function afterTurn() {
+    /* CAMBI FORZATI (Turbine, Boato, Staffetta, Zampata, Monito, Teletrasporto).
+       ⚠️ Si eseguono QUI, a turno finito, non nell'istante in cui la mossa
+       parte: le azioni ancora da risolvere tengono in mano un riferimento al
+       Pokemon in campo, e sostituirlo a metà turno le farebbe colpire un
+       fantasma. Nell'originale il cambio è immediato, ma in una finestra di un
+       turno la differenza non si vede. */
+    if (game.cambioForzato && game.cambioForzato.length) {
+      const richieste = game.cambioForzato; game.cambioForzato = null;
+      const log = makeLog();
+      for (const r of richieste) eseguiCambioForzato(r, log);
+      if (log.events.length) { renderScene(); playEvents(log.events, afterTurn); return; }
+    }
     registraExpNemici();       // prima di togliere i caduti dal campo
     renderScene();
     /* BOSS FINALE: la fase finisce quando cade l'ULTIMO SCUDO — è la
@@ -5413,9 +5684,9 @@
     const target = game.party[index];
     if (!target || target.fainted) return;
     setActive(index);
-    entraInCampo(game.player);
-    game.player.spr = null;
     const log = makeLog();
+    entraInCampo(game.player, log);   // anche qui le trappole mordono
+    game.player.spr = null;
     // chi e' caduto non "rientra": il posto lo prende il nuovo, che esce dalla ball
     log.push(conBall(`Vai, ${game.player.name}!`, "uscita", "player"));
     applyOnSummon(game.player, game.enemy, log);
@@ -5424,16 +5695,35 @@
   }
 
   // Esegue una singola mossa: blocchi pre-mossa, PP, precisione, danno, effetti.
-  function resolveAction(actor, foe, moveInst, messages) {
+  function resolveAction(actor, foe, moveInst, messages, mossaChiamata) {
     const move = M[moveInst.id];
 
+    /* 1-zero-zero. SONNOLALIA si usa DORMENDO: se passasse dal controllo qui
+       sotto verrebbe scartata sempre. Va intercettata prima.
+       Stesso discorso per le mosse chiamate da un'altra mossa (Metronomo,
+       Speculmossa…): il controllo l'ha già passato chi ha lanciato la prima,
+       rifarlo vorrebbe dire tirare due volte i dadi di confusione e paralisi. */
+    if (move.id === "SLEEP_TALK" && !mossaChiamata) {
+      moveInst.pp = Math.max(0, moveInst.pp - 1);
+      messages.push(`${actor.name} usa ${move.it}!`);
+      if (actor.status !== "SLEEP") { stessoMomento(messages, "Ma non ha funzionato!"); return; }
+      const dorm = actor.moves.filter(x => x.id !== "SLEEP_TALK" && M[x.id] && !M[x.id].charging);
+      if (!dorm.length) { stessoMomento(messages, "Ma non ha funzionato!"); return; }
+      usaAltraMossa(actor, foe, dorm[Math.floor(Math.random() * dorm.length)].id, messages);
+      return;
+    }
+
     // 1. l'attore riesce ad agire? (congelato/dorme/paralisi/tentennamento/confusione)
-    if (!canAct(actor, messages)) return;
+    if (!mossaChiamata && !canAct(actor, messages)) return;
 
     // 1-zero. mosse VIETATE da Provocazione / Attaccalite / Ripeti
-    const veto = mossaVietata(actor, move, moveInst);
+    const veto = mossaChiamata ? null : mossaVietata(actor, move, moveInst);
     if (veto) { messages.push(veto); return; }
     actor.volatile.lastMove = moveInst.id;   // serve a Ripeti e Attaccalite
+    /* ⚠️ Copione deve vedere la mossa PRECEDENTE, non se stesso: la memoria
+       si aggiorna solo dopo che la mossa è stata risolta (in fondo), non qui.
+       Aggiornandola subito, Copione trovava sempre "COPIONE" e falliva sempre. */
+    const mossaPrimaDiQuesta = game.ultimaMossa;
 
     /* 1-pre. PAZIENZA: due turni a incassare, poi restituisce il DOPPIO di
        tutto quello che ha preso. Non è una mossa a caricamento come Volo (che
@@ -5497,6 +5787,57 @@
       }
     }
 
+    /* 1-bis-bis. PROTEZIONI DI SQUADRA. Non riparano chi le usa: riparano
+       TUTTO il suo lato, e ognuna para una categoria diversa di colpo. */
+    const Lg = (game.lati && foe !== actor) ? game.lati[latoDi(foe)] : null;
+    if (Lg) {
+      const paraSquadra =
+          (Lg.wideguard > 0 && (move.target === "ALL_NEAR_ENEMIES" || move.target === "ALL_NEAR_OTHERS")) ? "Ampiaguardia"
+        : (Lg.quickguard > 0 && (move.priority || 0) > 0) ? "Blocco"
+        : (Lg.craftyshield > 0 && move.category === "STATUS") ? "Truccodifesa"
+        : (Lg.matblock > 0 && move.category !== "STATUS") ? "Scudo Aureo" : null;
+      if (paraSquadra) {
+        moveInst.pp = Math.max(0, moveInst.pp - 1);
+        messages.push(`${actor.name} usa ${move.it}!`);
+        messages.push(`${paraSquadra} protegge la squadra ${nomeLato(foe)}!`);
+        return;
+      }
+    }
+
+    /* 1-sexies. POLVEPARA: chi ne è coperto e prova una mossa di Fuoco
+       la fa esplodere addosso a sé. */
+    if (actor.volatile.powder && move.type === "FIRE") {
+      actor.volatile.powder = false;
+      const scoppio = Math.max(1, Math.floor(actor.maxHp / 4));
+      actor.hp = Math.max(0, actor.hp - scoppio); actor._justHit = true;
+      messages.push(`La polvere su ${actor.name} prende fuoco ed esplode!`);
+      if (actor.hp <= 0) { actor.fainted = true; messages.push(`${actor.name} è esausto!`); }
+      return;
+    }
+
+    /* 1-septies. MAGICOSPECCHIO rimanda al mittente le mosse di STATO; FURTO
+       ruba quelle che si usano su di sé (buff e cure). Sono le due mosse che
+       trasformano il turno di un altro nel proprio. */
+    if (move.category === "STATUS" && !mossaChiamata) {
+      if (foe !== actor && foe.volatile.magiccoat && !foe.fainted) {
+        foe.volatile.magiccoat = false;
+        moveInst.pp = Math.max(0, moveInst.pp - 1);
+        messages.push(`${actor.name} usa ${move.it}!`);
+        messages.push(`Magicospecchio di ${foe.name} rimanda la mossa al mittente!`);
+        usaAltraMossa(foe, actor, moveInst.id, messages, " ");
+        return;
+      }
+      const ladro = BERSAGLIO_SU_DI_SE.has(move.target)
+        ? onField().find(x => x && !x.fainted && x !== actor && x.volatile.snatch) : null;
+      if (ladro) {
+        ladro.volatile.snatch = false;
+        moveInst.pp = Math.max(0, moveInst.pp - 1);
+        messages.push(`${ladro.name} ruba la mossa di ${actor.name}!`);
+        usaAltraMossa(ladro, actor, moveInst.id, messages, " ");
+        return;
+      }
+    }
+
     // 2. consuma PP e annuncia
     moveInst.pp = Math.max(0, moveInst.pp - 1);
     /* Indice dell'annuncio: e' QUI che va appesa l'animazione della mossa,
@@ -5508,7 +5849,9 @@
     if (move.charging && messages.anim) messages.anim("CHARGE_" + move.id, sideOf(actor));
 
     // 3. precisione (stadi + abilita' di precisione/elusione). accuracy -1 = sempre a segno
-    if (move.accuracy !== -1) {
+    // Localizza e Leggimente: il colpo va a segno comunque, e la mira si consuma
+    if (actor.volatile.mirino) { actor.volatile.mirino = false; }
+    else if (move.accuracy !== -1) {
       // Grandelente: +5% di precisione per pezzo
       const lente = 1 + 0.05 * ((actor.held && actor.held.widelens) || 0);
       const chance = move.accuracy * accMult(actor.stages.acc + tempAccStages(actor) - foe.stages.eva)
@@ -5581,33 +5924,10 @@
       }
     }
 
-    /* 4-quater. MALEDIZIONE. 🔴 Nei dati ha `attrs: []`: nell'originale e' una
-       classe a se' (`CurseAttr`), e l'estrattore non sa tradurla in mattoncini.
-       Risultato: la mossa non faceva assolutamente niente, pur essendoci gia'
-       nel motore sia il volatile `curse` sia il rosicchio di fine turno.
-       Sono DUE mosse in una, come nei giochi veri:
-         · chi la usa e' di tipo SPETTRO -> sacrifica META' dei PS massimi e
-           maledice il bersaglio (1/4 dei suoi PS massimi a ogni fine turno);
-         · chiunque altro -> +1 Attacco, +1 Difesa, −1 Velocita' A SE STESSO.
-       ⚠️ Il bersaglio: `move.target` vale "CURSE", che non sta in nessuno dei
-       due gruppi, quindi `foe` e' l'avversario d'ufficio — giusto per la
-       versione spettro, ignorato del tutto per l'altra. */
-    if (move.id === "CURSE") {
-      if (actor.types.includes("GHOST")) {
-        if (foe.fainted || foe.volatile.curse) {
-          stessoMomento(messages, "Ma non ha funzionato!");
-        } else {
-          const costo = Math.max(1, Math.floor(actor.maxHp / 2));
-          actor.hp = Math.max(0, actor.hp - costo); actor._justHit = true;
-          foe.volatile.curse = true;
-          messages.push(`${actor.name} sacrifica metà dei suoi PS per lanciare una maledizione su ${foe.name}!`);
-          if (actor.hp <= 0) { actor.fainted = true; messages.push(`${actor.name} è esausto!`); }
-        }
-      } else {
-        applyStatStage(actor, ["ATK", "DEF"], 1, messages, true);
-        applyStatStage(actor, ["SPD"], -1, messages, true);
-      }
-    }
+    // 4-quater. le mosse che l'estrattore non sa tradurre (vedi MOSSE_SPECIALI)
+    game.ultimaMossa = mossaPrimaDiQuesta;   // Copione guarda indietro, non a se'
+    if (MOSSE_SPECIALI[move.id]) MOSSE_SPECIALI[move.id](actor, foe, move, messages);
+    game.ultimaMossa = moveInst.id;
 
     // 5. effetti (mattoncini). Se la mossa da danno non e' andata a segno, niente effetti.
     if (landed) applyMoveAttrs(actor, foe, move, messages);
@@ -5991,14 +6311,20 @@
     const hits = (multi ? rollMultiHit(multi.mode, actor) : 1) + lens;
     const lensPenalty = lens ? 1 / (1 + lens) : 1;
     // Mirino / Baccalangsa / Supercolpo alzano la probabilita' di brutto colpo
-    const critBonus = (actor.held && actor.held.scopelens ? 1 : 0)
+    /* Focalenergia e Grido del Drago valgono DUE stadi di brutto colpo, come
+       nell'originale; Concentrazione lo garantisce e si consuma al primo
+       colpo utile. */
+    const laserPronto = !!actor.volatile.laser;
+    if (laserPronto) actor.volatile.laser = false;
+    const critBonus = (actor.volatile.focus ? 2 : 0)
+                    + (actor.held && actor.held.scopelens ? 1 : 0)
                     + (actor.held && actor.held.leek && ["FARFETCHD", "SIRFETCHD"].includes(actor.speciesId) ? 2 : 0)
                     + (actor._lansat ? 2 : 0)
                     + (actor === game.player && game.tempBoost.crit > 0 ? 1 : 0);
     let total = 0, lastEff = 1, anyCrit = false, immune = false, done = 0;
     for (let h = 0; h < hits; h++) {
       if (foe.fainted) break;
-      const res = computeDamage(actor, foe, move, { forceCrit, highCrit, critStage: critBonus, potenza });
+      const res = computeDamage(actor, foe, move, { forceCrit: forceCrit || laserPronto, highCrit, critStage: critBonus, potenza });
       if (res.immune) { immune = true; break; }
       let raw = Math.max(1, Math.floor(res.damage * lensPenalty));
       /* Lo scudo lo rompe QUESTO colpo, quindi il messaggio dello scudo va
@@ -6007,6 +6333,16 @@
          e solo dopo «Colpo 1: 5 PS», cioe al contrario di come e successo. */
       const scudoMsg = [];
       const dealt = bossClamp(foe, raw, scudoMsg);  // scudi del boss
+      /* SOSTITUTO: il fantoccio incassa al posto suo finché regge. Il Pokemon
+         vero non perde neanche un PS, quindi niente `_justHit` e niente
+         bacche: per il motore è come se il colpo non fosse arrivato. */
+      if (foe.volatile.sub > 0) {
+        foe.volatile.sub -= dealt; done++;
+        for (const t of scudoMsg) messages.push(t);
+        if (foe.volatile.sub <= 0) { foe.volatile.sub = 0; messages.push(`Il sostituto di ${foe.name} si sgretola!`); }
+        else messages.push(`Il sostituto di ${foe.name} incassa il colpo!`);
+        continue;
+      }
       total += dealt; lastEff = res.effectiveness; if (res.crit) anyCrit = true; done++;
       foe.hp = Math.max(0, foe.hp - dealt); foe._justHit = true;
       /* 🔴 UN EVENTO PER COLPO, quando i colpi sono piu' d'uno.
@@ -6042,6 +6378,18 @@
         } else if (foe.held && foe.held.focusband && Math.random() < 0.1 * foe.held.focusband) {
           foe.hp = 1; messages.push(`${foe.name} ha resistito grazie alla Bandana!`);
         } else { foe.fainted = true; break; }
+      }
+    }
+    /* Altruismo: l'alleato che ha ricevuto la mano picchia il 50% in piu', per
+       questo turno solo. Si spegne appena serve, o resterebbe acceso. */
+    if (actor.volatile.helping) {
+      actor.volatile.helping = false;
+      const extra = Math.floor(total * 0.5);
+      if (extra > 0 && !foe.fainted) {
+        const dato = bossClamp(foe, extra, messages);
+        foe.hp = Math.max(0, foe.hp - dato); total += dato;
+        stessoMomento(messages, "L'aiuto dell'alleato rende il colpo più forte!");
+        if (foe.hp <= 0) { foe.fainted = true; messages.push(`${foe.name} è esausto!`); }
       }
     }
     // Pugno dorato: il danno inflitto frutta soldi
@@ -6113,6 +6461,16 @@
     }
     if (foe.fainted) {
       messages.push(`${foe.name} è esausto!`);
+      /* ULTIMOTORTO: chi cade si porta dietro chi l'ha steso. */
+      if (foe.volatile.destiny && !actor.fainted) {
+        actor.hp = 0; actor.fainted = true;
+        messages.push(`${foe.name} trascina con sé ${actor.name}!`);
+      }
+      /* RANCORE: la mossa che l'ha steso resta senza un PP. */
+      if (foe.volatile.grudge) {
+        const mi = actor.moves.find(x => x.id === move.id);
+        if (mi && mi.pp > 0) { mi.pp = 0; messages.push(`Il rancore di ${foe.name} azzera i PP di ${move.it}!`); }
+      }
       // Arroganza / Ultraboost / Nitriti: scattano su chi ha messo KO
       applyPostVictory(actor, messages);
     }
@@ -6178,6 +6536,14 @@
       if (t === "MISTY") { messages.push(`Il Campo Nebbioso protegge ${target.name}!`); return; }
       if (t === "ELECTRIC" && status === "SLEEP") { messages.push(`Il Campo Elettrico tiene sveglio ${target.name}!`); return; }
     }
+    /* Salvaguardia: il lato protetto non prende problemi di stato.
+       ⚠️ Non vale per quelli che uno si da' da solo (Riposo): li' `sourceAbility`
+       manca e chi li subisce e' chi li ha voluti — il controllo sta in chi
+       chiama, non qui. */
+    if (game.lati && game.lati[latoDi(target)].safeguard > 0) {
+      messages.push(`La Salvaguardia protegge ${target.name}!`);
+      return;
+    }
     // abilita' che immunizzano da uno stato (Insonnia, Immunita', Scioltezza...)
     const si = findAb(target, "statusImmunity");
     if (si && si.statuses.includes(status)) { messages.push(`${target.ability.it} protegge ${target.name}!`); return; }
@@ -6211,6 +6577,11 @@
 
   function applyStatStage(target, stats, delta, messages, isSelf) {
     if (target.fainted) return;
+    // Nebbia: il lato protetto non subisce cali dall'avversario
+    if (!isSelf && delta < 0 && game.lati && game.lati[latoDi(target)].mist > 0) {
+      stessoMomento(messages, `La Nebbia protegge ${target.name} dai cali!`);
+      return;
+    }
     // abilita' che bloccano i cali di statistiche causati dall'avversario (Corpochiaro)
     if (!isSelf && delta < 0 && findAb(target, "protectStats")) {
       stessoMomento(messages, `${target.ability.it} impedisce il calo a ${target.name}!`);
@@ -6317,6 +6688,15 @@
       return `${actor.name} è tormentato e non può ripetere ${move.it}!`;
     if (v.encore && v.encore.turni > 0 && v.encore.id !== moveInst.id)
       return `${actor.name} deve ripetere ${M[v.encore.id].it}!`;
+    /* BLOCCO: una mossa sola, per qualche turno. */
+    if (v.disable && v.disable.turni > 0 && v.disable.id === moveInst.id)
+      return `${move.it} di ${actor.name} è bloccata!`;
+    /* DIVIETO: chi l'ha usata sigilla le mosse che conosce ANCHE lui, e
+       l'avversario non può più usarle. */
+    const sigillo = onField().find(x => x && !x.fainted && x !== actor
+      && x.volatile.imprison && isEnemySide(x) !== isEnemySide(actor)
+      && x.moves.some(mm => mm.id === moveInst.id));
+    if (sigillo) return `${move.it} è sigillata da ${sigillo.name}!`;
     return null;
   }
 
@@ -6397,7 +6777,13 @@
 
   // Danni/cure di fine turno (scottatura, veleno, Avanzi).
   function endOfTurnResidual(f, messages) {
+    /* ⚠️ Gli effetti di SQUADRA si scalano una volta sola per turno, e questa
+       funzione gira su ogni combattente: ci si aggancia al giocatore, che c'e'
+       in tutte le strade del turno (singolo, doppio, cambio, lancio di ball). */
+    if (f === game.player) scalaLati(messages);
     if (f.fainted) return;
+    // TENTACOLOCK: ogni turno un pezzo di Difesa e Difesa Speciale in meno
+    if (f.volatile.octolock > 0) applyStatStage(f, ["DEF", "SPDEF"], -1, messages, true);
     // held: Avanzi — rigenera 1/16 dei PS max a fine turno (impilabile)
     if (f.held && f.held.leftovers && f.hp < f.maxHp) {
       f.hp = Math.min(f.maxHp, f.hp + Math.max(1, Math.floor(f.maxHp * f.held.leftovers / 16)));
@@ -7864,7 +8250,7 @@
      `events`/`timer`/`afterEvents` (roba di narrazione) e `encReward`, che e'
      una FUNZIONE e non sopravvive a JSON. */
   const CAMPI_RUN = ["balls", "greatballs", "ultraballs", "rogueballs", "theftballs",
-    "pendingTheft", "money", "stones", "charms", "tempBoost", "tempBoostN", "shopMarkup",
+    "pendingTheft", "money", "stones", "charms", "tempBoost", "tempBoostN", "shopMarkup", "lati", "cuccagna",
     "cicloOffset", "encSeen", "encTiersSeen", "leagueIdx", "evilIdx", "finalBossIdx",
     "rivalFemale", "hasMegaRing", "hasDynamaxBand", "active", "biome", "starterSpecies"];
 
@@ -10442,6 +10828,777 @@
     { tier: "ROGUE", weight: 0, id: "theft", label: "Clepto Ball", desc: "ruba un Pokémon a un allenatore", icon: "tb", ball: true,
       target: "run", apply: (p, pk) => { game.theftballs = (game.theftballs || 0) + (pk.qty || 1); } },
   ];
+  /* ======================================================================
+     LE MOSSE SPECIALI, gruppo per gruppo.
+     Si registrano qui in fondo perche' hanno bisogno di quasi tutto il motore;
+     la tabella `MOSSE_SPECIALI` e' dichiarata in cima ed e' letta solo a
+     runtime, quindi l'ordine va bene.
+     ====================================================================== */
+
+  // ---------------------------------------------------------------- MALEDIZIONE
+  /* Due mosse in una: da SPETTRO paga meta' PS e maledice, da chiunque altro
+     e' un buff su di se'. Nell'originale e' la classe `CurseAttr`. */
+  MOSSE_SPECIALI.CURSE = (actor, foe, move, messages) => {
+    if (actor.types.includes("GHOST")) {
+      if (foe.fainted || foe.volatile.curse) { stessoMomento(messages, "Ma non ha funzionato!"); return; }
+      const costo = Math.max(1, Math.floor(actor.maxHp / 2));
+      actor.hp = Math.max(0, actor.hp - costo); actor._justHit = true;
+      foe.volatile.curse = true;
+      messages.push(`${actor.name} sacrifica metà dei suoi PS per lanciare una maledizione su ${foe.name}!`);
+      if (actor.hp <= 0) { actor.fainted = true; messages.push(`${actor.name} è esausto!`); }
+    } else {
+      applyStatStage(actor, ["ATK", "DEF"], 1, messages, true);
+      applyStatStage(actor, ["SPD"], -1, messages, true);
+    }
+  };
+
+  // -------------------------------------------------------------- GLI SCHERMI
+  /* Durano 5 turni. Velaurora ne vuole due in uno ma si puo' usare SOLO con
+     neve o grandine, come nell'originale. */
+  MOSSE_SPECIALI.REFLECT      = (a, f, m, msg) => accendiLato(a, "reflect", 5, msg);
+  MOSSE_SPECIALI.LIGHT_SCREEN = (a, f, m, msg) => accendiLato(a, "lightscreen", 5, msg);
+  MOSSE_SPECIALI.SAFEGUARD    = (a, f, m, msg) => accendiLato(a, "safeguard", 5, msg);
+  MOSSE_SPECIALI.MIST         = (a, f, m, msg) => accendiLato(a, "mist", 5, msg);
+  MOSSE_SPECIALI.LUCKY_CHANT  = (a, f, m, msg) => accendiLato(a, "luckychant", 5, msg);
+  MOSSE_SPECIALI.TAILWIND     = (a, f, m, msg) => accendiLato(a, "tailwind", 4, msg);
+  MOSSE_SPECIALI.AURORA_VEIL  = (a, f, m, msg) => {
+    const w = weatherKind();
+    if (w !== "HAIL" && w !== "SNOW") { stessoMomento(msg, "Ma non ha funzionato: serve la neve!"); return; }
+    accendiLato(a, "auroravelo", 5, msg);
+  };
+
+  // ------------------------------------------------------- TRAPPOLE D'INGRESSO
+  /* Si mettono sul lato AVVERSARIO e restano finche' dura la lotta. Le Punte si
+     accumulano fino a tre strati, le Fielepunte fino a due (col secondo il
+     veleno diventa grave: da noi il veleno e' uno solo, quindi il secondo
+     strato non aggiunge niente e la mossa lo dice). */
+  MOSSE_SPECIALI.SPIKES = (a, f, m, msg) => {
+    const L = latoDiFronte(a);
+    if (L.spikes >= 3) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    L.spikes++;
+    msg.push(`Punte sparse ai piedi della squadra ${nomeLato(f)}!`);
+  };
+  MOSSE_SPECIALI.TOXIC_SPIKES = (a, f, m, msg) => {
+    const L = latoDiFronte(a);
+    if (L.toxicspikes >= 2) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    L.toxicspikes++;
+    msg.push(`Fielepunte sparse ai piedi della squadra ${nomeLato(f)}!`);
+  };
+  MOSSE_SPECIALI.STEALTH_ROCK = (a, f, m, msg) => {
+    const L = latoDiFronte(a);
+    if (L.stealthrock) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    L.stealthrock = 1;
+    msg.push(`Pietre levitanti fluttuano attorno alla squadra ${nomeLato(f)}!`);
+  };
+  MOSSE_SPECIALI.STICKY_WEB = (a, f, m, msg) => {
+    const L = latoDiFronte(a);
+    if (L.stickyweb) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    L.stickyweb = 1;
+    msg.push(`Una rete vischiosa avvolge i piedi della squadra ${nomeLato(f)}!`);
+  };
+
+  // ------------------------------------------------------- CURE E RECUPERI
+  /* Aiutini comuni a tutto il gruppo. */
+  const curaPS = (f, quota, messages, testo) => {
+    if (f.volatile && f.volatile.anticura > 0) { stessoMomento(messages, `${f.name} non può curarsi!`); return false; }
+    if (f.hp >= f.maxHp) { stessoMomento(messages, "Ma i PS erano già pieni!"); return false; }
+    f.hp = Math.min(f.maxHp, f.hp + Math.max(1, Math.floor(f.maxHp * quota)));
+    messages.push(testo || `${f.name} recupera energie!`);
+    if (messages.anim) messages.anim("COMMON_HEALTH_UP", sideOf(f));
+    return true;
+  };
+  /* Le cure che dipendono dal METEO: meta' PS col sereno, due terzi col sole,
+     un quarto con qualunque altro tempo. E' la regola dell'originale. */
+  const curaMeteo = (f, messages) => {
+    const w = weatherKind();
+    const quota = !w ? 0.5 : (w === "SUN" ? 2 / 3 : 0.25);
+    return curaPS(f, quota, messages);
+  };
+
+  /* RIPOSO: PS pieni, ma ci si addormenta per due turni. ⚠️ Il sonno se lo
+     da' da solo, quindi NON passa da `applyStatus` (che la Salvaguardia
+     bloccherebbe, e sarebbe sbagliato). */
+  MOSSE_SPECIALI.REST = (a, f, m, msg) => {
+    if (a.hp >= a.maxHp) { stessoMomento(msg, "Ma i PS erano già pieni!"); return; }
+    a.hp = a.maxHp; a.status = "SLEEP"; a.sleepTurns = 2;
+    msg.push(`${a.name} si addormenta e recupera tutti i PS!`);
+    if (msg.anim) msg.anim("COMMON_HEALTH_UP", sideOf(a));
+  };
+  MOSSE_SPECIALI.SYNTHESIS   = (a, f, m, msg) => curaMeteo(a, msg);
+  MOSSE_SPECIALI.MOONLIGHT   = (a, f, m, msg) => curaMeteo(a, msg);
+  MOSSE_SPECIALI.MORNING_SUN = (a, f, m, msg) => curaMeteo(a, msg);
+  MOSSE_SPECIALI.SHORE_UP    = (a, f, m, msg) =>
+    curaPS(a, weatherKind() === "SANDSTORM" ? 2 / 3 : 0.5, msg);
+  MOSSE_SPECIALI.FLORAL_HEALING = (a, f, m, msg) => {
+    const chi = f && !f.fainted ? f : a;
+    curaPS(chi, terrainKind() === "GRASSY" ? 2 / 3 : 0.5, msg, `${chi.name} recupera energie!`);
+  };
+  MOSSE_SPECIALI.REFRESH = (a, f, m, msg) => {
+    if (!a.status) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    a.status = null; a.sleepTurns = 0;
+    msg.push(`${a.name} si è rimesso in sesto!`);
+  };
+  /* Rintoccasana e Aromaterapia curano TUTTA la squadra, panchina compresa. */
+  const curaSquadra = (a, msg, come) => {
+    const malati = game.party.filter(p => p.status).length;
+    if (!malati) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    for (const p of game.party) { p.status = null; p.sleepTurns = 0; }
+    msg.push(come);
+  };
+  MOSSE_SPECIALI.HEAL_BELL    = (a, f, m, msg) => curaSquadra(a, msg, "Un rintocco di campana cura tutta la squadra!");
+  MOSSE_SPECIALI.AROMATHERAPY = (a, f, m, msg) => curaSquadra(a, msg, "Un dolce profumo cura tutta la squadra!");
+  /* Malcomune: si sommano i PS dei due e si divide a meta'. */
+  MOSSE_SPECIALI.PAIN_SPLIT = (a, f, m, msg) => {
+    if (!f || f.fainted) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    const media = Math.floor((a.hp + f.hp) / 2);
+    a.hp = Math.min(a.maxHp, media); f.hp = Math.min(f.maxHp, media); f._justHit = true;
+    msg.push("I PS vengono divisi in parti uguali!");
+  };
+  /* Preghiera Vitale: rianima un esausto della panchina, a meta' PS. */
+  MOSSE_SPECIALI.REVIVAL_BLESSING = (a, f, m, msg) => {
+    const caduto = game.party.find(p => p.fainted);
+    if (!caduto) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    caduto.fainted = false; caduto.hp = Math.max(1, Math.floor(caduto.maxHp / 2));
+    caduto.status = null; caduto.sleepTurns = 0;
+    msg.push(`${caduto.name} torna in forze!`);
+  };
+  /* Curardore e Lunardanza: chi la usa cade, e chi entra al suo posto trova il
+     posto pulito. ⚠️ Da noi il "chi entra dopo" lo decide il giocatore, quindi
+     si segna una promessa sul lato e la si riscuote all'ingresso. */
+  const sacrificioCurativo = (a, msg, testo) => {
+    a.hp = 0; a.fainted = true; a._justHit = true;
+    lato(a).curaProssimo = true;
+    msg.push(testo);
+    msg.push(`${a.name} è esausto!`);
+  };
+  MOSSE_SPECIALI.HEALING_WISH = (a, f, m, msg) =>
+    sacrificioCurativo(a, msg, `${a.name} esprime un desiderio di guarigione…`);
+  MOSSE_SPECIALI.LUNAR_DANCE = (a, f, m, msg) =>
+    sacrificioCurativo(a, msg, `${a.name} danza al chiaro di luna…`);
+  /* Desiderio: cura chi si trova su quel lato DUE turni dopo. */
+  MOSSE_SPECIALI.WISH = (a, f, m, msg) => {
+    const L = lato(a);
+    if (L.wish) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    L.wish = { turni: 2, quota: Math.max(1, Math.floor(a.maxHp / 2)) };
+    msg.push(`${a.name} esprime un desiderio…`);
+  };
+
+  // ------------------------------------------------------- BUFF SU DI SE'
+  MOSSE_SPECIALI.FOCUS_ENERGY = (a, f, m, msg) => {
+    if (a.volatile.focus) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    a.volatile.focus = true;
+    msg.push(`${a.name} si concentra: i brutti colpi diventano molto più probabili!`);
+  };
+  MOSSE_SPECIALI.LASER_FOCUS = (a, f, m, msg) => {
+    a.volatile.laser = 2;   // vale per il PROSSIMO turno
+    msg.push(`${a.name} si concentra: il prossimo colpo sarà critico!`);
+  };
+  /* Crescita: +1 e +1, ma col SOLE raddoppia. */
+  MOSSE_SPECIALI.GROWTH = (a, f, m, msg) => {
+    const n = weatherKind() === "SUN" ? 2 : 1;
+    applyStatStage(a, ["ATK", "SPATK"], n, msg, true);
+  };
+  /* Panciamburo: meta' dei PS massimi per portare l'Attacco al MASSIMO. */
+  MOSSE_SPECIALI.BELLY_DRUM = (a, f, m, msg) => {
+    const costo = Math.max(1, Math.floor(a.maxHp / 2));
+    if (a.hp <= costo || a.stages.atk >= 6) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    a.hp -= costo; a._justHit = true; a.stages.atk = 6;
+    msg.push(`${a.name} si sacrifica: Attacco al massimo!`);
+  };
+  const pagaEBuffa = (a, msg, frazione, stats, stadi) => {
+    const costo = Math.max(1, Math.floor(a.maxHp * frazione));
+    if (a.hp <= costo) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    a.hp -= costo; a._justHit = true;
+    msg.push(`${a.name} si sacrifica per rafforzarsi!`);
+    applyStatStage(a, stats, stadi, msg, true);
+  };
+  MOSSE_SPECIALI.CLANGOROUS_SOUL = (a, f, m, msg) =>
+    pagaEBuffa(a, msg, 1 / 3, ["ATK", "DEF", "SPATK", "SPDEF", "SPD"], 1);
+  MOSSE_SPECIALI.FILLET_AWAY = (a, f, m, msg) =>
+    pagaEBuffa(a, msg, 1 / 2, ["ATK", "SPATK", "SPD"], 2);
+  /* Acupressione: +2 a una statistica a caso, fra quelle non gia' al massimo. */
+  MOSSE_SPECIALI.ACUPRESSURE = (a, f, m, msg) => {
+    const chi = (f && !isEnemySide(f) === !isEnemySide(a) && !f.fainted) ? f : a;
+    const cand = ["ATK", "DEF", "SPATK", "SPDEF", "SPD", "ACC", "EVA"]
+      .filter(k => (chi.stages[k.toLowerCase()] || 0) < 6);
+    if (!cand.length) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    applyStatStage(chi, [rndOf(cand)], 2, msg, chi === a);
+  };
+  /* Altruismo e Grido del Drago: aiutano l'ALLEATO, quindi valgono in doppio. */
+  MOSSE_SPECIALI.HELPING_HAND = (a, f, m, msg) => {
+    if (!game.double || !f || isEnemySide(f) || f.fainted) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    f.volatile.helping = true;
+    msg.push(`${a.name} dà una mano a ${f.name}!`);
+  };
+  MOSSE_SPECIALI.DRAGON_CHEER = (a, f, m, msg) => {
+    if (!game.double || !f || isEnemySide(f) || f.fainted) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    f.volatile.focus = true;
+    msg.push(`${a.name} incita ${f.name}: brutti colpi più probabili!`);
+  };
+
+  // --------------------------------------------- GIOCHI CON LE STATISTICHE
+  const STADI = ["atk", "def", "spatk", "spdef", "spd", "acc", "eva"];
+  MOSSE_SPECIALI.HAZE = (a, f, m, msg) => {
+    for (const x of onField()) x.stages = { atk: 0, def: 0, spatk: 0, spdef: 0, spd: 0, acc: 0, eva: 0 };
+    msg.push("Una nube nera azzera tutte le modifiche alle statistiche!");
+  };
+  MOSSE_SPECIALI.TOPSY_TURVY = (a, f, m, msg) => {
+    if (!f || f.fainted) return;
+    for (const k of STADI) f.stages[k] = -f.stages[k];
+    msg.push(`Le modifiche di ${f.name} vengono capovolte!`);
+  };
+  MOSSE_SPECIALI.PSYCH_UP = (a, f, m, msg) => {
+    if (!f || f.fainted) return;
+    for (const k of STADI) a.stages[k] = f.stages[k];
+    msg.push(`${a.name} copia le modifiche di ${f.name}!`);
+  };
+  const scambiaStadi = (a, f, msg, chiavi, testo) => {
+    if (!f || f.fainted) return;
+    for (const k of chiavi) { const t = a.stages[k]; a.stages[k] = f.stages[k]; f.stages[k] = t; }
+    msg.push(testo);
+  };
+  MOSSE_SPECIALI.POWER_SWAP = (a, f, m, msg) =>
+    scambiaStadi(a, f, msg, ["atk", "spatk"], "Le modifiche d'attacco vengono scambiate!");
+  MOSSE_SPECIALI.GUARD_SWAP = (a, f, m, msg) =>
+    scambiaStadi(a, f, msg, ["def", "spdef"], "Le modifiche di difesa vengono scambiate!");
+  MOSSE_SPECIALI.SPEED_SWAP = (a, f, m, msg) => {
+    if (!f || f.fainted) return;
+    const t = a.stats.spd; a.stats.spd = f.stats.spd; f.stats.spd = t;
+    msg.push("Le Velocità vengono scambiate!");
+  };
+  MOSSE_SPECIALI.HEART_SWAP = (a, f, m, msg) =>
+    scambiaStadi(a, f, msg, STADI, "Tutte le modifiche vengono scambiate!");
+  MOSSE_SPECIALI.POWER_TRICK = (a, f, m, msg) => {
+    const t = a.stats.atk; a.stats.atk = a.stats.def; a.stats.def = t;
+    msg.push(`${a.name} scambia Attacco e Difesa!`);
+  };
+  MOSSE_SPECIALI.POWER_SHIFT = MOSSE_SPECIALI.POWER_TRICK;
+  const dividiStat = (a, f, msg, chiavi, testo) => {
+    if (!f || f.fainted) return;
+    for (const k of chiavi) {
+      const media = Math.floor((a.stats[k] + f.stats[k]) / 2);
+      a.stats[k] = media; f.stats[k] = media;
+    }
+    msg.push(testo);
+  };
+  MOSSE_SPECIALI.POWER_SPLIT = (a, f, m, msg) =>
+    dividiStat(a, f, msg, ["atk", "spatk"], "Gli attacchi vengono livellati!");
+  MOSSE_SPECIALI.GUARD_SPLIT = (a, f, m, msg) =>
+    dividiStat(a, f, msg, ["def", "spdef"], "Le difese vengono livellate!");
+
+  // ------------------------------------------------------ CAMBI DI TIPO
+  const nomeTipo = t => (T[t] || {}).it || t;
+  const cambiaTipo = (chi, tipi, msg) => {
+    chi.types = tipi.slice();
+    msg.push(`${chi.name} diventa di tipo ${tipi.map(nomeTipo).join("/")}!`);
+  };
+  MOSSE_SPECIALI.SOAK = (a, f, m, msg) => { if (f && !f.fainted) cambiaTipo(f, ["WATER"], msg); };
+  MOSSE_SPECIALI.MAGIC_POWDER = (a, f, m, msg) => { if (f && !f.fainted) cambiaTipo(f, ["PSYCHIC"], msg); };
+  /* Halloween e Boscomalocchio AGGIUNGONO un tipo invece di sostituirlo. */
+  const aggiungiTipo = (f, t, msg) => {
+    if (!f || f.fainted || f.types.includes(t)) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    f.types = f.types.concat([t]);
+    msg.push(`${f.name} prende anche il tipo ${nomeTipo(t)}!`);
+  };
+  MOSSE_SPECIALI.TRICK_OR_TREAT = (a, f, m, msg) => aggiungiTipo(f, "GHOST", msg);
+  MOSSE_SPECIALI.FORESTS_CURSE  = (a, f, m, msg) => aggiungiTipo(f, "GRASS", msg);
+  /* Conversione: chi la usa prende il tipo di una sua mossa. */
+  MOSSE_SPECIALI.CONVERSION = (a, f, m, msg) => {
+    const tipi = a.moves.map(x => M[x.id] && M[x.id].type).filter(Boolean);
+    if (!tipi.length) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    cambiaTipo(a, [rndOf(tipi)], msg);
+  };
+  /* Conversione2: si prende un tipo che RESISTE all'ultima mossa del bersaglio. */
+  MOSSE_SPECIALI.CONVERSION_2 = (a, f, m, msg) => {
+    const ultima = f && f.volatile && f.volatile.lastMove;
+    const tipoMossa = ultima && M[ultima] ? M[ultima].type : null;
+    if (!tipoMossa) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    const buoni = Object.keys(CHART).filter(t => typeMultiplier(tipoMossa, [t]) < 1);
+    if (!buoni.length) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    cambiaTipo(a, [rndOf(buoni)], msg);
+  };
+  MOSSE_SPECIALI.REFLECT_TYPE = (a, f, m, msg) => {
+    if (!f || f.fainted) return;
+    cambiaTipo(a, f.types, msg);
+  };
+  /* Camuffamento: il tipo lo detta il TERRENO, e in mancanza il bioma. */
+  MOSSE_SPECIALI.CAMOUFLAGE = (a, f, m, msg) => {
+    const perTerreno = { GRASSY: "GRASS", ELECTRIC: "ELECTRIC", MISTY: "FAIRY", PSYCHIC: "PSYCHIC" };
+    cambiaTipo(a, [perTerreno[terrainKind()] || "NORMAL"], msg);
+  };
+
+  // -------------------------------------------------- SCAMBI DI ABILITA'
+  const cambiaAbilita = (chi, chiave, msg) => {
+    const ab = ABIL[chiave];
+    if (!ab) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    chi.ability = ab;
+    msg.push(`L'abilità di ${chi.name} diventa ${ab.it}!`);
+  };
+  MOSSE_SPECIALI.SKILL_SWAP = (a, f, m, msg) => {
+    if (!f || f.fainted) return;
+    const t = a.ability; a.ability = f.ability; f.ability = t;
+    msg.push("Le abilità vengono scambiate!");
+  };
+  MOSSE_SPECIALI.ROLE_PLAY = (a, f, m, msg) => {
+    if (!f || f.fainted || !f.ability) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    a.ability = f.ability;
+    msg.push(`${a.name} copia ${f.ability.it}!`);
+  };
+  MOSSE_SPECIALI.DOODLE = MOSSE_SPECIALI.ROLE_PLAY;
+  MOSSE_SPECIALI.ENTRAINMENT = (a, f, m, msg) => {
+    if (!f || f.fainted || !a.ability) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    f.ability = a.ability;
+    msg.push(`${f.name} prende l'abilità ${a.ability.it}!`);
+  };
+  MOSSE_SPECIALI.SIMPLE_BEAM = (a, f, m, msg) => { if (f && !f.fainted) cambiaAbilita(f, "SIMPLE", msg); };
+  MOSSE_SPECIALI.WORRY_SEED  = (a, f, m, msg) => { if (f && !f.fainted) cambiaAbilita(f, "INSOMNIA", msg); };
+  /* Gastroacido: l'abilita' non viene sostituita, viene SPENTA. */
+  MOSSE_SPECIALI.GASTRO_ACID = (a, f, m, msg) => {
+    if (!f || f.fainted || !f.ability) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    msg.push(`L'abilità di ${f.name} viene annullata!`);
+    f.ability = null;
+  };
+
+  // --------------------------------------------------- SCAMBI DI OGGETTI
+  // (esiste gia un haOggetti piu su, per il pannello squadra: qui serve un nome suo)
+  const tieneQualcosa = f => f && (Object.keys(f.held || {}).length || Object.keys(f.berries || {}).length);
+  MOSSE_SPECIALI.TRICK = (a, f, m, msg) => {
+    if (!f || f.fainted || (!tieneQualcosa(a) && !tieneQualcosa(f))) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    const h = a.held, b = a.berries;
+    a.held = f.held || {}; a.berries = f.berries || {};
+    f.held = h || {}; f.berries = b || {};
+    msg.push("Gli oggetti tenuti vengono scambiati!");
+  };
+  MOSSE_SPECIALI.SWITCHEROO = MOSSE_SPECIALI.TRICK;
+  MOSSE_SPECIALI.BESTOW = (a, f, m, msg) => {
+    if (!f || f.fainted || !tieneQualcosa(a)) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    f.held = Object.assign({}, f.held, a.held);
+    f.berries = Object.assign({}, f.berries, a.berries);
+    a.held = {}; a.berries = {};
+    msg.push(`${a.name} cede quello che teneva a ${f.name}!`);
+  };
+  MOSSE_SPECIALI.CORROSIVE_GAS = (a, f, m, msg) => {
+    if (!f || f.fainted || !tieneQualcosa(f)) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    f.held = {}; f.berries = {};
+    msg.push(`Il gas corrode gli oggetti di ${f.name}!`);
+  };
+  MOSSE_SPECIALI.RECYCLE = (a, f, m, msg) => {
+    /* Da noi le bacche consumate non si tengono da parte, quindi non c'e'
+       niente da riciclare: si dice, invece di far finta. */
+    stessoMomento(msg, "Ma non c'è niente da riciclare!");
+  };
+  MOSSE_SPECIALI.EMBARGO = (a, f, m, msg) => {
+    if (!f || f.fainted) return;
+    f.volatile.embargo = 5;
+    spegniOggetti(f);
+    msg.push(`${f.name} non può più usare il suo oggetto!`);
+  };
+
+  // ---------------------------------------------- VEDERE E NON SBAGLIARE
+  /* Preveggenza, Segugio e Miracolvista tolgono le immunita' di tipo: da noi
+     si segna sul bersaglio e lo legge `typeMultiplier` tramite `doDamage`. */
+  const smascheraTipo = (f, tipi, msg, testo) => {
+    if (!f || f.fainted) return;
+    f.volatile.smascherato = (f.volatile.smascherato || []).concat(tipi);
+    msg.push(testo);
+  };
+  MOSSE_SPECIALI.FORESIGHT    = (a, f, m, msg) => smascheraTipo(f, ["NORMAL", "FIGHTING"], msg, `${f.name} è stato individuato!`);
+  MOSSE_SPECIALI.ODOR_SLEUTH  = MOSSE_SPECIALI.FORESIGHT;
+  MOSSE_SPECIALI.MIRACLE_EYE  = (a, f, m, msg) => smascheraTipo(f, ["PSYCHIC"], msg, `${f.name} è stato individuato!`);
+  /* Localizza e Leggimente: il prossimo colpo va a segno di sicuro. */
+  MOSSE_SPECIALI.LOCK_ON = (a, f, m, msg) => {
+    a.volatile.mirino = true;
+    msg.push(`${a.name} prende la mira su ${f ? f.name : "l'avversario"}!`);
+  };
+  MOSSE_SPECIALI.MIND_READER = MOSSE_SPECIALI.LOCK_ON;
+  /* Magnetascesa e Telecinesi: si sta per aria, quindi le mosse di Terra e le
+     trappole a terra non arrivano piu'. */
+  MOSSE_SPECIALI.MAGNET_RISE = (a, f, m, msg) => {
+    a.volatile.levita = 5;
+    msg.push(`${a.name} si solleva da terra!`);
+  };
+  MOSSE_SPECIALI.TELEKINESIS = (a, f, m, msg) => {
+    if (!f || f.fainted) return;
+    f.volatile.levita = 3;
+    msg.push(`${f.name} viene sollevato in aria!`);
+  };
+
+  // ---------------------------------------------------- EFFETTI DI CAMPO
+  const campoATempo = (chiave, turni, msg, testo) => {
+    if (game[chiave] > 0) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    game[chiave] = turni;
+    msg.push(testo);
+  };
+  MOSSE_SPECIALI.MUD_SPORT   = (a, f, m, msg) => campoATempo("fangata", 5, msg, "Il fango indebolisce le mosse Elettro!");
+  MOSSE_SPECIALI.WATER_SPORT = (a, f, m, msg) => campoATempo("doccia", 5, msg, "L'acqua indebolisce le mosse Fuoco!");
+  MOSSE_SPECIALI.GRAVITY     = (a, f, m, msg) => campoATempo("gravita", 5, msg, "La gravità aumenta: tutti a terra!");
+  MOSSE_SPECIALI.TRICK_ROOM  = (a, f, m, msg) => {
+    /* Distortozona si SPEGNE se e' gia' accesa: e' l'unica cosi'. */
+    if (game.distorto > 0) { game.distorto = 0; msg.push("La distorsione svanisce!"); return; }
+    game.distorto = 5;
+    msg.push("Lo spazio si distorce: i più lenti agiscono per primi!");
+  };
+  MOSSE_SPECIALI.WONDER_ROOM = (a, f, m, msg) => {
+    if (game.mirabil > 0) { game.mirabil = 0; msg.push("La Mirabilzona svanisce!"); return; }
+    game.mirabil = 5;
+    msg.push("Difesa e Difesa Speciale si scambiano per tutti!");
+  };
+  MOSSE_SPECIALI.MAGIC_ROOM = (a, f, m, msg) => {
+    if (game.magica > 0) {
+      game.magica = 0;
+      for (const x of game.party.concat(onField())) riaccendiOggetti(x);
+      msg.push("La Magicozona svanisce!"); return;
+    }
+    game.magica = 5;
+    for (const x of onField()) spegniOggetti(x);
+    msg.push("Gli oggetti tenuti smettono di funzionare!");
+  };
+  MOSSE_SPECIALI.ION_DELUGE = (a, f, m, msg) => campoATempo("plasma", 5, msg, "Particelle elettrizzate riempiono il campo!");
+
+  // ------------------------------------------------------- ALTRE DUE COSE
+  MOSSE_SPECIALI.PSYCHO_SHIFT = (a, f, m, msg) => {
+    if (!a.status || !f || f.fainted || f.status) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    const st = a.status; a.status = null; a.sleepTurns = 0;
+    applyStatus(f, st, msg);
+    msg.push(`${a.name} passa il suo malessere a ${f.name}!`);
+  };
+  MOSSE_SPECIALI.HEAL_BLOCK = (a, f, m, msg) => {
+    if (!f || f.fainted) return;
+    f.volatile.anticura = 5;
+    msg.push(`${f.name} non può piu' curarsi!`);
+  };
+
+  // ---------------------------------------------- QUELLE CHE NON FANNO NULLA
+  /* ⚠️ Non sono dimenticate: nei giochi veri non fanno NIENTE, e il bello e'
+     proprio quello. L'importante e' che lo DICANO, invece di lasciare un turno
+     muto che sembra un difetto. */
+  MOSSE_SPECIALI.SPLASH     = (a, f, m, msg) => msg.push(`${a.name} sguazza qua e là… ma non succede nulla!`);
+  MOSSE_SPECIALI.CELEBRATE  = (a, f, m, msg) => msg.push(`${a.name} ti fa gli auguri!`);
+  MOSSE_SPECIALI.HOLD_HANDS = (a, f, m, msg) => msg.push(`${a.name} e il suo alleato si tengono per mano!`);
+  MOSSE_SPECIALI.TEATIME    = (a, f, m, msg) => {
+    let qualcuno = false;
+    for (const x of onField()) {
+      const bacche = Object.keys(x.berries || {});
+      if (bacche.length) { qualcuno = true; useBerry(x, bacche[0], msg); }
+    }
+    if (!qualcuno) msg.push("È l'ora del tè… ma nessuno ha bacche!");
+  };
+  /* Cuccagna: i soldi di fine ondata raddoppiano. */
+  MOSSE_SPECIALI.HAPPY_HOUR = (a, f, m, msg) => {
+    game.cuccagna = true;
+    msg.push("Che fortuna! I premi in denaro raddoppiano!");
+  };
+
+  /* ====================================================================
+     LOTTO 5 — le mosse che ne muovono ALTRE, o che muovono il Pokemon.
+     Sono le piu' intricate del gruppo: non aggiungono un effetto, cambiano
+     il funzionamento del turno.
+     ==================================================================== */
+
+  /* ---- una mossa che ne lancia un'altra --------------------------------
+     Metronomo, Speculmossa, Copiatore, Introduzione, Sonnolalia, Prioricolpo,
+     Naturforza, Assistenza, Bisticcio.
+     [ATTENZIONE] Serve davvero un limite di profondita': Metronomo puo'
+     pescare Metronomo, e Speculmossa puo' rispondere a Speculmossa. Senza
+     tetto il gioco si pianta senza dire niente. */
+  let profonditaMossa = 0;
+  function usaAltraMossa(actor, foe, id, messages, testo) {
+    if (!M[id] || profonditaMossa >= 2) { stessoMomento(messages, "Ma non ha funzionato!"); return; }
+    profonditaMossa++;
+    try {
+      if (testo !== " ") messages.push(testo || `Parte ${M[id].it}!`);
+      resolveAction(actor, foe || pickFoeFor(actor), { id, pp: 1, maxPp: 1 }, messages, true);
+    } finally { profonditaMossa--; }
+  }
+  const scegliACaso = arr => arr[Math.floor(Math.random() * arr.length)];
+
+  /* Metronomo non deve pescare le mosse che chiamano altre mosse (si
+     rincorrerebbero) ne' quelle che qui non hanno senso. */
+  const NIENTE_METRONOMO = new Set(["METRONOME", "MIRROR_MOVE", "COPYCAT", "ASSIST", "SLEEP_TALK",
+    "ME_FIRST", "NATURE_POWER", "MIMIC", "SKETCH", "TRANSFORM", "STRUGGLE", "INSTRUCT",
+    "SNATCH", "MAGIC_COAT", "BATON_PASS", "SHED_TAIL", "AFTER_YOU", "QUASH"]);
+  MOSSE_SPECIALI.METRONOME = (a, f, m, msg) => {
+    const pool = Object.keys(M).filter(id => !NIENTE_METRONOMO.has(id));
+    const id = scegliACaso(pool);
+    usaAltraMossa(a, f, id, msg, `Il dito indica ${M[id].it}!`);
+  };
+  MOSSE_SPECIALI.MIRROR_MOVE = (a, f, m, msg) => {
+    const u = f && f.volatile && f.volatile.lastMove;
+    if (!u) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    usaAltraMossa(a, f, u, msg, `${a.name} rispecchia ${M[u].it}!`);
+  };
+  MOSSE_SPECIALI.COPYCAT = (a, f, m, msg) => {
+    const u = game.ultimaMossa;
+    if (!u || u === "COPYCAT") { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    usaAltraMossa(a, f, u, msg, `${a.name} copia ${M[u].it}!`);
+  };
+  /* Assistenza pesca a caso tra le mosse dei COMPAGNI in panchina. */
+  MOSSE_SPECIALI.ASSIST = (a, f, m, msg) => {
+    const compagni = game.party.filter(p => p !== a && !p.fainted);
+    const pool = [];
+    for (const p of compagni) for (const mm of p.moves) if (!NIENTE_METRONOMO.has(mm.id)) pool.push(mm.id);
+    if (!pool.length) { stessoMomento(msg, "Ma non c'è nessuno che possa aiutare!"); return; }
+    const id = scegliACaso(pool);
+    usaAltraMossa(a, f, id, msg, `Un compagno passa ${M[id].it}!`);
+  };
+  /* Naturforza cambia mossa col TERRENO, come nelle generazioni recenti. */
+  const NATURA_PER_TERRENO = { GRASSY: "ENERGY_BALL", ELECTRIC: "THUNDERBOLT",
+                               MISTY: "MOONBLAST", PSYCHIC: "PSYCHIC" };
+  MOSSE_SPECIALI.NATURE_POWER = (a, f, m, msg) => {
+    let id = NATURA_PER_TERRENO[terrainKind()] || "TRI_ATTACK";
+    if (!M[id]) id = "SWIFT";
+    usaAltraMossa(a, f, id, msg, `La natura sceglie ${M[id].it}!`);
+  };
+  /* Prioricolpo: nell'originale ruba la mossa che l'avversario sta per usare.
+     Da noi la scelta avversaria non e' visibile da qui, quindi si prende una
+     delle sue mosse d'attacco — l'effetto in campo e' lo stesso. */
+  MOSSE_SPECIALI.ME_FIRST = (a, f, m, msg) => {
+    if (!f || f.fainted) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    const pool = f.moves.filter(x => M[x.id] && M[x.id].category !== "STATUS" && !NIENTE_METRONOMO.has(x.id));
+    if (!pool.length) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    const id = scegliACaso(pool).id;
+    usaAltraMossa(a, f, id, msg, `${a.name} anticipa ${M[id].it}!`);
+  };
+  /* Ordine: il bersaglio rifa' subito l'ultima mossa che ha usato. */
+  MOSSE_SPECIALI.INSTRUCT = (a, f, m, msg) => {
+    const u = f && f.volatile && f.volatile.lastMove;
+    if (!f || f.fainted || !u) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    usaAltraMossa(f, pickFoeFor(f), u, msg, `${f.name} è costretto a rifare ${M[u].it}!`);
+  };
+
+  /* ---- copiare mosse e Pokemon ---------------------------------------- */
+  /* Mimica e Schizzo scrivono la mossa copiata AL POSTO DI SE STESSE: da noi
+     Mimica dura fino a fine lotta (i volatili si azzerano rientrando),
+     Schizzo e' per sempre — la differenza dei giochi veri. */
+  const copiaMossa = (a, f, msg, perSempre, nome) => {
+    const u = f && f.volatile && f.volatile.lastMove;
+    if (!u || a.moves.some(x => x.id === u)) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    const slot = a.moves.find(x => x.id === (perSempre ? "SKETCH" : "MIMIC"));
+    if (!slot) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    slot.id = u; slot.pp = M[u].pp; slot.maxPp = M[u].pp;
+    if (perSempre) { const sp = (a.movesFissi = a.movesFissi || []); sp.push(u); }
+    msg.push(`${nome}: ${a.name} impara ${M[u].it}!`);
+  };
+  MOSSE_SPECIALI.MIMIC  = (a, f, m, msg) => copiaMossa(a, f, msg, false, "Mimica");
+  MOSSE_SPECIALI.SKETCH = (a, f, m, msg) => copiaMossa(a, f, msg, true, "Schizzo");
+  /* Trasformazione: statistiche, tipi, abilita' e mosse dell'avversario.
+     I PS restano i propri — come nei giochi veri — e lo sprite non cambia:
+     ridisegnarlo vorrebbe dire ricaricare l'atlante a meta' turno. */
+  MOSSE_SPECIALI.TRANSFORM = (a, f, m, msg) => {
+    if (!f || f.fainted) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    a.types = f.types.slice();
+    a.stats = Object.assign({}, f.stats, { hp: a.stats.hp });
+    a.stages = Object.assign({}, f.stages);
+    a.ability = f.ability;
+    a.moves = f.moves.map(x => ({ id: x.id, pp: Math.min(5, M[x.id].pp), maxPp: Math.min(5, M[x.id].pp) }));
+    msg.push(`${a.name} si trasforma in ${f.name}!`);
+  };
+
+  /* ---- il sostituto ---------------------------------------------------- */
+  /* Un quarto dei PS massimi diventa un fantoccio che incassa i colpi al posto
+     suo (l'incasso vero sta in `doDamage`). */
+  MOSSE_SPECIALI.SUBSTITUTE = (a, f, m, msg) => {
+    if (a.volatile.sub > 0) { stessoMomento(msg, "C'è già un sostituto!"); return; }
+    const costo = Math.floor(a.maxHp / 4);
+    if (a.hp <= costo) { stessoMomento(msg, `${a.name} non ha abbastanza PS!`); return; }
+    a.hp -= costo; a._justHit = true; a.volatile.sub = costo;
+    msg.push(`${a.name} crea un sostituto!`);
+  };
+
+  /* ---- togliere mosse e PP all'avversario ------------------------------- */
+  MOSSE_SPECIALI.DISABLE = (a, f, m, msg) => {
+    const u = f && f.volatile && f.volatile.lastMove;
+    if (!f || f.fainted || !u || (f.volatile.disable && f.volatile.disable.turni > 0)) {
+      stessoMomento(msg, "Ma non ha funzionato!"); return;
+    }
+    f.volatile.disable = { id: u, turni: 4 };
+    msg.push(`${M[u].it} di ${f.name} è bloccata!`);
+  };
+  MOSSE_SPECIALI.SPITE = (a, f, m, msg) => {
+    const u = f && f.volatile && f.volatile.lastMove;
+    const mi = u && f.moves.find(x => x.id === u);
+    if (!mi || mi.pp <= 0) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    const tolti = Math.min(4, mi.pp); mi.pp -= tolti;
+    msg.push(`${M[u].it} di ${f.name} perde ${tolti} PP!`);
+  };
+  /* Divieto sigilla le mosse che chi la usa conosce: legge in `mossaVietata`. */
+  MOSSE_SPECIALI.IMPRISON = (a, f, m, msg) => {
+    a.volatile.imprison = true;
+    msg.push(`${a.name} sigilla le mosse che conosce anche lui!`);
+  };
+  /* Tentacolock stringe ogni turno: il morso sta in `endOfTurnResidual`. */
+  MOSSE_SPECIALI.OCTOLOCK = (a, f, m, msg) => {
+    if (!f || f.fainted) return;
+    f.volatile.octolock = 1;
+    msg.push(`${f.name} è stretto nella morsa e non può più difendersi!`);
+  };
+
+  /* ---- portarsi dietro chi ti stende ----------------------------------- */
+  MOSSE_SPECIALI.DESTINY_BOND = (a, f, m, msg) => {
+    a.volatile.destiny = true;
+    msg.push(`${a.name} si prepara a trascinare con sé chi lo stenderà!`);
+  };
+  MOSSE_SPECIALI.GRUDGE = (a, f, m, msg) => {
+    a.volatile.grudge = true;
+    msg.push(`${a.name} nutre rancore verso chi lo stenderà!`);
+  };
+
+  /* ---- rubare e rimandare indietro le mosse di stato -------------------- */
+  MOSSE_SPECIALI.MAGIC_COAT = (a, f, m, msg) => {
+    a.volatile.magiccoat = true;
+    msg.push(`${a.name} si avvolge in un manto magico!`);
+  };
+  MOSSE_SPECIALI.SNATCH = (a, f, m, msg) => {
+    a.volatile.snatch = true;
+    msg.push(`${a.name} si mette in agguato per rubare una mossa!`);
+  };
+
+  /* ---- attirare i colpi su di se' (solo in doppio ha senso) ------------- */
+  const attiraColpi = (chi, msg, testo) => {
+    if (!chi || chi.fainted) return;
+    chi.volatile.centro = true;
+    msg.push(testo);
+  };
+  MOSSE_SPECIALI.FOLLOW_ME    = (a, f, m, msg) => attiraColpi(a, msg, `${a.name} attira su di sé tutti i colpi!`);
+  MOSSE_SPECIALI.RAGE_POWDER  = (a, f, m, msg) => attiraColpi(a, msg, `${a.name} si copre di polline e attira i colpi!`);
+  MOSSE_SPECIALI.SPOTLIGHT    = (a, f, m, msg) => attiraColpi(f, msg, `Un riflettore punta ${f ? f.name : "l'avversario"}: tutti i colpi vanno su di lui!`);
+
+  /* ---- protezioni di SQUADRA (le legge `resolveAction`) ----------------- */
+  const guardiaSquadra = (a, chiave, msg, testo) => { lato(a)[chiave] = 1; msg.push(testo); };
+  MOSSE_SPECIALI.WIDE_GUARD    = (a, f, m, msg) => guardiaSquadra(a, "wideguard", msg, "Ampiaguardia protegge la squadra dagli attacchi ad area!");
+  MOSSE_SPECIALI.QUICK_GUARD   = (a, f, m, msg) => guardiaSquadra(a, "quickguard", msg, "Blocco protegge la squadra dalle mosse di priorità!");
+  MOSSE_SPECIALI.CRAFTY_SHIELD = (a, f, m, msg) => guardiaSquadra(a, "craftyshield", msg, "Truccodifesa protegge la squadra dalle mosse di stato!");
+  MOSSE_SPECIALI.MAT_BLOCK     = (a, f, m, msg) => guardiaSquadra(a, "matblock", msg, "Scudo Aureo para gli attacchi diretti alla squadra!");
+
+  /* ---- riordinare il turno (Prendinota, Rinvio) ------------------------- */
+  const spostaInCoda = (f, msg, inFondo) => {
+    const q = game._coda || [];
+    const i = q.findIndex((x, k) => k > game._codaI && x.actor === f);
+    if (i < 0) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
+    const az = q.splice(i, 1)[0];
+    if (inFondo) q.push(az); else q.splice(game._codaI + 1, 0, az);
+    msg.push(inFondo ? `${f.name} viene rimandato in fondo al turno!`
+                     : `${f.name} passa avanti nel turno!`);
+  };
+  MOSSE_SPECIALI.AFTER_YOU = (a, f, m, msg) => spostaInCoda(f, msg, false);
+  MOSSE_SPECIALI.QUASH     = (a, f, m, msg) => spostaInCoda(f, msg, true);
+
+  /* ---- scambiarsi di posto col compagno (solo in doppio) ---------------- */
+  MOSSE_SPECIALI.ALLY_SWITCH = (a, f, m, msg) => {
+    if (!game.double) { stessoMomento(msg, "Ma non c'è nessuno con cui scambiarsi!"); return; }
+    if (a === game.player && game.player2) { const t = game.player; game.player = game.player2; game.player2 = t; game.active = game.party.indexOf(game.player); }
+    else if (a === game.player2 && game.player) { const t = game.player; game.player = game.player2; game.player2 = t; game.active = game.party.indexOf(game.player); }
+    else if (a === game.enemy && game.enemy2) { const t = game.enemy; game.enemy = game.enemy2; game.enemy2 = t; }
+    else if (a === game.enemy2 && game.enemy) { const t = game.enemy; game.enemy = game.enemy2; game.enemy2 = t; }
+    else { stessoMomento(msg, "Ma non c'è nessuno con cui scambiarsi!"); return; }
+    renderScene();
+    msg.push(`${a.name} e il suo compagno si scambiano di posto!`);
+  };
+
+  /* ---- effetti di campo minori ----------------------------------------- */
+  MOSSE_SPECIALI.ELECTRIFY = (a, f, m, msg) => {
+    if (!f || f.fainted) return;
+    f.volatile.elettro = true;
+    msg.push(`Le mosse di ${f.name} diventano di tipo Elettro!`);
+  };
+  MOSSE_SPECIALI.POWDER = (a, f, m, msg) => {
+    if (!f || f.fainted) return;
+    f.volatile.powder = true;
+    msg.push(`${f.name} viene coperto di polvere esplosiva!`);
+  };
+  MOSSE_SPECIALI.FAIRY_LOCK = (a, f, m, msg) => {
+    if (!game.lati) game.lati = latiVuoti();
+    game.lati.mio.nocambio = 2; game.lati.suo.nocambio = 2;
+    msg.push("Un vincolo fatato tiene tutti in campo!");
+  };
+  /* Cambiocampo: schermi e trappole passano dall'altra parte. Cambia la lotta
+     in un colpo solo, ed e' proprio quello che fa nell'originale. */
+  MOSSE_SPECIALI.COURT_CHANGE = (a, f, m, msg) => {
+    if (!game.lati) { stessoMomento(msg, "Ma non c'è niente da scambiare!"); return; }
+    const t = game.lati.mio; game.lati.mio = game.lati.suo; game.lati.suo = t;
+    msg.push("I due campi si scambiano tutto quello che c'era sopra!");
+  };
+
+  /* ---- i cambi forzati -------------------------------------------------- */
+  /* Chi entra al posto di chi esce, e chi porta con se' gli sbalzi.
+     [ATTENZIONE] Non si esegue subito: si mette in lista e `afterTurn` la
+     svuota a turno concluso. Le azioni ancora da risolvere tengono in mano il
+     Pokemon che c'e' adesso, e cambiarlo sotto i piedi le farebbe colpire un
+     riferimento morto. */
+  function chiediCambio(chi, stadi, msg, testo) {
+    if (!chi || chi.fainted) { stessoMomento(msg, "Ma non ha funzionato!"); return false; }
+    if (game.lati && lato(chi).nocambio > 0) { stessoMomento(msg, "Un vincolo fatato lo tiene in campo!"); return false; }
+    if (chi.volatile.trap || chi.volatile.ingrain) { stessoMomento(msg, `${chi.name} non riesce a lasciare il campo!`); return false; }
+    /* Il ricambio si controlla ADESSO. Senza, si annunciava «X viene spazzato
+       via!» e un attimo dopo «ma non c'e' nessuno che lo sostituisca»: due
+       righe che si smentiscono. */
+    const c_e_ricambio = isEnemySide(chi)
+      ? (chi === game.enemy && !!(game.enemyQueue && game.enemyQueue.length))
+      : game.party.some(p => !p.fainted && p !== game.player && p !== game.player2);
+    if (!c_e_ricambio) { stessoMomento(msg, `Ma non c'è nessuno che possa sostituire ${chi.name}!`); return false; }
+    (game.cambioForzato = game.cambioForzato || []).push({ chi, stadi: !!stadi });
+    if (testo) msg.push(testo);
+    return true;
+  }
+  function eseguiCambioForzato(r, log) {
+    const chi = r.chi;
+    if (!chi || chi.fainted) return;
+    const stadi = r.stadi ? Object.assign({}, chi.stages) : null;
+    const sub = r.stadi ? chi.volatile.sub : 0;      // la Zampata passa il sostituto
+    if (isEnemySide(chi)) {
+      // avversario: si pesca dalla coda dell'allenatore, e lui torna in fondo
+      if (chi !== game.enemy || !game.enemyQueue || !game.enemyQueue.length) {
+        log.push(`Ma non c'è nessuno che possa sostituire ${chi.name}!`); return;
+      }
+      richiamaNellaBall(chi);
+      game.enemyQueue.push(chi);
+      const next = game.enemyQueue.shift();
+      log.push(conBall(`${chi.name} lascia il campo!`, "ritiro", "enemy"));
+      deployEnemy(next, log);
+      entraInCampo(next, log);
+      log.push(conBall(`Tocca a ${next.name}!`, "uscita", "enemy"));
+      if (stadi) next.stages = stadi;
+      if (sub) next.volatile.sub = sub;
+      if (typeof renderTrainerBalls === "function") renderTrainerBalls();
+      renderScene();
+      return;
+    }
+    // squadra del giocatore: il ricambio e' il primo della panchina ancora in piedi
+    const riserva = game.party.find(p => !p.fainted && p !== game.player && p !== game.player2);
+    if (!riserva) { log.push(`Ma non c'è nessuno che possa sostituire ${chi.name}!`); return; }
+    const secondo = (chi === game.player2);
+    richiamaNellaBall(chi);
+    log.push(conBall(`Ritirati, ${chi.name}!`, "ritiro", secondo ? "player2" : "player"));
+    if (secondo) game.player2 = riserva; else setActive(game.party.indexOf(riserva));
+    entraInCampo(riserva, log);
+    riserva.spr = null;
+    loadFighterSprite(riserva, "back").then(sp => { riserva.spr = sp; redrawScene(); });
+    log.push(conBall(`Vai, ${riserva.name}!`, "uscita", secondo ? "player2" : "player"));
+    if (stadi) riserva.stages = stadi;
+    if (sub) riserva.volatile.sub = sub;
+    applyOnSummon(riserva, game.enemy, log);
+    renderScene();
+  }
+
+  /* Turbine e Boato scacciano l'AVVERSARIO; Staffetta, Zampata, Monito e
+     Teletrasporto fanno uscire CHI LI USA. Solo Staffetta e Zampata passano
+     gli sbalzi di statistica a chi entra. */
+  MOSSE_SPECIALI.WHIRLWIND = (a, f, m, msg) => chiediCambio(f, false, msg, `${f.name} viene spazzato via dal campo!`);
+  MOSSE_SPECIALI.ROAR      = (a, f, m, msg) => chiediCambio(f, false, msg, `Il boato caccia ${f.name} dal campo!`);
+  MOSSE_SPECIALI.TELEPORT  = (a, f, m, msg) => chiediCambio(a, false, msg, `${a.name} si teletrasporta via!`);
+  MOSSE_SPECIALI.BATON_PASS = (a, f, m, msg) => chiediCambio(a, true, msg, `${a.name} passa il testimone!`);
+  MOSSE_SPECIALI.SHED_TAIL = (a, f, m, msg) => {
+    const costo = Math.floor(a.maxHp / 4);
+    if (a.hp <= costo) { stessoMomento(msg, `${a.name} non ha abbastanza PS!`); return; }
+    if (!chiediCambio(a, true, msg, null)) return;
+    a.hp -= costo; a._justHit = true; a.volatile.sub = costo;
+    msg.push(`${a.name} lascia un sostituto e si defila!`);
+  };
+  MOSSE_SPECIALI.PARTING_SHOT = (a, f, m, msg) => {
+    if (f && !f.fainted) applyStatStage(f, ["ATK", "SPATK"], -1, msg, false);
+    chiediCambio(a, false, msg, `${a.name} lascia il campo dopo l'ultima parola!`);
+  };
+
   // Probabilita' del TIER (poi si pesca l'oggetto dentro al tier, coi pesi sopra)
   const TIER_W = { COMMON: 50, GREAT: 34, ULTRA: 13, ROGUE: 3, MASTER: 0.5 };
   /* PROMOZIONE DI TIER PER FORTUNA — la cascata dell'originale
