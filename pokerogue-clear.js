@@ -190,7 +190,8 @@
       unlocked: {},
       pullsSinceEpic: 0,
       stats: { hatched: 0, bestWave: 0, runs: 0 },
-      starterBest: {},   // record di ondate per starter (per i fiocchi)
+      starterBest: {},   // record di ondate raggiunte con ogni starter (statistica)
+      ribbons: {},       // FIOCCHI: quante volte hai VINTO con quella specie
       candy: {},         // caramelle per specie (da catture/schiuse)
       costCut: {},       // riduzione permanente del costo starter (comprata con caramelle)
       passiveOn: {},     // specie con PASSIVA sbloccata (caramelle)
@@ -274,9 +275,32 @@
     }
     return out;
   }
-  // Fiocco ("ribbon"): assegnato allo starter che ha raggiunto l'ondata 30.
-  const RIBBON_WAVE = 30;
-  function hasRibbon(k) { return (meta.starterBest[k] || 0) >= RIBBON_WAVE; }
+  /* FIOCCO ("ribbon"). Nell'originale (`incrementRibbonCount`, chiamato da
+     `awardFirstClassicCompletion`) si prende **completando la modalita'
+     Classica**, cioe' battendo l'ondata 200 — e lo prende OGNI Pokemon che
+     era in squadra alla vittoria, sul suo capostipite. Il primo fiocco di una
+     specie frutta anche un buono uovo (`VOUCHER_PLUS`).
+     ⚠️ Da noi si prendeva all'ondata 30, che e' un'altra cosa: un traguardo
+     di meta' strada, non una vittoria. Adesso e' quello vero.
+     `starterBest` resta, ma solo come statistica: non fa piu' fiocchi. */
+  function hasRibbon(k) { return (((meta.ribbons || {})[k]) || 0) > 0; }
+  function assegnaFiocchi(messages) {
+    meta.ribbons = meta.ribbons || {};
+    const nuovi = [];
+    for (const p of game.party) {
+      const root = rootOf(p.speciesId);
+      const prima = meta.ribbons[root] || 0;
+      meta.ribbons[root] = prima + 1;
+      if (!prima) nuovi.push(root);
+    }
+    for (const k of nuovi) messages.push(`🎀 ${S[k].it} ha ottenuto il suo primo Fiocco!`);
+    // un buono uovo per ogni specie al suo PRIMO fiocco, come nell'originale
+    if (nuovi.length) {
+      meta.vouchers += nuovi.length;
+      messages.push(`🎟 ${nuovi.length} Voucher Uovo per i primi fiocchi!`);
+    }
+    saveMeta();
+  }
   let meta = defaultMeta();
   function loadMeta() {
     try { const s = localStorage.getItem(META_KEY); if (s) meta = Object.assign(defaultMeta(), JSON.parse(s)); } catch (e) {}
@@ -293,6 +317,23 @@
     return pas.length ? own.concat(pas) : own;
   }
   function findAb(f, kind) { return abAttrs(f).find(a => a.kind === kind); }
+  /* COPRICAPO, MAGICSCUDO e Antisabbia: il meteo non li tocca. Sta qui perche'
+     la usano sia il danno di fine turno sia i controlli di immunita'. */
+  const immuneAlMeteo = f => ha(f, "OVERCOAT") || ha(f, "MAGIC_GUARD")
+    || ha(f, "SAND_VEIL") || ha(f, "SAND_RUSH") || ha(f, "SAND_FORCE");
+  /* 🔴 «HA questa abilita'?», per nome.
+     243 abilita' su 306 arrivavano dai dati con `attrs: []` — lo stesso buco
+     delle 136 mosse della §47, ma piu' largo: 2.628 assegnazioni
+     specie-abilita' che non facevano assolutamente nulla. Non sono traducibili
+     in mattoncini perche' nell'originale sono classi a se' (`AbAttr`) con la
+     loro logica; vanno scritte a mano, agganciate al punto giusto del motore.
+     ⚠️ Guarda ANCHE la passiva: si sblocca con le caramelle ed è a tutti gli
+     effetti una seconda abilita'. Dimenticarla vuol dire che chi ha speso le
+     caramelle non vede niente. */
+  const ha = (f, id) => !!(f && ((f.ability && f.ability.id === id)
+                              || (f.passiveAbility && f.passiveAbility.id === id)));
+  const nomeAb = (f, id) => (f.ability && f.ability.id === id ? f.ability.it
+                            : (f.passiveAbility || {}).it) || id;
 
   /* ---------------------------------------------------------------------- */
   /*  STATISTICHE — dalla base della specie alla stat reale (IV 31, EV 0)   */
@@ -379,6 +420,7 @@
     const k = weatherKind(); const w = WEATHER[k];
     if (!w || !w.danno || f.fainted) return;
     if (f.types.some(t => w.danno.includes(t))) return;
+    if (immuneAlMeteo(f)) return;      // Copricapo, Magicscudo, Antisabbia...
     // le abilita' che immunizzano dal meteo (Scudopolvere, Corpogelo...) lo evitano
     if (abAttrs(f).some(a => a.kind === "weatherImmune")) return;
     const d = Math.max(1, Math.floor(f.maxHp / 16));
@@ -1050,6 +1092,20 @@
   // critStage: +prob critico (HighCritAttr).
   function computeDamage(attacker, defender, move, opts) {
     opts = opts || {};
+    /* ROMPIFORMA / Pressavuoto / Turbostrike: chi attacca IGNORA l'abilita' di
+       chi difende. Si toglie di mezzo per tutto il calcolo e si rimette dopo:
+       e' il modo piu' onesto di dire «come se non ce l'avesse». */
+    const rompi = ha(attacker, "MOLD_BREAKER") || ha(attacker, "TERAVOLT") || ha(attacker, "TURBOBLAZE");
+    const abSospesa = rompi ? defender.ability : null;
+    const pasSospesa = rompi ? defender.passiveAbility : null;
+    if (rompi) { defender.ability = null; defender.passiveAbility = null; }
+    try {
+    return computeDamageInterno(attacker, defender, move, opts);
+    } finally {
+      if (rompi) { defender.ability = abSospesa; defender.passiveAbility = pasSospesa; }
+    }
+  }
+  function computeDamageInterno(attacker, defender, move, opts) {
     /* PIOGGIAPLASMA: le mosse Normali diventano Elettro finche' dura. Va fatto
        PRIMA della tabella dei tipi, o cambierebbe solo il STAB. */
     if (game.plasma > 0 && move.type === "NORMAL") move = Object.assign({}, move, { type: "ELECTRIC" });
@@ -1060,11 +1116,16 @@
     /* Preveggenza, Segugio, Miracolvista: il bersaglio non ha piu' l'immunita'
        ai tipi indicati (Spettro contro Normale/Lotta, Buio contro Psico). */
     if (eff === 0 && defender.volatile && (defender.volatile.smascherato || []).includes(move.type)) eff = 1;
+    /* NERVISALDI: Normale e Lotta colpiscono gli Spettro. */
+    if (eff === 0 && ha(attacker, "SCRAPPY") && (move.type === "NORMAL" || move.type === "FIGHTING")
+        && defender.types.includes("GHOST")) eff = 1;
     /* ARCEUS PERFETTO: le sue mosse sono SEMPRE superefficaci. Spunto dalla
        Lastra Legum di Leggende: Arceus, che gli fa assumere il tipo che
        infligge più danno (in PokéRogue l'oggetto esiste ma non fa nulla).
        Le immunità restano tali: se non ha effetto, non ha effetto. */
     if (attacker.superEff && eff > 0) eff = Math.max(eff, 2);
+    /* LENTIFUMÉ: le mosse poco efficaci fanno il doppio (cioe' tornano a 1). */
+    if (eff > 0 && eff < 1 && ha(attacker, "TINTED_LENS")) eff *= 2;
     if (eff === 0) return { damage: 0, effectiveness: 0, crit: false, immune: true };
 
     const isPhysical = move.category === "PHYSICAL";
@@ -1075,16 +1136,26 @@
     const CRIT_ODDS = [1 / 16, 1 / 8, 1 / 2, 1];
     const cs = Math.min(3, (opts.highCrit ? 1 : 0) + (opts.critStage || 0));
     /* Fortuncanto: dal suo lato non si prendono brutti colpi. */
-    const noCrit = latoDi(defender) && (game.lati ? game.lati[latoDi(defender)].luckychant > 0 : false);
+    /* GUSCIOSCUDO e Corazza: niente brutti colpi contro di loro. */
+    const noCrit = (ha(defender, "SHELL_ARMOR") || ha(defender, "BATTLE_ARMOR"))
+      || (latoDi(defender) && (game.lati ? game.lati[latoDi(defender)].luckychant > 0 : false));
     const crit = !noCrit && (opts.forceCrit || Math.random() < CRIT_ODDS[cs]);
-    const atkStage = isPhysical ? attacker.stages.atk : attacker.stages.spatk;
-    const defStage = isPhysical ? defender.stages.def : defender.stages.spdef;
+    /* IMPRUDENZA: chi ce l'ha ignora gli sbalzi dell'AVVERSARIO — sia quando
+       attacca (niente difese gonfiate) sia quando difende (niente attacchi
+       gonfiati). I propri se li tiene. */
+    const ignoraLoro = ha(attacker, "UNAWARE");
+    const ignoraMiei = ha(defender, "UNAWARE");
+    const atkStage = ignoraMiei ? 0 : (isPhysical ? attacker.stages.atk : attacker.stages.spatk);
+    const defStage = ignoraLoro ? 0 : (isPhysical ? defender.stages.def : defender.stages.spdef);
     // abilita': moltiplicatori di statistica (es. Grancampione ATK x2, Corposcelto)
     const atkAb = abStatMult(attacker, isPhysical ? "ATK" : "SPATK");
     // Evolcondensa: +50% alle difese se la specie puo' ancora evolvere
     const evio = (defender.held && defender.held.eviolite && (S[defender.speciesId].evolutions || []).length) ? 1.5 : 1;
-    const defAb = abStatMult(defender, isPhysical ? "DEF" : "SPDEF") * evio;
-    const atk = (isPhysical ? attacker.stats.atk : attacker.stats.spatk) * stageMult(atkStage) * atkAb
+    // FOLTOPELO: Difesa raddoppiata. DENTISTRETTI: +50% Attacco se stai male.
+    const foltopelo = (isPhysical && ha(defender, "FUR_COAT")) ? 2 : 1;
+    const defAb = abStatMult(defender, isPhysical ? "DEF" : "SPDEF") * evio * foltopelo;
+    const grinta = (isPhysical && attacker.status && ha(attacker, "GUTS")) ? 1.5 : 1;
+    const atk = (isPhysical ? attacker.stats.atk : attacker.stats.spatk) * stageMult(atkStage) * atkAb * grinta
               * tempStatMult(attacker, isPhysical ? "atk" : "spatk");
     /* MIRABILZONA: Difesa e Difesa Speciale si scambiano — la STATISTICA, non
        gli stadi, come nell'originale. */
@@ -1103,6 +1174,26 @@
     // held: Boost di Tipo impilabile (+20% l'uno)
     const hb = attacker.held && attacker.held.typeboost && attacker.held.typeboost[move.type];
     if (hb) power *= 1 + 0.2 * hb;
+    /* ABILITA' CHE POTENZIANO UNA FAMIGLIA DI MOSSE. I flag (`pugno`, `morso`,
+       `taglio`…) arrivano dai `MoveFlags` dell'originale: senza, queste
+       abilita' non avrebbero modo di sapere a quali mosse applicarsi. */
+    if (ha(attacker, "TECHNICIAN") && move.power > 0 && move.power <= 60) power *= 1.5;
+    // TEMERARIETÀ: chi si fa male picchiando, picchia di piu'
+    if (ha(attacker, "RECKLESS") && (move.attrs || []).some(a => a.kind === "recoil")) power *= 1.2;
+    if (ha(attacker, "TOUGH_CLAWS") && move.contact) power *= 1.3;
+    if (ha(attacker, "IRON_FIST") && move.pugno) power *= 1.2;
+    if (ha(attacker, "STRONG_JAW") && move.morso) power *= 1.5;
+    if (ha(attacker, "SHARPNESS") && move.taglio) power *= 1.5;
+    if (ha(attacker, "MEGA_LAUNCHER") && move.onda) power *= 1.5;
+    if (ha(attacker, "PUNK_ROCK") && move.sonora) power *= 1.3;
+    /* FORZABRUTTA: +30% ma gli effetti aggiuntivi non partono (li spegne
+       `applyMoveAttrs`, che guarda la stessa abilita'). */
+    if (ha(attacker, "SHEER_FORCE") && move.effectChance > 0) power *= 1.3;
+    /* ANTAGONISMO: ±25% secondo il sesso del bersaglio. */
+    if (ha(attacker, "RIVALRY") && attacker.gender && defender.gender
+        && attacker.gender !== "GENDERLESS" && defender.gender !== "GENDERLESS") {
+      power *= attacker.gender === defender.gender ? 1.25 : 0.75;
+    }
     // PRECEDENZA: il colpo soffiato all'avversario picchia il 50% in piu'
     if (attacker.volatile && attacker.volatile.precedenza) power *= 1.5;
     // METEO: Sole potenzia il Fuoco e smorza l'Acqua, la Pioggia il contrario
@@ -1114,19 +1205,34 @@
     let dmg = Math.floor(Math.floor(Math.floor(2 * attacker.level / 5 + 2) * power * atk / def) / 50) + 2;
 
     // Modificatori
-    const stab = attacker.types.includes(move.type) ? 1.5 : 1;
-    const critMult = crit ? 1.5 : 1;
+    // ADATTABILITÀ: il bonus di tipo passa da 1,5 a 2
+    const stab = attacker.types.includes(move.type) ? (ha(attacker, "ADAPTABILITY") ? 2 : 1.5) : 1;
+    // CECCHINO: il brutto colpo vale 2,25 invece di 1,5
+    const critMult = crit ? (ha(attacker, "SNIPER") ? 2.25 : 1.5) : 1;
     const rand = 0.85 + Math.random() * 0.15;    // varianza 85-100%
-    const burn = (isPhysical && attacker.status === "BURN") ? 0.5 : 1; // la scottatura dimezza il fisico
+    // la scottatura dimezza il fisico — ma non a chi ha DENTISTRETTI
+    const burn = (isPhysical && attacker.status === "BURN" && !ha(attacker, "GUTS")) ? 0.5 : 1;
     // abilita' del difensore: riduce il danno di certi tipi (Grassottello, Antifuoco)
     let abMult = 1;
     for (const a of abAttrs(defender)) if (a.kind === "typeDamageMult" && a.moveType === move.type) abMult *= a.mult;
+    /* SOLIDROCCIA / Filtro / Corazzprisma: −25% dalle superefficaci.
+       MULTISQUAME / Scudo Ombra: metà danno se il bersaglio è a PS pieni. */
+    if (eff > 1 && (ha(defender, "SOLID_ROCK") || ha(defender, "FILTER") || ha(defender, "PRISM_ARMOR"))) abMult *= 0.75;
+    if (defender.hp >= defender.maxHp && (ha(defender, "MULTISCALE") || ha(defender, "SHADOW_SHIELD"))) abMult *= 0.5;
+    // MORBIDONE: il pelo attutisce il contatto ma prende fuoco facilmente
+    if (ha(defender, "FLUFFY")) {
+      if (move.contact) abMult *= 0.5;
+      if (move.type === "FIRE") abMult *= 2;
+    }
+    // FUOCARDORE acceso: le proprie mosse di Fuoco valgono il 50% in piu'
+    if (move.type === "FIRE" && attacker.volatile && attacker.volatile.fuocardore) abMult *= 1.5;
 
     /* SCHERMI: dimezzano il danno che arriva su quel lato — Riflesso il
        fisico, Schermoluce lo speciale, Velaurora tutti e due.
        ⚠️ Un brutto colpo li IGNORA, come nei giochi veri: e' il modo di
        sfondarli, e senza questa riga diventerebbero troppo forti. */
-    const Ld = game.lati ? game.lati[latoDi(defender)] : null;
+    // INTRAPASSO: gli schermi avversari non lo riguardano
+    const Ld = (game.lati && !ha(attacker, "INFILTRATOR")) ? game.lati[latoDi(defender)] : null;
     const schermo = (!crit && Ld && (Ld.auroravelo > 0 || (isPhysical ? Ld.reflect > 0 : Ld.lightscreen > 0)))
       ? 0.5 : 1;
     /* Fangata e Docciascudo: indeboliscono un tipo per tutto il campo. */
@@ -1165,6 +1271,16 @@
      Strumenti X. Le abilita' legate al meteo (Clorofilla, Nuotovelox...) restano
      fuori: nei dati non portano la condizione, applicarle sempre sarebbe peggio. */
   function velEff(f) {
+    /* AGILTECNICA: perso o usato l'oggetto, la Velocita' raddoppia.
+       `_avevaOggetto` si accende appena si tiene qualcosa: cosi' si distingue
+       «non ho mai avuto niente» da «l'ho perso», che e' la condizione vera. */
+    if (f && ha(f, "UNBURDEN") && f._avevaOggetto
+        && !Object.keys(f.held || {}).length && !Object.keys(f.berries || {}).length) {
+      return velEffBase(f) * 2;
+    }
+    return velEffBase(f);
+  }
+  function velEffBase(f) {
     const vento = (game.lati && game.lati[latoDi(f)].tailwind > 0) ? 2 : 1;
     return f.stats.spd * stageMult(f.stages.spd) * tempStatMult(f, "spd") * vento;
   }
@@ -2292,6 +2408,13 @@
      toglie soltanto la cura delle decine (`curaSquadraDecina`). */
   function richiamaNellaBall(f) {
     if (!f) return;
+    /* RIGENERGIA e ALTERNACURA lavorano nel momento in cui si LASCIA il campo:
+       un terzo dei PS la prima, via il problema di stato la seconda. Sono due
+       delle abilita' piu' diffuse che non facevano niente. */
+    if (ha(f, "REGENERATOR") && !f.fainted && f.hp < f.maxHp) {
+      f.hp = Math.min(f.maxHp, f.hp + Math.max(1, Math.floor(f.maxHp / 3)));
+    }
+    if (ha(f, "NATURAL_CURE") && !f.fainted) { f.status = null; f.sleepTurns = 0; }
     annullaTrasformazione(f); // chi era trasformato torna se stesso
     revertForm(f);            // mega/gigamax durano solo una battaglia
     f.stages = { atk: 0, def: 0, spatk: 0, spdef: 0, spd: 0, acc: 0, eva: 0 };
@@ -3565,6 +3688,17 @@
 
   // Abilita' che scattano all'ingresso in campo (Prepotenza abbassa l'Attacco).
   function applyOnSummon(f, foe, messages) {
+    /* INDAGINE: entrando, si vede cosa tiene l'avversario. */
+    if (ha(f, "FRISK") && foe && !foe.fainted) {
+      const roba = Object.keys(foe.held || {}).concat(Object.keys(foe.berries || {}));
+      if (roba.length && messages) {
+        messages.push(`${nomeAb(f, "FRISK")}: ${foe.name} tiene ${roba.map(nomeHeld).join(", ")}!`);
+      }
+    }
+    /* AGITAZIONE: l'avversario non riesce piu' a mangiare le bacche. */
+    if (ha(f, "UNNERVE") && foe && !foe.fainted && messages) {
+      messages.push(`${nomeAb(f, "UNNERVE")}: ${foe.name} è troppo agitato per mangiare bacche!`);
+    }
     // ABILITA' METEO (Siccità, Piovischio, Sabbiafiume, Nevischio): entrando in
     // campo chiamano il tempo, come nell'originale.
     for (const ab of [f.ability, f.passiveAbility]) {
@@ -4022,11 +4156,14 @@
       meta.stats.wins = (meta.stats.wins || 0) + 1;
       if (FINAL_WAVE > meta.stats.bestWave) meta.stats.bestWave = FINAL_WAVE;
       saveMeta();
-      queueMessages([
+      // 🎀 IL FIOCCO si prende QUI, e solo qui: e' il premio della vittoria
+      const fiocchi = [];
+      assegnaFiocchi(fiocchi);
+      queueMessages(fiocchi.concat([
         `${game.enemy.name} è stato sconfitto!`,
         `«…magnifico.»`,                       // `secondStageWin` dei testi ufficiali
         `🏆 HAI COMPLETATO LA MODALITÀ CLASSICA!`,
-      ], () => renderRunVictory());
+      ]), () => renderRunVictory());
       return;
     }
     const wasEvilBoss = !!game.enemy.evil && !!game.enemy.boss;
@@ -4077,13 +4214,29 @@
         stessoMomento(messages, `🧹 ${chi.ability.it}: ${chi.name} raccoglie ${nomeHeld(preso)}!`);
       }
     }
-    // fiocco: aggiorna il record di ondate raggiunte con questo starter
+    // record di ondate raggiunte con questo starter (statistica, non fiocchi)
     if (game.starterSpecies) {
       const cur = meta.starterBest[game.starterSpecies] || 0;
-      if (game.wave > cur) {
-        meta.starterBest[game.starterSpecies] = game.wave;
-        if (cur < RIBBON_WAVE && game.wave >= RIBBON_WAVE) messages.push(`🎀 ${S[game.starterSpecies].it} ha ottenuto il Fiocco!`);
-        saveMeta();
+      if (game.wave > cur) { meta.starterBest[game.starterSpecies] = game.wave; saveMeta(); }
+    }
+    /* PREMI DELLE DECINE. Ogni ondata multipla di 10 e' un boss, e il boss gia'
+       dava un voucher. Ci si aggiunge un pugno di CARAMELLE per tutta la
+       squadra — poche all'inizio, di piu' andando avanti — e un voucher in
+       piu' ogni 50 ondate, che sono i traguardi veri della run. */
+    if (game.wave % 10 === 0 && !game.enemy.finalBoss) {
+      const quante = 1 + Math.floor(game.wave / 50);
+      const viste = new Set();
+      for (const p of game.party) {
+        const root = rootOf(p.speciesId);
+        if (viste.has(root)) continue;
+        viste.add(root);
+        daiCaramelle(root, quante);
+      }
+      saveMeta();
+      stessoMomento(messages, `🍬 Traguardo dell'ondata ${game.wave}: +${quante} caramell${quante === 1 ? "a" : "e"} a ogni specie in squadra!`);
+      if (game.wave % 50 === 0) {
+        meta.vouchers++; saveMeta();
+        stessoMomento(messages, "🎟 Un Voucher Uovo in più per il traguardo!");
       }
     }
     // ESPERIENZA VERA (non piu' livelli regalati): la si guadagna dai nemici
@@ -5493,8 +5646,10 @@
     }
     actions.sort((a, b) => {
       if (a.quick !== b.quick) return a.quick ? -1 : 1;
-      const pa = M[a.move.id].priority || 0;
-      const pb = M[b.move.id].priority || 0;
+      /* BURLA: le mosse di STATO scattano prima. */
+      const bonus = (act) => (ha(act.actor, "PRANKSTER") && M[act.move.id].category === "STATUS") ? 1 : 0;
+      const pa = (M[a.move.id].priority || 0) + bonus(a);
+      const pb = (M[b.move.id].priority || 0) + bonus(b);
       if (pa !== pb) return pb - pa;
       /* DISTORTOZONA: l'ordine si capovolge, i piu' lenti vanno per primi. */
       const va = velEff(a.actor), vb = velEff(b.actor);
@@ -5695,6 +5850,14 @@
       if (p.fainted || p.level >= tetto || p.level >= LIVELLO_MAX) continue;
       let m = inCampo.includes(p) ? 1 / quota : EXP_QUOTA_PANCHINA / quota;
       if (p.pokerus) m *= 1.5;
+      /* 🔴 RECUPERO RAPIDO. Chi e' molto sotto il tetto dell'ondata prende
+         molta piu' esperienza, fino a cinque volte tanto. Serve a chi entra
+         tardi — un nato dall'uovo arriva al livello 1 — e a chi è rimasto in
+         panchina troppo a lungo: senza, sarebbero inutilizzabili per sempre.
+         Il tetto resta invalicabile, quindi non si scavalca nessuno: si
+         RAGGIUNGE il gruppo, non lo si supera. */
+      const sotto = Math.max(0, tetto - p.level);
+      if (sotto > 5) m *= Math.min(5, 1 + sotto / 8);
       const guadagno = Math.floor(tot * m * boost);
       if (guadagno <= 0) continue;
       // le partite salvate prima dell'esperienza vera non hanno questi campi
@@ -5924,6 +6087,15 @@
       }
     }
 
+    /* UMIDITÀ: finche' c'e' in campo, le mosse esplosive non partono. */
+    if ((move.id === "SELF_DESTRUCT" || move.id === "EXPLOSION" || move.id === "MISTY_EXPLOSION")
+        && onField().some(x => x && !x.fainted && ha(x, "DAMP"))) {
+      moveInst.pp = Math.max(0, moveInst.pp - 1);
+      messages.push(`${actor.name} usa ${move.it}!`);
+      stessoMomento(messages, "L'umidità in campo impedisce l'esplosione!");
+      return;
+    }
+
     /* 1-sexies. POLVEPARA: chi ne è coperto e prova una mossa di Fuoco
        la fa esplodere addosso a sé. */
     if (actor.volatile.powder && move.type === "FIRE") {
@@ -5958,6 +6130,21 @@
       }
     }
 
+    /* ANTISUONO: le mosse sonore non lo toccano. TELEPATIA: gli attacchi
+       dell'ALLEATO li vede arrivare e li schiva (vale solo in doppio). */
+    if (foe !== actor && !foe.fainted) {
+      const alleato = isEnemySide(foe) === isEnemySide(actor);
+      const para = (move.sonora && ha(foe, "SOUNDPROOF")) ? nomeAb(foe, "SOUNDPROOF")
+        : (alleato && move.category !== "STATUS" && ha(foe, "TELEPATHY")) ? nomeAb(foe, "TELEPATHY")
+        : null;
+      if (para) {
+        moveInst.pp = Math.max(0, moveInst.pp - 1);
+        messages.push(`${actor.name} usa ${move.it}!`);
+        stessoMomento(messages, `${para} di ${foe.name} annulla il colpo!`);
+        return;
+      }
+    }
+
     /* 1-octies. SOSTITUTO del bersaglio. Il fantoccio para TUTTO quello che
        arriva da fuori: danno, stati, cali di statistica. Lo attraversano solo
        le mosse SONORE (il fantoccio non tappa le orecchie) e quelle che per
@@ -5985,6 +6172,8 @@
 
     // 2. consuma PP e annuncia
     moveInst.pp = Math.max(0, moveInst.pp - 1);
+    // PRESSIONE: chi attacca chi ce l'ha consuma un PP in piu'
+    if (foe !== actor && ha(foe, "PRESSURE")) moveInst.pp = Math.max(0, moveInst.pp - 1);
     /* Indice dell'annuncio: e' QUI che va appesa l'animazione della mossa,
        perche' e' l'unico evento che fotografa il campo prima del colpo. */
     const iAnnuncio = messages.length;
@@ -5996,6 +6185,8 @@
     // 3. precisione (stadi + abilita' di precisione/elusione). accuracy -1 = sempre a segno
     // Localizza e Leggimente: il colpo va a segno comunque, e la mira si consuma
     if (actor.volatile.mirino) { actor.volatile.mirino = false; }
+    // NULLODIFESA: le mosse vanno sempre a segno, sue e di chi lo attacca
+    else if (ha(actor, "NO_GUARD") || ha(foe, "NO_GUARD")) { /* colpo garantito */ }
     else if (move.accuracy !== -1) {
       // Grandelente: +5% di precisione per pezzo
       const lente = 1 + 0.05 * ((actor.held && actor.held.widelens) || 0);
@@ -6300,11 +6491,16 @@
     if (actor.status === "SLEEP") {
       if (actor.sleepTurns <= 0) { actor.status = null; messages.push(`${actor.name} si è svegliato!`); }
       else {
-        actor.sleepTurns--; messages.push(`${actor.name} sta dormendo.`);
+        // SVEGLIALAMPO: ci si sveglia il doppio piu' in fretta
+        actor.sleepTurns -= ha(actor, "EARLY_BIRD") ? 2 : 1;
+        if (actor.sleepTurns < 0) actor.sleepTurns = 0;
+        messages.push(`${actor.name} sta dormendo.`);
         if (messages.anim) messages.anim("COMMON_SLEEP", sideOf(actor));
         return false;
       }
     }
+    /* FORZA INTERIORE: non tentenna mai. */
+    if (actor.volatile.flinch && ha(actor, "INNER_FOCUS")) actor.volatile.flinch = false;
     if (actor.volatile.flinch) { messages.push(`${actor.name} ha tentennato!`); return false; }
     // SBADIGLIO: al secondo turno si addormenta
     if (actor.volatile.drowsy > 0 && --actor.volatile.drowsy <= 0) {
@@ -6474,6 +6670,26 @@
 
     // abilita' del difensore: immunita' a un tipo di mossa (Levitazione) o
     // assorbimento (Assorbivolt/Assorbacqua: immune + recupera HP).
+    /* IMMUNITÀ DI TIPO CHE DANNO UN PREMIO: Fuocardore, Mangiaerba,
+       Parafulmine, Assorbivolt d'acqua… Nell'originale sono classi a se';
+       qui una tabella sola, perche' fanno tutte la stessa cosa: annullano il
+       colpo e in cambio danno qualcosa. */
+    const DONO_IMMUNITA = {
+      FLASH_FIRE:    { tipo: "FIRE",     fai: (d) => { d.volatile.fuocardore = true; }, testo: "si infiamma: le sue mosse di Fuoco sono più forti!" },
+      SAP_SIPPER:    { tipo: "GRASS",    stat: "ATK",   testo: "assorbe l'erba!" },
+      LIGHTNING_ROD: { tipo: "ELECTRIC", stat: "SPATK", testo: "attira il fulmine!" },
+      MOTOR_DRIVE:   { tipo: "ELECTRIC", stat: "SPD",   testo: "si carica!" },
+      STORM_DRAIN:   { tipo: "WATER",    stat: "SPATK", testo: "raccoglie l'acqua!" },
+      WELL_BAKED_BODY:{ tipo: "FIRE",    stat: "DEF",   stadi: 2, testo: "si cuoce a puntino!" },
+    };
+    for (const id in DONO_IMMUNITA) {
+      const d = DONO_IMMUNITA[id];
+      if (d.tipo !== move.type || !ha(foe, id)) continue;
+      stessoMomento(messages, `${foe.name} è immune: ${d.testo}`);
+      if (d.stat) applyStatStage(foe, [d.stat], d.stadi || 1, messages, true);
+      if (d.fai) d.fai(foe);
+      return false;
+    }
     const imm = abAttrs(foe).find(a => (a.kind === "typeImmunity" || a.kind === "typeAbsorb") && a.moveType === move.type);
     if (imm) {
       stessoMomento(messages, `${foe.name} è immune grazie a ${foe.ability.it}!`);
@@ -6487,6 +6703,7 @@
     if (attrs.some(a => a.kind === "ohko")) {
       if (typeMultiplier(move.type, foe.types) === 0) { messages.push(`Non ha effetto su ${foe.name}...`); return false; }
       if (foe.boss) { messages.push(`Gli scudi del boss annullano il colpo!`); return true; }
+      if (ha(foe, "STURDY")) { messages.push(`${nomeAb(foe, "STURDY")}: il colpo da KO non funziona su ${foe.name}!`); return false; }
       foe.hp = 0; foe._justHit = true; foe.fainted = true;
       messages.push("KO in un colpo solo!"); messages.push(`${foe.name} è esausto!`);
       return true;
@@ -6502,12 +6719,15 @@
        colpo utile. */
     const laserPronto = !!actor.volatile.laser;
     if (laserPronto) actor.volatile.laser = false;
-    const critBonus = (actor.volatile.focus ? 2 : 0)
+    const critBonus = (ha(actor, "SUPER_LUCK") ? 1 : 0)      // SUPERSORTE
+                    + (actor.volatile.focus ? 2 : 0)
                     + (actor.held && actor.held.scopelens ? 1 : 0)
                     + (actor.held && actor.held.leek && ["FARFETCHD", "SIRFETCHD"].includes(actor.speciesId) ? 2 : 0)
                     + (actor._lansat ? 2 : 0)
                     + (actor === game.player && game.tempBoost.crit > 0 ? 1 : 0);
     let total = 0, lastEff = 1, anyCrit = false, immune = false, done = 0;
+    // VIGORE guarda i PS PRIMA del colpo: e' «non vai KO in un colpo solo»
+    const daPsPieni = foe.hp >= foe.maxHp;
     for (let h = 0; h < hits; h++) {
       if (foe.fainted) break;
       const res = computeDamage(actor, foe, move, { forceCrit: forceCrit || laserPronto, highCrit, critStage: critBonus, potenza });
@@ -6561,6 +6781,9 @@
         // Resistenza (Protect in versione "endure") e Bandana: si sopravvive con 1 PS
         if (foe.volatile.protect === "endure") {
           foe.hp = 1; messages.push(`${foe.name} ha resistito al colpo!`);
+        } else if (foe.hp <= 0 && ha(foe, "STURDY") && foe.maxHp > 1 && daPsPieni) {
+          // VIGORE: da PS pieni non si va KO in un colpo solo
+          foe.hp = 1; messages.push(`${nomeAb(foe, "STURDY")}: ${foe.name} resiste con 1 PS!`);
         } else if (foe.held && foe.held.focusband && Math.random() < 0.1 * foe.held.focusband) {
           foe.hp = 1; messages.push(`${foe.name} ha resistito grazie alla Bandana!`);
         } else { foe.fainted = true; break; }
@@ -6588,6 +6811,11 @@
         && Math.random() < 0.1 * actor.held.kingsrock) {
       foe.volatile.flinch = true;
       messages.push(`La Roccia di re fa tentennare ${foe.name}!`);
+    }
+    /* PRESTIGIATORE: colpendo si ruba l'oggetto del bersaglio — una volta
+       sola, e solo se non si tiene gia' qualcosa. */
+    if (ha(actor, "MAGICIAN") && total > 0 && !Object.keys(actor.held || {}).length) {
+      rubaOggetto(actor, foe, messages, nomeAb(actor, "MAGICIAN"), "fa sparire");
     }
     // Presartigli: 10% per pezzo di RUBARE un oggetto tenuto, col contatto
     if (actor.held && actor.held.gripclaw && total > 0 && move.contact
@@ -6619,16 +6847,36 @@
       stessoMomento(messages, `La Conchinella ristora ${actor.name}!`);
     }
     const recoil = attrs.find(a => a.kind === "recoil");
-    if (recoil && total > 0 && !actor.fainted && !findAb(actor, "noRecoil")) {
+    if (recoil && total > 0 && !actor.fainted && !findAb(actor, "noRecoil") && dannoIndirettoOk(actor)) {
       actor.hp = Math.max(0, actor.hp - Math.max(1, Math.floor(total * recoil.ratio))); actor._justHit = true;
       stessoMomento(messages, `${actor.name} è danneggiato dal contraccolpo!`);
       if (actor.hp <= 0) { actor.fainted = true; messages.push(`${actor.name} è esausto!`); }
     }
 
+    /* ABILITA' CHE REAGISCONO AL COLPO SUBITO. */
+    if (total > 0 && !foe.fainted) {
+      // SOTTILGUSCIO: il fisico incrina la corazza ma libera le gambe
+      if (move.category === "PHYSICAL" && ha(foe, "WEAK_ARMOR")) {
+        applyStatStage(foe, ["DEF"], -1, messages, true);
+        applyStatStage(foe, ["SPD"], 2, messages, true);
+      }
+      // PAURA: Buio, Spettro e Coleottero fanno scattare in avanti
+      if (ha(foe, "RATTLED") && ["DARK", "GHOST", "BUG"].includes(move.type)) {
+        applyStatStage(foe, ["SPD"], 1, messages, true);
+      }
+    }
     // effetti da CONTATTO: l'abilita' del difensore colpisce l'attaccante
     if (move.contact && total > 0) {
       const cs = findAb(foe, "contactStatus");
       if (cs && !actor.fainted && Math.random() * 100 < cs.chance) applyStatus(actor, cs.status, messages, foe.ability.it);
+      /* ARRAFFALESTO: chi ti tocca ci rimette l'oggetto. */
+      if (ha(foe, "PICKPOCKET") && !actor.fainted && !Object.keys(foe.held || {}).length) {
+        rubaOggetto(foe, actor, messages, nomeAb(foe, "PICKPOCKET"), "sfila");
+      }
+      // INCANTEVOLE: chi tocca rischia di innamorarsi
+      if (ha(foe, "CUTE_CHARM") && !actor.fainted && Math.random() < 0.3) {
+        applyInfatuate(foe, actor, messages);
+      }
       const cd = findAb(foe, "contactDamage");
       if (cd && !actor.fainted) {
         actor.hp = Math.max(0, actor.hp - Math.max(1, Math.floor(actor.maxHp / cd.fraction))); actor._justHit = true;
@@ -6669,11 +6917,16 @@
   // (tranne gli auto-effetti self, che sono garantiti).
   function applyMoveAttrs(actor, foe, move, messages) {
     const isStatus = move.category === "STATUS";
-    const ch = move.effectChance;
+    /* FORZABRUTTA: in cambio del +30% di potenza, gli effetti aggiuntivi non
+       partono affatto. E' il patto dell'abilita', non un effetto collaterale. */
+    if (!isStatus && ha(actor, "SHEER_FORCE") && move.effectChance > 0) return;
+    // LEGGIADRO: gli effetti aggiuntivi scattano il doppio delle volte
+    const ch = ha(actor, "SERENE_GRACE") && move.effectChance > 0
+      ? Math.min(100, move.effectChance * 2) : move.effectChance;
     const secondary = () => isStatus || (ch > 0 && Math.random() * 100 < ch);
     for (const a of move.attrs || []) {
       switch (a.kind) {
-        case "status":    if (secondary()) applyStatus(foe, a.status, messages); break;
+        case "status":    if (secondary()) { applyStatus(foe, a.status, messages); sincronizza(foe, actor, a.status, messages); } break;
         case "confuse":   if (secondary()) applyConfuse(foe, messages); break;
         case "flinch":    if (ch > 0 && Math.random() * 100 < ch && !foe.fainted) foe.volatile.flinch = true; break;
         case "statStage": {
@@ -6727,8 +6980,23 @@
     }
   }
 
+  /* SINCRONISMO: chi te lo ha dato se lo riprende. Si chiama DOPO che lo stato
+     e' andato a segno, da chi conosce la sorgente. */
+  function sincronizza(target, chi, status, messages) {
+    if (!chi || chi === target || chi.fainted || chi.status) return;
+    if (!ha(target, "SYNCHRONIZE")) return;
+    if (status !== "BURN" && status !== "POISON" && status !== "PARALYSIS") return;
+    messages.push(`${nomeAb(target, "SYNCHRONIZE")}: anche ${chi.name} ne è colpito!`);
+    applyStatus(chi, status, messages, "sync");
+  }
+
   function applyStatus(target, status, messages, sourceAbility) {
     if (target.fainted || target.status) return;
+    // FOGLIAMANTO: col sole pieno non si prendono problemi di stato
+    if (ha(target, "LEAF_GUARD") && weatherKind() === "SUN") {
+      messages.push(`${nomeAb(target, "LEAF_GUARD")} protegge ${target.name} sotto il sole!`);
+      return;
+    }
     if ((STATUS_IMMUNE[status] || []).some(t => target.types.includes(t))) return;
     // TERRENI: il Nebbioso protegge da tutti gli stati, l'Elettrico dal sonno
     // (vale solo per chi tocca terra).
@@ -6788,6 +7056,7 @@
       stessoMomento(messages, `${target.ability.it} impedisce il calo a ${target.name}!`);
       return;
     }
+    let calato = false;      // e' cambiato qualcosa davvero? lo legge Agonismo
     for (const st of stats) {
       const k = st.toLowerCase();
       if (!(k in target.stages)) continue;
@@ -6797,6 +7066,15 @@
       if (target.stages[k] === before) { stessoMomento(messages, `${name} di ${target.name} non può ${delta > 0 ? "salire" : "scendere"} oltre!`); continue; }
       const word = delta >= 2 ? "è aumentato molto" : delta === 1 ? "è aumentato" : delta === -1 ? "è diminuito" : "è diminuito molto";
       stessoMomento(messages, `${name} di ${target.name} ${word}!`);
+      calato = true;
+    }
+    /* AGONISMO e Competizione: un calo causato dall'AVVERSARIO fa saltare la
+       mosca al naso, e la statistica di attacco sale di due.
+       ⚠️ Si guarda dopo, non prima: se il calo e' stato parato (Corpochiaro)
+       o era gia' a −6, non e' successo niente di cui arrabbiarsi. */
+    if (calato && !isSelf && delta < 0) {
+      if (ha(target, "DEFIANT")) applyStatStage(target, ["ATK"], 2, messages, true);
+      else if (ha(target, "COMPETITIVE")) applyStatStage(target, ["SPATK"], 2, messages, true);
     }
   }
 
@@ -6903,6 +7181,11 @@
 
   function applyConfuse(target, messages) {
     if (target.fainted || target.volatile.confusion > 0) return;
+    // MENTE LOCALE e Indifferenza: niente confusione
+    if (ha(target, "OWN_TEMPO") || ha(target, "OBLIVIOUS")) {
+      messages.push(`${target.name} non si confonde grazie a ${nomeAb(target, ha(target, "OWN_TEMPO") ? "OWN_TEMPO" : "OBLIVIOUS")}!`);
+      return;
+    }
     target.volatile.confusion = 2 + Math.floor(Math.random() * 4); // 2-5 turni
     messages.push(`${target.name} è confuso!`);
     if (messages.anim) messages.anim("COMMON_CONFUSION", sideOf(target));
@@ -6925,8 +7208,11 @@
   }
   function checkBerries(f, messages) {
     if (!f || f.fainted || !f.berries) return;
+    /* AGITAZIONE dell'avversario: le bacche non si toccano. */
+    if (onField().some(x => x && !x.fainted && isEnemySide(x) !== isEnemySide(f) && ha(x, "UNNERVE"))) return;
     const has = k => (f.berries[k] || 0) > 0;
-    const half = f.hp <= f.maxHp / 2, quarter = f.hp <= f.maxHp / 4;
+    // VORACITÀ: le bacche da un quarto si mangiano gia' a meta' PS
+  const half = f.hp <= f.maxHp / 2, quarter = f.hp <= f.maxHp / (ha(f, "GLUTTONY") ? 2 : 4);
     // cura PS
     if (has("SITRUS") && half && f.hp < f.maxHp) {
       useBerry(f, "SITRUS", messages);
@@ -6979,6 +7265,10 @@
   }
 
   // Danni/cure di fine turno (scottatura, veleno, Avanzi).
+  /* MAGICSCUDO: danni SOLO dagli attacchi diretti. Tutto il resto — trappole,
+     semi, maledizione, sale, meteo, stato, contraccolpo — non lo tocca. */
+  const dannoIndirettoOk = f => !ha(f, "MAGIC_GUARD");
+
   function endOfTurnResidual(f, messages) {
     /* ⚠️ Gli effetti di SQUADRA si scalano una volta sola per turno, e questa
        funzione gira su ogni combattente: ci si aggancia al giocatore, che c'e'
@@ -6998,6 +7288,23 @@
     if (f.fainted) return;
     // TENTACOLOCK: ogni turno un pezzo di Difesa e Difesa Speciale in meno
     if (f.volatile.octolock > 0) applyStatStage(f, ["DEF", "SPDEF"], -1, messages, true);
+    // ACCELERATORE: la Velocita' sale da sola a ogni turno
+    if (ha(f, "SPEED_BOOST")) applyStatStage(f, ["SPD"], 1, messages, true);
+    // MUTA: una volta su tre ci si libera del problema di stato
+    if (f.status && ha(f, "SHED_SKIN") && Math.random() < 1 / 3) {
+      messages.push(`${nomeAb(f, "SHED_SKIN")}: ${f.name} si libera facendo la muta!`);
+      f.status = null; f.sleepTurns = 0;
+    }
+    // IDRATAZIONE: sotto la pioggia i problemi di stato passano da soli
+    if (f.status && ha(f, "HYDRATION") && weatherKind() === "RAIN") {
+      messages.push(`${nomeAb(f, "HYDRATION")}: la pioggia guarisce ${f.name}!`);
+      f.status = null; f.sleepTurns = 0;
+    }
+    // CORPOGELO: con neve o grandine si recuperano PS invece di prenderne
+    if (ha(f, "ICE_BODY") && weatherKind() === "HAIL" && f.hp < f.maxHp) {
+      f.hp = Math.min(f.maxHp, f.hp + Math.max(1, Math.floor(f.maxHp / 16)));
+      messages.push(`${nomeAb(f, "ICE_BODY")} ristora ${f.name}!`);
+    }
     /* 🔴 COGLIBACCHE (Harvest). Nei dati ha `attrs: []` e non faceva
        assolutamente niente, come le mosse della §47. A fine turno rimette la
        bacca appena consumata: metà delle volte, ma SEMPRE col sole — la regola
@@ -7029,7 +7336,17 @@
     // ATTENZIONE: qui NON si puo' uscire quando manca lo stato, altrimenti si
     // saltano prese, semi, Ultimocanto e meteo (che stanno in fondo).
     let dmg = 0, txt = "";
-    if (f.status === "BURN") { dmg = Math.floor(f.maxHp / 16); txt = `${f.name} soffre per la scottatura!`; }
+    /* VELENCURA: il veleno RISTORA invece di ferire — e' l'abilita' che rende
+       il veleno un vantaggio. MAGICSCUDO: nessun danno che non venga da un
+       attacco diretto, quindi nemmeno da stato. */
+    if (f.status === "POISON" && ha(f, "POISON_HEAL")) {
+      if (f.hp < f.maxHp) {
+        f.hp = Math.min(f.maxHp, f.hp + Math.max(1, Math.floor(f.maxHp / 8)));
+        messages.push(`${nomeAb(f, "POISON_HEAL")}: il veleno ristora ${f.name}!`);
+      }
+    }
+    else if (ha(f, "MAGIC_GUARD")) { /* niente danno da stato */ }
+    else if (f.status === "BURN") { dmg = Math.floor(f.maxHp / 16); txt = `${f.name} soffre per la scottatura!`; }
     else if (f.status === "POISON") { dmg = Math.floor(f.maxHp / 8); txt = `${f.name} soffre per il veleno!`; }
     if (dmg > 0) {
       f.hp = Math.max(0, f.hp - Math.max(1, dmg)); f._justHit = true; messages.push(txt);
@@ -9166,8 +9483,11 @@
     const chiudi = () => { hideMeta(); poi(); };
     metaEl().querySelector('[data-act="no"]').onclick = chiudi;
     metaEl().querySelector('[data-act="si"]').onclick = () => {
-      const lvl = Math.max(START_LEVEL, enemyLevelFor(game.wave));
-      const mon = makeFighter(nato.sp, lvl, {
+      /* ⚠️ LIVELLO 1, come nell'originale (`addPlayerPokemon(species, 1, ...)`).
+         Da solo sarebbe un peso morto a meta' run: a compensare c'e' il
+         recupero rapido in `assegnaEsperienza`, che da' molta piu' esperienza
+         a chi e' molto sotto il tetto dell'ondata. */
+      const mon = makeFighter(nato.sp, 1, {
         shiny: nato.shiny, shinyVar: nato.shinyVar,
         ivs: nato.nato.ivs, abilIndex: nato.nato.abilIndex,
       });
@@ -10859,7 +11179,9 @@
                dell'originale, che tolgono le cure quando nessuno e' ferito)
        dyn     richiede una seconda scelta (quale vitamina, quale tipo...)
      ---------------------------------------------------------------------- */
-  function addHeld(p, key) { p.held[key] = (p.held[key] || 0) + 1; }
+  /* `_avevaOggetto` serve ad AGILTECNICA: distingue «non ho mai tenuto niente»
+     da «l'ho perso», che e' la condizione che raddoppia la Velocita'. */
+  function addHeld(p, key) { p.held[key] = (p.held[key] || 0) + 1; p._avevaOggetto = true; }
   // Una vitamina: +10% lineare alla statistica base (usata anche dai mystery encounter)
   function boostBase(p, stat) { p.vits[stat] = (p.vits[stat] || 0) + 1; recomputeStats(p); }
   const VITS = ["atk", "def", "spatk", "spdef", "spd", "hp"];
@@ -11209,7 +11531,7 @@
        ⚠️ `avail` lo fa comparire fra i premi solo quando c'e' davvero
        qualcosa da togliere: un premio che non fa niente e' peggio di un
        premio che non c'e'. All'emporio invece sta sempre sullo scaffale. */
-    { tier: "ULTRA", weight: 5, id: "riequilibrante", label: "Riequilibrante",
+    { tier: "GREAT", weight: 10, id: "riequilibrante", label: "Riequilibrante",
       desc: "azzera i cali di statistica (i bonus restano)", icon: "riequilibrante",
       target: "run", avail: () => haCali(game.player),
       apply: () => togliCali(game.player) },
@@ -12462,10 +12784,9 @@
   const SHOP_ROWS = [
     [{ id: "potion", mult: 0.2 }, { id: "ether", mult: 0.4 }, { id: "revive", mult: 2 }],
     [{ id: "superpotion", mult: 0.45 }, { id: "fullheal", mult: 1 }],
-    [{ id: "elisir", mult: 1 }, { id: "maxether", mult: 1 }],
+    [{ id: "elisir", mult: 1 }, { id: "maxether", mult: 1 }, { id: "riequilibrante", mult: 1.2 }],
     // ⚠️ il Fungo della memoria mancava: nell'originale sta proprio qui, a x4
-    [{ id: "hyperpotion", mult: 0.8 }, { id: "maxrevive", mult: 2.75 }, { id: "mushroom", mult: 4 },
-     { id: "riequilibrante", mult: 1.4 }],
+    [{ id: "hyperpotion", mult: 0.8 }, { id: "maxrevive", mult: 2.75 }, { id: "mushroom", mult: 4 }],
     [{ id: "maxpotion", mult: 1.5 }, { id: "maxelisir", mult: 2.5 }],
     [{ id: "fullrestore", mult: 2.25 }],
     [{ id: "sacredash", mult: 10 }],
@@ -12867,7 +13188,7 @@
   /* ---------------------------------------------------------------------- */
   /*  AVVIO — carica i dati reali, poi comincia                             */
   /* ---------------------------------------------------------------------- */
-  const DATA_V = 23;   // versione dei dati: alzala a ogni rigenerazione
+  const DATA_V = 24;   // versione dei dati: alzala a ogni rigenerazione
   /* I dati arrivano dallo strato aggiornato se c'e' (vedi pokerogue-boot.js,
      §28), altrimenti dai file locali. `window.PR` esiste solo quando la pagina
      e' stata avviata dal guscio: aprendo i file a mano si ricade sul fetch. */

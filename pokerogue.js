@@ -1063,10 +1063,18 @@
   function accMult(stage)   { return stage >= 0 ? (3 + stage) / 3 : 3 / (3 - stage); }
 
   const STAT_IT = { atk: "Attacco", def: "Difesa", spatk: "Att. Speciale", spdef: "Dif. Speciale", spd: "Velocità", acc: "Precisione", eva: "Elusione" };
-  const STATUS_IT = { BURN: "SCT", PARALYSIS: "PAR", SLEEP: "DOR", POISON: "VEL", FREEZE: "CON" };
+  /* 🔴 IPERAVVELENAMENTO. Nei dati Tossina e Velenzanna danno
+     `status: "TOXIC"`, ma nel motore quello stato NON ESISTEVA: si scriveva
+     `f.status = "TOXIC"` e poi nessuno lo guardava. Risultato: Tossina non
+     faceva niente — peggio di un veleno normale, che almeno rosicchia.
+     Il veleno grave cresce: 1/16 dei PS massimi il primo turno, 2/16 il
+     secondo, 3/16 il terzo… Il contatore riparte da capo rientrando nella
+     ball, come nei giochi veri (ed è il modo di «curarlo» a meta'). */
+  const STATUS_IT = { BURN: "SCT", PARALYSIS: "PAR", SLEEP: "DOR", POISON: "VEL", FREEZE: "CON", TOXIC: "TOX" };
   // Immunita' di tipo agli stati principali.
   const STATUS_IMMUNE = {
     BURN: ["FIRE"], FREEZE: ["ICE"], PARALYSIS: ["ELECTRIC"], POISON: ["POISON", "STEEL"],
+    TOXIC: ["POISON", "STEEL"],
   };
 
   /* ---------------------------------------------------------------------- */
@@ -2334,7 +2342,8 @@
         L.toxicspikes = 0;
         messages.push(`${f.name} porta via le fielepunte!`);
       } else {
-        applyStatus(f, "POISON", messages);
+        // due strati = veleno GRAVE, uno solo = veleno normale
+        applyStatus(f, L.toxicspikes >= 2 ? "TOXIC" : "POISON", messages);
       }
     }
     if (aTerra && L.stickyweb) {
@@ -2416,6 +2425,7 @@
       f.hp = Math.min(f.maxHp, f.hp + Math.max(1, Math.floor(f.maxHp / 3)));
     }
     if (ha(f, "NATURAL_CURE") && !f.fainted) { f.status = null; f.sleepTurns = 0; }
+    f.toxicN = 0;              // il veleno grave riparte da capo, come nei giochi
     annullaTrasformazione(f); // chi era trasformato torna se stesso
     revertForm(f);            // mega/gigamax durano solo una battaglia
     f.stages = { atk: 0, def: 0, spatk: 0, spdef: 0, spd: 0, acc: 0, eva: 0 };
@@ -2427,6 +2437,7 @@
      CAMBIO: cambiare Pokemon spazzava via il meteo a meta' battaglia. */
   function fineBattaglia() {
     game.weather = null; game.terrain = null;
+    game.tentativiFuga = 0;      // ogni lotta riparte da capo
     game.lati = latiVuoti();     // schermi e trappole valgono per UNA lotta
     // effetti di campo a tempo: valgono per la lotta, non per la run
     game.fangata = 0; game.doccia = 0; game.gravita = 0;
@@ -5209,7 +5220,7 @@
   /* Animazione comune di uno stato (attenzione: FREEZE si chiama FROZEN). */
   const STATUS_ANIM = {
     BURN: "COMMON_BURN", PARALYSIS: "COMMON_PARALYSIS", SLEEP: "COMMON_SLEEP",
-    POISON: "COMMON_POISON", FREEZE: "COMMON_FROZEN",
+    POISON: "COMMON_POISON", TOXIC: "COMMON_POISON", FREEZE: "COMMON_FROZEN",
   };
 
   /* Lato di un combattente: serve per ancorare l'animazione al Pokemon giusto. */
@@ -5754,6 +5765,61 @@
     playEvents(log.events, afterTurn);
   }
 
+  /* ======================================================================
+     LA FUGA 🔴
+
+     Prima «Fuggi» chiamava `gameOver("RUN")`: si perdeva la RUN INTERA. Era
+     una porta con su scritto «esci» in mezzo ai comandi di battaglia, e non
+     e' quello che fa in nessun gioco Pokemon.
+     Adesso fa quello che deve: il selvatico ti lascia andare, non prendi
+     niente — niente premi, niente esperienza, niente cattura — e si passa
+     all'incontro dopo. Dagli ALLENATORI e dai BOSS non si scappa affatto.
+
+     La probabilita' e' quella dell'originale (`calculateEscapeChance`):
+       rapporto = velocita' tua / velocita' sua, con tetto a 4
+       pendenza = (95 − 5) / 4
+       tiro     = pendenza × rapporto + 5 + 10 × (tentativi gia' falliti)
+     cioe' da un minimo del 5% a un massimo del 95%, e ogni tentativo fallito
+     rende il prossimo piu' facile. Un tentativo fallito COSTA IL TURNO. */
+  function motivoNoFuga() {
+    const e = game.enemy;
+    if (!e) return "Non c'è nessuno da cui scappare.";
+    if (e.trainer || e.trainerMon || (game.enemyQueue && game.enemyQueue.length))
+      return "Non si scappa dalla sfida di un allenatore!";
+    if (e.boss || e.finalBoss) return "Non si scappa da un boss!";
+    return null;
+  }
+  function probabilitaFuga() {
+    const miei = [game.player, game.player2].filter(p => p && !p.fainted);
+    const loro = enemiesOnField();
+    const vMia = miei.reduce((t, p) => t + p.stats.spd, 0) || 1;
+    const vSua = loro.reduce((t, p) => t + p.stats.spd, 0) || 1;
+    // FUGAFACILE: la fuga dai selvatici e' garantita, ed e' tutta la sua ragione d'essere
+    if (miei.some(p => ha(p, "RUN_AWAY"))) return 100;
+    const rapporto = Math.min(4, vMia / vSua);
+    const pendenza = (95 - 5) / 4;
+    const tentativi = game.tentativiFuga || 0;
+    return Math.max(5, Math.min(95, Math.round(pendenza * rapporto + 5 + 10 * tentativi)));
+  }
+  function tentaFuga() {
+    if (game.phase !== "CHOICE") return;
+    const perche = motivoNoFuga();
+    if (perche) { notAvailable(perche); return; }
+    const log = makeLog();
+    const scappato = Math.random() * 100 < probabilitaFuga();
+    if (!scappato) {
+      game.tentativiFuga = (game.tentativiFuga || 0) + 1;
+      log.push("Non sei riuscito a fuggire!");
+      // il tentativo fallito consuma il turno: gli avversari attaccano
+      risolviTurno([], log);
+      return;
+    }
+    const chi = enemiesOnField().map(e => e.name).join(" e ") || "l'avversario";
+    log.push(`Sei fuggito da ${chi}! Nessuna ricompensa per questo incontro.`);
+    fineBattaglia();
+    playEvents(log.events, nextWave);
+  }
+
   /* Turno in cui il giocatore CAMBIA Pokemon.
      ⚠️ In DOPPIO cambia lo slot di CHI STA SCEGLIENDO: prima si agiva sempre
      sul primo alleato e il secondo non si poteva cambiare affatto (i pulsanti
@@ -6208,6 +6274,14 @@
     }
 
     actor.volatile.fallita = false;   // e' partita: Pestone torna a potenza normale
+    /* 🔴 MOSSE ESPLOSIVE: chi le usa va KO, sempre, anche se il colpo non
+       fa danno o il bersaglio e' immune. Nei dati non c'e' traccia del
+       sacrificio (nell'originale e' `SacrificialAttr`, che l'estrattore non
+       traduce): erano attacchi da 250 di potenza senza contropartita, cioe' la
+       mossa migliore del gioco.
+       ⚠️ Il KO si segna PRIMA del colpo e si applica DOPO: nell'originale chi
+       esplode cade comunque, ma il danno lo fa lo stesso. */
+    const sacrificio = ESPLOSIVE.has(move.id);
     // 4. danno (se e' una mossa d'attacco)
     let landed = true;
     if (move.category !== "STATUS" && move.power > 0) {
@@ -6281,6 +6355,11 @@
     // 5. effetti (mattoncini). Se la mossa da danno non e' andata a segno, niente effetti.
     // chi ha incassato e' il fantoccio: gli effetti secondari non passano
     if (landed && !colpisceSub) applyMoveAttrs(actor, foe, move, messages);
+    if (sacrificio && !actor.fainted) {
+      actor.hp = 0; actor.fainted = true; actor._justHit = true;
+      if (messages.snap) messages.snap();
+      messages.push(`${actor.name} si sacrifica nell'esplosione!`);
+    }
   }
 
   /* ======================================================================
@@ -6380,6 +6459,11 @@
     // Russare: si usa DORMENDO (e infatti non ci si arriva da svegli)
     SNORE: a => a.status === "SLEEP",
   };
+
+  /* Le mosse che mettono KO CHI LE USA. Nell'originale sono `SacrificialAttr`
+     (esplosive) e `SacrificialAttrOnHit`; da noi non arrivavano affatto. */
+  const ESPLOSIVE = new Set(["EXPLOSION", "SELF_DESTRUCT", "MISTY_EXPLOSION",
+                             "MEMENTO", "HEALING_WISH", "LUNAR_DANCE", "FINAL_GAMBIT"]);
 
   /* Potenza calcolata. Le formule sono quelle dei giochi. */
   const POTENZA_VARIABILE = {
@@ -7031,9 +7115,11 @@
     if (sourceAbility) messages.push(`${sourceAbility} è entrata in azione!`);
     target.status = status;
     if (status === "SLEEP") target.sleepTurns = 1 + Math.floor(Math.random() * 3); // 1-3 turni
+    if (status === "TOXIC") target.toxicN = 0;    // il rosicchio parte dal primo scatto
     messages.push({
       BURN: `${target.name} è scottato!`, PARALYSIS: `${target.name} è paralizzato!`,
       SLEEP: `${target.name} si è addormentato!`, POISON: `${target.name} è avvelenato!`,
+      TOXIC: `${target.name} è gravemente avvelenato!`,
       FREEZE: `${target.name} si è congelato!`,
     }[status]);
     if (messages.anim) messages.anim(STATUS_ANIM[status], sideOf(target));
@@ -7351,7 +7437,9 @@
     /* VELENCURA: il veleno RISTORA invece di ferire — e' l'abilita' che rende
        il veleno un vantaggio. MAGICSCUDO: nessun danno che non venga da un
        attacco diretto, quindi nemmeno da stato. */
-    if (f.status === "POISON" && ha(f, "POISON_HEAL")) {
+    // il contatore del veleno grave sale a ogni fine turno
+    if (f.status === "TOXIC") f.toxicN = (f.toxicN || 0) + 1;
+    if ((f.status === "POISON" || f.status === "TOXIC") && ha(f, "POISON_HEAL")) {
       if (f.hp < f.maxHp) {
         f.hp = Math.min(f.maxHp, f.hp + Math.max(1, Math.floor(f.maxHp / 8)));
         messages.push(`${nomeAb(f, "POISON_HEAL")}: il veleno ristora ${f.name}!`);
@@ -7360,6 +7448,14 @@
     else if (ha(f, "MAGIC_GUARD")) { /* niente danno da stato */ }
     else if (f.status === "BURN") { dmg = Math.floor(f.maxHp / 16); txt = `${f.name} soffre per la scottatura!`; }
     else if (f.status === "POISON") { dmg = Math.floor(f.maxHp / 8); txt = `${f.name} soffre per il veleno!`; }
+    else if (f.status === "TOXIC") {
+      /* ⚠️ Almeno 1: su un Pokemon con pochi PS massimi il primo scatto
+         (1/16) arrotonda a zero, e il gate `if (dmg > 0)` qui sotto lo
+         salterebbe del tutto — l'iperavvelenamento non farebbe niente proprio
+         a chi sta gia' peggio. */
+      dmg = Math.max(1, Math.floor(f.maxHp * Math.min(15, f.toxicN || 1) / 16));
+      txt = `${f.name} soffre per l'iperavvelenamento!`;
+    }
     if (dmg > 0) {
       f.hp = Math.max(0, f.hp - Math.max(1, dmg)); f._justHit = true; messages.push(txt);
       // il danno residuo mostra l'animazione dello stato, come nell'originale
@@ -7986,7 +8082,8 @@
         <button class="btn main-fight" data-act="fight">Lotta</button>
         <button class="btn main-bag"   data-act="ball">Ball</button>
         <button class="btn main-team"  data-act="team">Squadra</button>
-        <button class="btn main-run"   data-act="run">Fuggi</button>
+        <button class="btn main-run"   data-act="run"
+          title="${motivoNoFuga() || "probabilità ~" + probabilitaFuga() + "%"}">Fuggi</button>
       </div>${game.chooser === 1 ? `<div class="back-row"><button class="btn back" data-act="rifai">↩ Rifai la prima scelta</button></div>` : ""}${tfRow}`;
     if (game.chooser === 1) cmd().querySelector('[data-act="rifai"]').onclick = () => {
       game.chooser = 0; game.queued = null; showMainMenu();
@@ -8006,7 +8103,7 @@
     cmd().querySelector('[data-act="fight"]').onclick = showMoves;
     cmd().querySelector('[data-act="ball"]').onclick  = showBallMenu;
     cmd().querySelector('[data-act="team"]').onclick = () => renderParty("switch");
-    cmd().querySelector('[data-act="run"]').onclick  = () => gameOver("RUN");
+    cmd().querySelector('[data-act="run"]').onclick  = tentaFuga;
     cmd().querySelector('[data-act="menu"]').onclick = showRunMenu;
     const lente = cmd().querySelector('[data-act="lente"]');
     if (lente) lente.onclick = () => {
@@ -11719,6 +11816,8 @@
     L.spikes++;
     msg.push(`Punte sparse ai piedi della squadra ${nomeLato(f)}!`);
   };
+  /* Il SECONDO strato di Fielepunte ipervelena invece di avvelenare: adesso
+     che l'iperavvelenamento esiste, la differenza si sente davvero. */
   MOSSE_SPECIALI.TOXIC_SPIKES = (a, f, m, msg) => {
     const L = latoDiFronte(a);
     if (L.toxicspikes >= 2) { stessoMomento(msg, "Ma non ha funzionato!"); return; }
