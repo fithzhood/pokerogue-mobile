@@ -4286,3 +4286,146 @@ __provaMossa("TRANSFORM");        // cambia anche lo sprite
 
 Turbine, Boato, Staffetta e le cure vanno provati **giocando**: passano dalla
 coda del turno e dalla schermata squadra, che la sonda non attraversa.
+
+## 49. Le indicazioni da Spola, e i tre buchi che sono saltati fuori collaudandole (rev 157-158)
+
+Nove segnalazioni arrivate dal telefono, più due chieste a voce mentre erano in
+lavorazione. Le prime otto sono state applicate e provate; le ultime due —
+oscillazioni della ball e squadra del Rivale — hanno tirato fuori difetti che
+non c'entravano con la richiesta, ed erano peggiori della richiesta.
+
+### 49.1 Le sonde nuove
+
+Tre agganci di collaudo che prima mancavano, e senza i quali metà delle prove
+qui sotto sarebbero costate una partita intera ciascuna:
+
+```js
+__items.dai("mushroom")   // consegna un premio PRECISO, come dall'emporio
+__items.ondata(95, 80)    // salta a un'ondata qualunque, squadra al livello dato
+__items.dondolo(2)        // un lancio con ESATTAMENTE due oscillazioni
+```
+
+### 49.2 Fungo della memoria: la mossa la sceglie chi gioca
+
+Prendeva `rndOf(mosseDimenticate(p))`. Su un Bulbasaur di livello 45 le mosse
+dimenticate sono dieci: pescarne una a caso vuol dire prendere quella sbagliata
+nove volte su dieci. Nell'originale (`RememberMoveModifierType`) la mossa è un
+argomento che arriva dal giocatore. Ora `scegliMossaDimenticata` apre l'elenco
+con tipo, categoria, potenza e PP — la stessa scheda dei pulsanti mossa.
+
+### 49.3 I selvatici arrivavano cuccioli
+
+`biomePick` pesca dal pool del bioma, che contiene anche le forme base: all'ondata
+45 usciva un Bulbasaur di livello 27. Gli allenatori passavano già tutti da
+`evolvedFormFor`; i selvatici erano gli unici rimasti indietro. Nuova
+`biomePickLv(level, boss)`, che è quello che fa `getSpeciesForLevel`
+nell'originale. Dieci pescate all'ondata 45 dopo la correzione: Brambleghast,
+Jumpluff, Haunter, Dwebble, Rhydon, Hydrapple, Monferno, Ludicolo, Sharpedo,
+Combusken — tutte forme giuste per il livello.
+
+### 49.4 Uova a blocchi di dieci
+
+Chip ×1/×10 sopra le macchine. Il blocco mostra il conto per qualità
+(`8× Comune · 1× Raro · 1× Epico`) invece di una riga sola: con dieci uova la
+cosa che si vuole sapere è quella. Il tasto «Ancora» tira sempre uno.
+
+### 49.5 🔴 I TRE POSTI DOVE NESSUNO ENTRAVA DAVVERO IN CAMPO
+
+Volevo far cambiare Pokémon agli allenatori bravi. La condizione «non è appena
+entrato» (`turniInCampo >= 1`) non scattava mai, e indagando è venuto fuori che
+il difetto era molto più vecchio e molto più largo del cambio.
+
+`entraInCampo` è la funzione che azzera i volatili, fa mordere le trappole e
+avvia i contatori d'ingresso. La chiamavano il giocatore, il cambio forzato e
+il cambio volontario. **Non la chiamavano i tre ingressi avversari**:
+
+| chi entra | come entrava | cosa si perdeva |
+|---|---|---|
+| capofila dell'allenatore | `startTrainerBattle` → `deployEnemy` | contatori d'ingresso |
+| selvatico | `makeFighter` e via | contatori d'ingresso |
+| ricambio dopo un KO | `deployEnemy` senza `entraInCampo` | contatori **e trappole** |
+
+Conseguenze vere, non teoriche: le punte e la rete vischiosa che avevi messo tu
+non toccavano i ricambi dell'allenatore; e ogni mossa che chiede «è il tuo primo
+turno?» — Bruciapelo, Bruciatutto, Bloccoscudo, che confrontano con `=== 0` —
+falliva sempre su un avversario, perché confrontava con `undefined`.
+
+Correzione in due punti: `makeFighter` nasce con `turniInCampo: 0, usate: []`
+(sono parte dell'identità di un combattente nuovo, non di un ingresso), e i due
+ricambi dopo un KO chiamano `entraInCampo`.
+
+### 49.6 L'avversario che cambia Pokémon
+
+Solo i bravi (`allenatoreBravo`: Rivale, capipalestra, boss dei team,
+Superquattro, Campione, boss finale). Cambia se le sta prendendo 2× o più e in
+panchina c'è chi le prende meno *e* colpisce meglio. **Il cambio costa il
+turno**, massimo due per lotta, mai appena entrato.
+
+⚠️ Il bersaglio scelto dal giocatore va ricontrollato: `!foe.fainted` non basta,
+perché dopo un cambio il bersaglio è vivo ma **non è più in campo**. Serve
+`!onField().includes(foe)`, o si colpisce un fantasma.
+
+Prova (ondata 95, Bulbasaur col solo Fulmine contro il Rivale):
+
+```
+turno 1  Mandibuzz usa Neropulsar! · Bulbasaur usa Fulmine! È superefficace!
+turno 2  il Rivale richiama Mandibuzz! · 🌨️ Scendineve: inizia grandine!
+         Tocca a Vanilluxe! · Bulbasaur usa Fulmine!        ← ribersagliato
+```
+
+### 49.7 🔴 LE OSCILLAZIONI DELLA BALL NON SI CONTAVANO
+
+Segnalazione: «o si aprono subito oppure fanno tutte le oscillazioni». Le prime
+due cose che ho verificato erano a posto, ed è quello che rende il caso
+interessante:
+
+- la **matematica** è ben distribuita — su un selvatico a piena vita, dei tiri
+  falliti il 48% è a zero scosse, il **27% a una**, il **15% a due**, il 9% a tre;
+- l'**animazione** è fedele: un osservatore sulle classi del DOM conta
+  esattamente una `dondola` quando le scosse sono una, due quando sono due.
+
+Il difetto era nel disegno. Le scosse erano fatte per **crescere**: la prima
+piccola e lenta (15° in 380ms), l'ultima larga. Sulla carta è tensione; a
+schermo rendeva illeggibile proprio il caso più comune, perché una scossa sola
+era un'ondeggiata appena accennata — chi guardava leggeva «non si è mossa», cioè
+zero. E due scosse lente si confondevano con tre. Restavano due letture.
+
+Nell'originale ogni scossa è invece un **colpo secco**, uguale agli altri e
+staccato dal successivo da mezzo secondo di immobilità: **è la pausa che le
+rende numerabili, non l'ampiezza**. Ora 26-32° in 330-380ms con 300ms di vuoto
+in mezzo, easing a scatto, e anche lo zero ha il suo beat di immobilità prima di
+aprirsi — se no non si legge «non ha resistito nemmeno una volta», si legge un
+difetto.
+
+### 49.8 🔴 IL RIVALE NON ERA UN PERSONAGGIO
+
+`buildRival` rifaceva la squadra da capo a ogni incontro: lo starter opposto da
+un sorteggio fra quattro, i compagni da `pickThemed`. Lo battevi con Charmeleon e
+alla wave dopo aveva Totodile.
+
+Nell'originale la sua squadra è **statica** (`.setStaticParty()`): il seme di
+generazione non include il numero d'ondata (`trainer.ts`, `genPartyMember`),
+quindi lo slot N pesca sempre lo stesso; e i pool per incontro
+(`SLOT_1_FIGHT_1` → `SLOT_1_FIGHT_2` → `SLOT_1_FINAL`) sono la stessa linea
+evolutiva a stadi diversi. Cioè: gli stessi Pokémon, cresciuti.
+
+Da noi le radici stanno in `game.rivalRoster` (salvata con la run): nasce al
+primo incontro, si allunga di uno a ogni tappa, non cambia mai ordine. `r[0]` è
+l'asso e scende sempre per ultimo. I nuovi compagni entrano già all'altezza
+dell'ondata in cui li recluta — se no, aggiunti alla 195, sarebbero cuccioli.
+
+⚠️ Due trappole trovate provando:
+- **la forma va legata alla specie del momento** (`variantOf`): evolvendo cambia
+  specie, e la chiave di forma di Applin non vuol dire niente per Hydrapple;
+- **il sesso si tramanda solo se la specie ne ha uno** (`malePercent != null`):
+  forzare ♂ su una specie tutta ♀ è peggio del difetto che si sta togliendo.
+
+Una run intera dopo la correzione:
+
+```
+w8    Vullaby♀, Charmander♂
+w25   Vullaby♀, Vanillite♂, Charmeleon♂
+w55   Vullaby♀, Vanillite♂, Stunky♂, Charmeleon♂
+w95   Mandibuzz♀, Vanilluxe♂, Skuntank♂, Walrein♀, Charizard♂
+w145  Mandibuzz♀, Vanilluxe♂, Skuntank♂, Walrein♀, Dondozo♀, Charizard♂
+```

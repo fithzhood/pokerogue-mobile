@@ -339,16 +339,20 @@ html, body {
   box-shadow: 0 3px 0 rgba(0,0,0,.35), inset 0 2px 6px rgba(255,255,255,.15);
 }
 
-/* Dondolio: due oscillazioni per scossa, come nei giochi.
-   Ampiezza e durata arrivano dal JS (`--dondolo-amp` / `--dondolo-dur`) perché
-   ogni scossa dev'essere più larga e più lenta della precedente: è quello che
-   fa CRESCERE la tensione. Con oscillazioni tutte uguali, due o tre scosse si
-   somigliavano e il tiro sembrava sempre lo stesso. */
-.ball-lancio.dondola { animation: ballDondola var(--dondolo-dur, 460ms) ease-in-out; }
+/* Dondolio: un colpo secco per scossa, come nell'originale.
+   Ampiezza e durata arrivano dal JS (`--dondolo-amp` / `--dondolo-dur`), ma
+   ormai cambiano appena: le scosse devono somigliarsi, non crescere. Quello
+   che le rende NUMERABILI è il vuoto fra una e l'altra, non l'ampiezza — e
+   una scossa che parte netta e si ferma netta si conta a colpo d'occhio,
+   mentre un ondeggio morbido si legge come «non si è mossa».
+   L'uscita e il rientro sono rapidi (cubic-bezier con lo scatto), la ball si
+   inclina, scivola di lato e torna dritta. */
+.ball-lancio.dondola { animation: ballDondola var(--dondolo-dur, 340ms) cubic-bezier(.36,.07,.19,.97); }
 @keyframes ballDondola {
-  0%, 100% { transform: rotate(0deg); }
-  25%      { transform: rotate(calc(var(--dondolo-amp, 22deg) * -1)) translateX(-3px); }
-  75%      { transform: rotate(var(--dondolo-amp, 22deg))            translateX(3px); }
+  0%, 100% { transform: rotate(0deg) translateX(0); }
+  20%      { transform: rotate(calc(var(--dondolo-amp, 26deg) * -1)) translateX(-7px); }
+  50%      { transform: rotate(calc(var(--dondolo-amp, 26deg) * .35)) translateX(3px); }
+  80%      { transform: rotate(var(--dondolo-amp, 26deg))            translateX(7px); }
 }
 /* dopo la cattura la ball CHIUSA resta in campo (il Pokemon è dentro): se
    sparisse tutto, sembrerebbe scappato */
@@ -924,6 +928,9 @@ html, body {
 
 /* Le TRE macchine del gacha, una sotto l'altra: titolo + cosa favorisce */
 .macchine { display: flex; flex-direction: column; gap: 1.1vh; margin: 1vh 0; }
+/* Quante uova per tiro: due chip sopra le macchine. */
+.gacha-quante { display: flex; gap: 8px; justify-content: center; margin-bottom: .4vh; }
+.gacha-quante .chip { min-width: 62px; justify-content: center; font-weight: 800; }
 .meta-btn.macchina {
   display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
   padding: 9px 14px; text-align: left; line-height: 1.25;
