@@ -4429,3 +4429,83 @@ w55   Vullaby♀, Vanillite♂, Stunky♂, Charmeleon♂
 w95   Mandibuzz♀, Vanilluxe♂, Skuntank♂, Walrein♀, Charizard♂
 w145  Mandibuzz♀, Vanilluxe♂, Skuntank♂, Walrein♀, Dondozo♀, Charizard♂
 ```
+
+## 50. Vincoli, scudi, sprite degli eventi (rev 159)
+
+### 50.1 🔴 GLI SCUDI DEI BOSS ERANO FUORI SCALA — e la formula giusta c'era già
+
+Segnalazione: «alcuni Pokémon hanno un numero di scudi insensato». Vero, e la
+causa è la peggiore possibile: **due implementazioni della stessa regola**, e a
+girare era quella sbagliata.
+
+`bossSegmentsFor(level, bst, wave)` traduceva già fedelmente
+`getEncounterBossSegments` dell'originale — 2, +1 sopra il livello 100, +1 se il
+totale base della specie arriva a 670, +1 ogni 250 ondate — ma la usavano solo i
+boss finali. `makeFighter`, cioè la strada di **tutti gli altri boss**, si era
+tenuta la vecchia `2 + floor(level / 25)`.
+
+| ondata | prima | adesso |
+|---|---|---|
+| 50 (lv 36) | 3 | 2 |
+| 100 (lv 80) | 5 | 2 |
+| 200 (lv 208, Zygarde) | **10** | 3 |
+
+In una run che finisce alla 200 il massimo vero è **quattro**, e lo vedono solo
+i pesi massimi sopra il livello 100.
+
+### 50.2 🔴 LE MOSSE CHE VINCOLANO IL TURNO DOPO
+
+Tre famiglie, nessuna implementata. Erano attacchi da 120 di potenza senza
+contropartita: cioè le mosse migliori del gioco.
+
+**FURIA** — Colpo, Petalodanza, Oltraggio, Ira Furente (`FrenzyAttr`). Si ripete
+per 1-2 turni in più senza poter scegliere altro, e alla fine chi l'ha usata
+resta **confuso**. Un colpo a vuoto la spezza (`frenzyMissFunc`).
+
+⚠️ La confusione arriva solo se il vincolo si rompe quando era comunque agli
+sgoccioli: nell'originale `FrenzyTag.onRemove` la mette se `turnCount` è sceso
+sotto 2.
+
+**ROTOLAMENTO / PALLA GELO** — fino a cinque turni, potenza che raddoppia ogni
+volta (30 · 60 · 120 · 240 · 480), il doppio ancora dopo Ricciolscudo. Nel
+codice dell'originale sono marcate `.partial()` — «non vincolano, e la potenza
+non cresce bene» — quindi qui la regola giusta è quella dei **giochi**, non
+quella del sorgente.
+
+**BARAONDA** — tre turni, e mentre dura nessuno può addormentarsi.
+
+Più due che crescono senza vincolare: Forbicidànza (×2 fino a tre) ed
+Echeggiavoce (+40 fino a cinque).
+
+Il meccanismo generale è `mossaObbligata(chi)`, che copre anche le **mosse a due
+turni**, che prima non vincolavano affatto: durante la carica di Sub si poteva
+scegliere un'altra mossa e la carica spariva.
+
+⚠️ Un turno obbligato **non paga i PP** (`MoveUseMode.IGNORE_PP`): il PP l'hai
+speso quando la mossa l'hai scelta tu. Si accredita in `risolviTurno` prima che
+il consumo normale lo tolga. Effetto collaterale gradito: anche Sub adesso costa
+1 PP invece di 2.
+
+⚠️ Il vincolo si applica in **due** posti: i pulsanti (tutti spenti tranne quello,
+con una riga che spiega perché) e `risolviTurno` (che riscrive l'azione già in
+coda — in doppio il primo alleato sceglie prima che il vincolo scatti).
+
+Prove: Oltraggio → 3 turni, 1 PP, «si placa…» + confusione per 2 turni.
+Rotolamento → danno 9 · 12 · 23 · 47 · 83, poi riparte. Baraonda → 3 turni, e
+Spora sul bersaglio risponde «La baraonda tiene sveglio Binacle!».
+
+### 50.3 Gli sprite degli incontri
+
+In «Cupidigia Assoluta» compariva uno scoiattolo 🐿️: l'incontro parla di un
+Greedent, lo fa combattere, te lo fa perfino guadagnare, e in cima alla
+schermata c'era un'emoji generica. Nell'originale ogni incontro porta il suo
+`spriteKey`, e per questi è il Pokémon stesso.
+
+Ora la carta sceglie in quest'ordine: **Pokémon** (campo `mon`, o quello appena
+generato da `setup` quando è lui il soggetto) → **allenatore** (`npc`) → emoji.
+
+Dodici incontri corretti: avarice→Greedent, fiery→Volcarona,
+strongstuff→Shuckle, lostsea→Lapras, dancing→Oricorio, delibirdy→Delibird,
+funandgames→Wobbuffet, snorlax→Snorlax, trash→Garbodor, clown→Mr. Mime,
+uncommon e fightflight→quello generato. E `offer` passa da `clerk_m` a `rich_m`,
+che è il `rich_kid_m` dell'originale.

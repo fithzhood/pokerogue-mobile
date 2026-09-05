@@ -990,7 +990,15 @@
       status: null,          // BURN | PARALYSIS | SLEEP | POISON | FREEZE
       sleepTurns: 0,         // turni di sonno rimanenti
       stages: { atk: 0, def: 0, spatk: 0, spdef: 0, spd: 0, acc: 0, eva: 0 },
-      volatile: { confusion: 0, flinch: false },
+      /* 🔴 I CONTATORI D'INGRESSO NASCONO QUI, non solo in `entraInCampo`.
+         Chi entra a lotta in corso passa da `entraInCampo`, che glieli azzera;
+         ma il PRIMO di ogni schieramento avversario — il selvatico e il capofila
+         dell'allenatore — arriva in campo senza passarci, e restava con
+         `turniInCampo` a `undefined`. Le mosse che chiedono «e' il tuo primo
+         turno?» (Bruciapelo, Bruciatutto, Bloccoscudo) confrontano con `=== 0`:
+         su un `undefined` fallivano sempre. E l'avversario non risultava mai
+         «appena entrato» per l'IA che valuta il cambio. */
+      volatile: { confusion: 0, flinch: false, turniInCampo: 0, usate: [] },
       // istanze mossa con PP correnti, dal learnset reale
       moves: buildMovepool(speciesId, level).map(id => ({ id, pp: M[id].pp, maxPp: M[id].pp })),
     };
@@ -1415,6 +1423,30 @@
     get pool() { return REWARD_POOL; },
     stock: (w) => { const o = game.wave; game.wave = w; const s = shopStock(); game.wave = o; return s; },
     stones: () => usefulStones(),
+    /* Fa vedere UN LANCIO con un numero di oscillazioni deciso da te, senza
+       consumare ball ne' chiudere il turno: e' l'unico modo di confrontare a
+       occhio «una scossa» e «due», che giocando escono a caso.
+         __items.dondolo(0)  __items.dondolo(1)  __items.dondolo(2)
+         __items.dondolo(4)  -> cattura riuscita */
+    dondolo: (n) => {
+      if (!game.enemy) return "serve un avversario in campo";
+      const scosse = Math.max(0, Math.min(4, n == null ? 2 : n));
+      animaBall("balls", { preso: scosse >= 4, scosse, critica: false }, () => {});
+      return "lancio con " + scosse + " oscillazioni";
+    },
+    /* Consegna un premio PRECISO, come se lo avessi appena scelto dall'emporio:
+       serve a collaudare le schermate che si aprono dopo (chi lo usa, quale
+       mossa, l'evoluzione) senza restare in attesa che quel premio esca.
+         __items.dai("mushroom")   __items.dai("tm")   __items.dai("stone") */
+    dai: (id) => {
+      const it = REWARD_POOL.find(x => x.id === id);
+      if (!it) return "premio sconosciuto: " + REWARD_POOL.map(x => x.id).join(", ");
+      const pick = fillPick(it);
+      if (!pick) return "adesso non e' assegnabile (nessuno puo' usarlo)";
+      hideMeta();
+      grantItem(pick, () => { game.phase = "CHOICE"; showMainMenu(); }, () => openShop());
+      return "consegnato: " + it.label;
+    },
     roll: (n) => Array.from({ length: n || 10 }, () => rollReward([])),
     waveMoney: (w) => { const o = game.wave; game.wave = w; const m = waveMoney(1); game.wave = o; return m; },
     berries: (f) => { const msg = []; checkBerries(f || game.player, msg); return msg; },
@@ -1498,6 +1530,20 @@
         }
       }
       return out;
+    },
+    /* Salta a un'ondata QUALUNQUE tenendo squadra e bioma: serve a vedere chi
+       esce a quel livello senza doverci arrivare giocando.
+         __items.ondata(45)        __items.ondata(45, 50) */
+    ondata: (n, livello) => {
+      if (!game.player) return "serve una run in corso";
+      clearTimeout(game.timer); game.events = []; game.eventIndex = 0;
+      game.wave = Math.max(1, (n || 1)) - 1;
+      for (const p of game.party) {
+        if (livello) { p.level = livello; recomputeStats(p); p.hp = p.maxHp; }
+        p.fainted = false;
+      }
+      nextWave();
+      return "ondata " + (game.wave);
     },
     /* Salta direttamente alla lotta finale dell'ondata 200: provarla giocando
        vorrebbe dire arrivarci, e sono 199 ondate. `livello` alza la squadra
@@ -1800,8 +1846,8 @@
       if (game.party.filter(p => !p.fainted).length < 2) return "servono 2 Pokemon vivi";
       clearTimeout(game.timer); game.events = []; game.eventIndex = 0;
       const lvl = enemyLevelFor(game.wave);
-      const a = makeFighter(biomePick(), lvl, {});
-      const b = makeFighter(biomePick(), lvl, {});
+      const a = makeFighter(biomePickLv(lvl), lvl, {});
+      const b = makeFighter(biomePickLv(lvl), lvl, {});
       game.double = true; game.enemy2 = b;
       game.chooser = 0; game.queued = null;
       game.player2 = game.party.find(p => !p.fainted && p !== game.player) || null;
@@ -2007,6 +2053,17 @@
      Da qui in poi si passa sempre da questi due controlli. */
   const specieUsabile = k => !!(S[k] && !S[k].noSprite);
   const evoUsabile = e => !!(e && specieUsabile(e.to));
+
+  /* 🔴 La specie del bioma, PORTATA AL LIVELLO GIUSTO.
+     `biomePick` pesca dal pool del bioma, che contiene anche le forme base:
+     all'ondata 40 usciva un Bulbasaur di livello 40, che nei giochi non
+     esiste. Gli allenatori passavano gia' tutti da `evolvedFormFor` — i
+     selvatici no, ed erano gli unici a restare cuccioli.
+     ⚠️ Non e' un ripiego nostro: nell'originale `getSpeciesForLevel` fa
+     esattamente questo, cammina la catena evolutiva in base al livello. */
+  function biomePickLv(level, boss) {
+    return evolvedFormFor(biomePick(boss), level);
+  }
 
   // Sceglie la specie del nemico dal pool del bioma corrente.
   function biomePick(boss) {
@@ -2446,6 +2503,7 @@
   function fineBattaglia() {
     game.weather = null; game.terrain = null;
     game.tentativiFuga = 0;      // ogni lotta riparte da capo
+    game.cambiAi = 0;            // e cosi' i cambi dell'avversario
     game.lati = latiVuoti();     // schermi e trappole valgono per UNA lotta
     // effetti di campo a tempo: valgono per la lotta, non per la run
     game.fangata = 0; game.doccia = 0; game.gravita = 0;
@@ -2494,6 +2552,7 @@
        nell'originale all'ondata 200 c'è sempre Eternatus, da noi no. */
     game.finalBossIdx = Math.floor(Math.random() * FINAL_BOSSES.length);
     game.rivalFemale = Math.random() < 0.5;    // il Rivale è uomo o donna (50%)
+    game.rivalRoster = [];                     // la sua squadra nasce al primo incontro
     game.hasMegaRing = false;
     game.hasDynamaxBand = false;
     game.active = 0;
@@ -2956,27 +3015,69 @@
     return cur;
   }
 
-  // Squadra del Rivale: starter opposto (evoluto secondo il livello) + Pokemon
-  // a tema. Cresce di numero e di forma a ogni incontro.
+  /* Squadra del Rivale: starter opposto + compagni, e CRESCE con te.
+     🔴 ERA UNA SQUADRA NUOVA OGNI VOLTA. A ogni incontro si ripescava tutto da
+     capo: lo starter opposto usciva da un sorteggio fra quattro e i compagni
+     da `pickThemed`. Il risultato e' che il Rivale non era un personaggio ma
+     un allenatore a caso col suo nome: lo battevi con Charmeleon e alla wave
+     dopo aveva Totodile.
+     Nell'originale la sua squadra e' STATICA (`.setStaticParty()` in
+     `trainer-config.ts`): il seme di generazione non include il numero
+     d'ondata, quindi lo slot 1 pesca sempre lo stesso, e i pool per incontro
+     (SLOT_1_FIGHT_1 → SLOT_1_FIGHT_2 → SLOT_1_FINAL) sono la stessa linea
+     evolutiva a stadi diversi. Cioe': gli stessi Pokemon, cresciuti.
+     Da noi le radici stanno in `game.rivalRoster` — una lista di specie che
+     nasce al primo incontro, si allunga di uno a ogni tappa e non cambia mai
+     ordine. A ogni sfida si rifanno i combattenti da quelle radici, portate al
+     livello del momento con `evolvedFormFor`. */
   function buildRival(eLevel) {
-    const rivalStage = RIVAL_WAVES.indexOf(game.wave);   // 0..3
-    const count = rivalStage + 2;                          // 2,3,4,5 Pokemon
-    // starter opposto: sceglie quello forte contro il tuo tipo primario
-    const counter = { GRASS: ["CHARMANDER", "CYNDAQUIL", "TORCHIC", "FENNEKIN"],
-                      FIRE:  ["SQUIRTLE", "TOTODILE", "MUDKIP", "FROAKIE"],
-                      WATER: ["BULBASAUR", "CHIKORITA", "TREECKO", "CHESPIN"] };
-    const myType = game.starterSpecies && S[game.starterSpecies] ? S[game.starterSpecies].types[0] : null;
-    const opts = (counter[myType] || ["PIKACHU", "EEVEE", "RIOLU"]).filter(k => S[k]);
-    let oppStarter = opts.length ? opts[Math.floor(Math.random() * opts.length)] : "PIKACHU";
-    oppStarter = evolvedFormFor(oppStarter, eLevel);
+    const rivalStage = RIVAL_WAVES.indexOf(game.wave);       // 0..5
+    const count = Math.min(6, rivalStage + 2);               // 2..6 Pokemon
+    const r = game.rivalRoster = game.rivalRoster || [];
+    if (!r.length) {
+      // ASSO: lo starter opposto al tuo, deciso una volta sola per la run
+      const counter = { GRASS: ["CHARMANDER", "CYNDAQUIL", "TORCHIC", "FENNEKIN"],
+                        FIRE:  ["SQUIRTLE", "TOTODILE", "MUDKIP", "FROAKIE"],
+                        WATER: ["BULBASAUR", "CHIKORITA", "TREECKO", "CHESPIN"] };
+      const myType = game.starterSpecies && S[game.starterSpecies] ? S[game.starterSpecies].types[0] : null;
+      const opts = (counter[myType] || ["PIKACHU", "EEVEE", "RIOLU"]).filter(k => S[k]);
+      r.push({ sp: opts.length ? opts[Math.floor(Math.random() * opts.length)] : "PIKACHU" });
+    }
+    /* I compagni NUOVI entrano gia' all'altezza dell'ondata in cui li recluta
+       (se no, aggiunti alla wave 195, sarebbero cuccioli); quelli che c'erano
+       gia' non si toccano: crescono da soli con `evolvedFormFor`. */
+    while (r.length < count) {
+      let k = null;
+      for (let t = 0; t < 25 && (!k || r.some(x => x.sp === k)); t++) k = pickThemed(null, eLevel);
+      r.push({ sp: k || pickThemed(null, eLevel) });
+    }
     const mons = [];
     for (let i = 0; i < count; i++) {
-      const isAce = i === count - 1;
-      const key = isAce ? oppStarter : evolvedFormFor(pickThemed(null, eLevel), eLevel);
-      const f = makeFighter(key, eLevel + (isAce ? 2 : 0), { isTrainer: true });
+      const isAce = i === 0;                                 // r[0] e' l'asso
+      const lv = eLevel + (isAce ? 2 : 0);
+      /* ⚠️ Non basta la specie: senza fissare FORMA e SESSO, l'Alcremie del
+         Rivale cambiava gusto da un incontro all'altro e i suoi Pokemon si
+         invertivano il simbolo ♂/♀. Sono la stessa squadra: devono anche
+         sembrarlo.
+         ⚠️ La forma va però legata alla SPECIE DEL MOMENTO: evolvendo cambia
+         specie, e la chiave di forma di Applin non vuol dire niente per
+         Hydrapple. Si ricorda quindi anche PER CHI vale (`variantOf`), e alla
+         prima evoluzione se ne pesca una nuova che resta da li' in poi.
+         Il sesso invece attraversa le evoluzioni, ma si tramanda solo se la
+         specie ne ha davvero uno: forzare ♂ su una specie tutta ♀ sarebbe
+         peggio del difetto che stiamo togliendo. */
+      const spOra = evolvedFormFor(r[i].sp, lv);
+      const opt = { isTrainer: true };
+      if (r[i].variantOf === spOra && r[i].variant != null) opt.variant = r[i].variant;
+      if (r[i].gender && S[spOra] && S[spOra].malePercent != null) opt.gender = r[i].gender;
+      const f = makeFighter(spOra, lv, opt);
+      r[i].variantOf = spOra;
+      r[i].variant = f.variant == null ? null : f.variant;
+      if (f.gender && f.gender !== "GENDERLESS") r[i].gender = f.gender;
       f.trainer = game.rivalFemale ? "la Rivale" : "il Rivale"; f.rival = true;
       mons.push(f);
     }
+    mons.push(mons.shift());          // ma scende in campo per ULTIMO
     return mons;
   }
 
@@ -3689,12 +3790,12 @@
 
     // selvatico / boss
     const messages = [];
-    const eKey = (game.wave === 1 && overrideKey("e")) || biomePick(boss);
+    const eKey = (game.wave === 1 && overrideKey("e")) || biomePickLv(eLevel, boss);
     const f = makeFighter(eKey, eLevel, { boss, shiny: rollShiny() });
     // LOTTA IN DOPPIO: due selvatici contro i tuoi due Pokemon in campo
     if (!boss && rollDouble()) {
       game.double = true;
-      const f2 = makeFighter(biomePick(), eLevel, { shiny: rollShiny() });
+      const f2 = makeFighter(biomePickLv(eLevel), eLevel, { shiny: rollShiny() });
       game.enemy2 = f2;
       const secondo = game.party.find(p => !p.fainted && p !== game.player);
       if (secondo) { entraInCampo(secondo); game.player2 = secondo; }
@@ -4568,10 +4669,24 @@
              Ora, come nell'originale (`shakeCounter` con `repeatDelay: 500`
              in `attempt-capture-phase.ts`): c'è un BEAT di attesa prima del
              primo controllo — anche il fallimento immediato ha il suo momento
-             di sospensione — le oscillazioni CRESCONO in ampiezza e durata,
-             e più la ball ha dondolato più il verdetto si fa aspettare. */
-          const AMPIEZZA = [15, 21, 27, 30];   // gradi: ogni scossa più larga
-          const DURATA   = [380, 470, 580, 640];
+             di sospensione — e più la ball ha dondolato più il verdetto si fa
+             aspettare.
+
+             🔴 LE OSCILLAZIONI DEVONO ESSERE CONTABILI.
+             Erano pensate per CRESCERE: la prima piccola e lenta (15° in
+             380ms), l'ultima larga. Sulla carta è tensione; a schermo era il
+             difetto, perche' rendeva illeggibile proprio il caso piu' comune.
+             Una scossa sola era un'ondeggiata appena accennata: chi guardava
+             leggeva «non si è mossa», cioe' zero. E due scosse lente si
+             confondevano con tre. Restavano due sole letture: «si apre
+             subito» e «dondola un po' di volte».
+             Nell'originale ogni scossa è invece un COLPO SECCO, uguale agli
+             altri e staccato dal successivo da mezzo secondo di immobilita':
+             e' la pausa che le rende numerabili, non l'ampiezza.
+             Adesso: tutte larghe, tutte rapide, tutte separate. */
+          const AMPIEZZA = [26, 28, 30, 32];   // gradi: gia' la prima si vede
+          const DURATA   = [330, 340, 360, 380];   // colpo secco, non ondeggio
+          const PAUSA    = 300;                    // il vuoto che separa una scossa dall'altra
           let n = 0;
           const dondola = () => {
             if (n >= esito.scosse) return attesaVerdetto();
@@ -4581,12 +4696,16 @@
             ball.style.setProperty("--dondolo-amp", amp + "deg");
             ball.style.setProperty("--dondolo-dur", dur + "ms");
             ball.classList.add("dondola");
-            dopo(dur, () => { ball.classList.remove("dondola"); dopo(150, dondola); });
+            dopo(dur, () => { ball.classList.remove("dondola"); dopo(PAUSA, dondola); });
           };
           /* Il silenzio prima del verdetto: cresce con le scosse. Una ball che
              si è fermata dopo la terza tiene col fiato sospeso; una che non ha
              dondolato affatto va liquidata in fretta. */
-          const attesaVerdetto = () => dopo(240 + 150 * n, chiusura);
+          /* ⚠️ Anche lo ZERO ha bisogno del suo tempo: se la ball si apre appena
+             toccata terra non si legge «non ha resistito nemmeno una volta», si
+             legge un difetto. Un attimo di immobilita' prima — lo stesso vuoto
+             che separa due scosse — e la lettura arriva. */
+          const attesaVerdetto = () => dopo((n ? 240 : PAUSA + 120) + 150 * n, chiusura);
           const chiusura = () => {
             if (esito.preso) {
               // scatto: la ball si chiude e lampeggia
@@ -5699,12 +5818,68 @@
     return quale === "tutto" ? d.fisico + d.speciale : d[quale];
   }
 
+  /* 🔴 L'AVVERSARIO CHE CAMBIA POKEMON.
+     Gli allenatori mandavano avanti i loro in fila e li lasciavano li' a
+     prenderle: non esisteva il cambio, che nei giochi veri e' meta' del
+     mestiere di un allenatore. Adesso i piu' bravi — Rivale, capipalestra,
+     boss dei team, Superquattro, Campione — se stanno male di tipo tirano
+     fuori chi risponde meglio.
+     ⚠️ Il cambio COSTA IL TURNO, come per te: non attaccano e cambiano.
+     ⚠️ Al massimo due per lotta e mai appena entrati, o si passerebbe la
+     lotta a guardarli entrare e uscire. */
+  const allenatoreBravo = e => !!(e && (e.gym || e.evil || e.e4 || e.champion
+                                        || e.finalBoss || game.trainerIsRival));
+  /* Quanto le prende `chi` dalle mosse di `da`: il moltiplicatore peggiore. */
+  function quantoLePrende(chi, da) {
+    const mosse = (da.moves || []).map(m => M[m.id]).filter(m => m && m.category !== "STATUS");
+    if (!mosse.length) return 1;
+    return Math.max(...mosse.map(m => typeMultiplier(m.type, chi.types)));
+  }
+  function aiCambioMigliore(e) {
+    if (!e || e.fainted || !game.enemyQueue || !game.enemyQueue.length) return null;
+    if (!allenatoreBravo(e)) return null;
+    if ((e.volatile.turniInCampo || 0) < 1) return null;      // appena entrato: resta
+    if ((game.cambiAi || 0) >= 2) return null;                 // due a lotta, basta
+    const io = game.player;
+    if (!io || io.fainted) return null;
+    const adesso = quantoLePrende(e, io);
+    if (adesso < 2) return null;                               // non sta male: resta
+    /* Chi in panchina le prende meno E colpisce meglio? Se nessuno migliora
+       davvero, cambiare sarebbe solo regalare un turno. */
+    let meglio = null, punteggio = 0;
+    for (const c of game.enemyQueue) {
+      if (!c || c.fainted) continue;
+      const prende = quantoLePrende(c, io);
+      const da = quantoLePrende(io, c);          // quanto gliene fa lui a te
+      const p = (adesso - prende) + (da - quantoLePrende(io, e));
+      if (prende < adesso && p > punteggio) { meglio = c; punteggio = p; }
+    }
+    return meglio;
+  }
+
   function risolviTurno(actions, logIniziale) {
     game.queued = null; game.chooser = 0;
     azzeraDannoSubito();
     // avversari
+    const log0 = logIniziale || makeLog();
+    /* Prima di scegliere le mosse: l'allenatore bravo valuta se cambiare.
+       Chi cambia non attacca, quindi non entra nella coda delle azioni. */
+    const cambiato = aiCambioMigliore(game.enemy);
+    if (cambiato) {
+      game.cambiAi = (game.cambiAi || 0) + 1;
+      const uscito = game.enemy;
+      richiamaNellaBall(uscito);
+      game.enemyQueue.splice(game.enemyQueue.indexOf(cambiato), 1);
+      game.enemyQueue.push(uscito);
+      log0.push(conBall(`${game.trainerName || "L'allenatore"} richiama ${uscito.name}!`, "ritiro", "enemy"));
+      deployEnemy(cambiato, log0);
+      entraInCampo(cambiato, log0);
+      log0.push(conBall(`Tocca a ${cambiato.name}!`, "uscita", "enemy"));
+      if (typeof renderTrainerBalls === "function") renderTrainerBalls();
+      renderScene();
+    }
     for (const e of [game.enemy, game.enemy2]) {
-      if (!e || e.fainted) continue;
+      if (!e || e.fainted || e === cambiato) continue;   // chi e' appena entrato non attacca
       const mv = e === game.enemy ? enemyChooseMove() : aiChooseMove(e);
       if (mv) actions.push({ actor: e, foe: pickFoeFor(e), move: mv });
     }
@@ -5726,7 +5901,7 @@
       return Math.random() - 0.5;
     });
 
-    const log = logIniziale || makeLog();
+    const log = log0;
     for (const act of actions) if (act.quick) log.push(`I Rapidartigli di ${act.actor.name} scattano!`);
     /* Prendinota e Rinvio riordinano la coda MENTRE la si scorre: per farlo
        devono poterla vedere, e sapere a che punto siamo. */
@@ -5736,8 +5911,10 @@
       const act = actions[i];
       if (act.actor.fainted) continue;                  // niente colpi post-KO
       // se il bersaglio e' caduto nel frattempo, si ripiega sull'altro
+      /* ⚠️ Non basta «e' caduto»: se l'avversario ha CAMBIATO, il bersaglio
+         scelto non e' piu' in campo pur essendo vivo. Colpirebbe un fantasma. */
       let foe = act.foe;
-      if (!foe || foe.fainted) foe = pickFoeFor(act.actor);
+      if (!foe || foe.fainted || !onField().includes(foe)) foe = pickFoeFor(act.actor);
       if (!foe) continue;
       /* ATTIRASGUARDO / NUBEPOLLINE / SPLENDICALCIO: se sul lato del bersaglio
          qualcuno ha attirato l'attenzione, il colpo va addosso a lui. */
@@ -6068,6 +6245,16 @@
         log.push(conBall(next.trainer ? `${next.trainer} manda in campo ${next.name}!`
                                       : `${next.name} irrompe sul campo!`, "uscita", "enemy"));
         deployEnemy(next, log);
+        /* 🔴 Il ricambio dell'allenatore dopo un KO non ENTRAVA davvero:
+           `deployEnemy` lo mette sul campo e chiama le abilita' d'ingresso, ma
+           saltava `entraInCampo` — che e' quella che azzera i volatili, fa
+           mordere le TRAPPOLE (punte, punte velenose, rete vischiosa messe da
+           te: se le passava indenne) e avvia i contatori d'ingresso
+           `turniInCampo`/`usate`. Senza quei contatori Bruciapelo non partiva
+           mai su chi entra a lotta in corso, e l'IA non lo considerava mai
+           «appena entrato». Le altre due strade — cambio forzato e cambio
+           dell'IA — lo facevano gia': era solo questa a mancare. */
+        entraInCampo(next, log);
         renderTrainerBalls();
         renderScene();
         playEvents(log.events, () => {
@@ -8777,6 +8964,8 @@
           const l2 = makeLog();
           l2.push(conBall(`${next.trainer} manda in campo ${next.name}!`, "uscita", "enemy"));
           deployEnemy(next, l2);
+          entraInCampo(next, l2);        // vedi sopra: anche dopo un furto
+
           renderTrainerBalls(); renderScene();
           playEvents(l2.events, () => { game.phase = "CHOICE"; showMainMenu(); });
           return;
@@ -9095,7 +9284,7 @@
   const CAMPI_RUN = ["balls", "greatballs", "ultraballs", "rogueballs", "theftballs",
     "pendingTheft", "money", "stones", "charms", "tempBoost", "tempBoostN", "shopMarkup", "lati", "cuccagna",
     "cicloOffset", "encSeen", "encTiersSeen", "leagueIdx", "evilIdx", "finalBossIdx",
-    "rivalFemale", "hasMegaRing", "hasDynamaxBand", "active", "biome", "starterSpecies"];
+    "rivalFemale", "rivalRoster", "hasMegaRing", "hasDynamaxBand", "active", "biome", "starterSpecies"];
 
   /* Un Pokemon e' gia' quasi tutto JSON. Le due eccezioni: `spr` (i dati
      dell'immagine, si ricaricano) e le abilita', che sono RIFERIMENTI dentro
@@ -9533,22 +9722,42 @@
   /* Quale macchina sta sul palco. Si ricorda l'ultima usata: dopo un tiro si
      torna a vedere QUELLA, non sempre la prima. */
   let gachaScelto = "MOVE";
+  /* Quante uova per tiro. Nell'originale il gacha ha il tiro singolo e quello
+     da dieci: con i voucher che si accumulano, tirare uno alla volta e' solo
+     un tocco ripetuto trenta volte. */
+  let gachaQuante = 1;
 
   function showGacha(result, dove) {
     game.phase = "GACHA";
     const canPull = meta.vouchers > 0;
     const evid = specieInEvidenza();
     if (result && result.tipo) gachaScelto = result.tipo;
+    // il blocco da dieci si puo' scegliere solo se i voucher bastano
+    if (gachaQuante > meta.vouchers) gachaQuante = 1;
     /* 🔴 Prima l'uovo appena preso RESTAVA sul palco fino al tiro dopo, e
        della macchina non c'era traccia: sembrava una schermata di inventario,
        non un gacha. Adesso la macchina c'è sempre, l'uovo esce da lei e con
        «Continua» sparisce, lasciando la macchina pronta per il prossimo. */
+    // con un blocco appena tirato il palco mostra il MUCCHIO, non un uovo solo
+    const blocco = result && Array.isArray(result.blocco) ? result.blocco : null;
     const tipoPalco = result ? result.tipo : gachaScelto;
     const macchina = `<div class="gacha-macchina${result ? " scuote" : ""}"
         style="background-image:url('${GACHA_IMG[tipoPalco] || GACHA_IMG.MOVE}')">
         ${result ? `<span class="gacha-uovo egg-sprite egg-${result.tier}"></span>` : ""}
       </div>`;
-    const stage = result
+    /* Col blocco da dieci non ha senso una riga sola: si mostra il conto per
+       qualita', che e' l'unica cosa che si vuole sapere davvero. */
+    const riepilogo = () => {
+      const conta = {};
+      for (const u of blocco) conta[u.tier] = (conta[u.tier] || 0) + 1;
+      return Object.keys(EGG_TIERS).filter(t => conta[t])
+        .map(t => `<span class="tier-${t}">${conta[t]}× ${EGG_TIERS[t].it}</span>`).join(" · ");
+    };
+    const stage = blocco
+      ? `${macchina}
+         <div class="gacha-result">${blocco.length} uova!</div>
+         <div class="meta-sub">${riepilogo()}</div>`
+      : result
       ? `${macchina}
          <div class="gacha-result">È un <span class="tier-${result.tier}">Uovo ${EGG_TIERS[result.tier].it}</span>!</div>
          <div class="meta-sub">dal ${GACHA[result.tipo].emoji} ${GACHA[result.tipo].it} · si schiude superando ${result.waves} ondate</div>`
@@ -9563,12 +9772,17 @@
          </button>
          <button class="meta-btn ghost" data-a="chiudi">
            <span class="mac-tit">✓ Continua</span></button>`
-      : Object.keys(GACHA).map(k => {
+      : `<div class="gacha-quante">
+           ${[1, 10].map(n => `<button class="chip filtro-chip${gachaQuante === n ? " on" : ""}"
+             data-q="${n}" ${meta.vouchers >= n ? "" : "disabled"}
+             title="${meta.vouchers >= n ? "" : "servono " + n + " voucher"}">×${n}</button>`).join("")}
+         </div>`
+        + Object.keys(GACHA).map(k => {
         const sub = k === "LEGENDARY" && evid
           ? `in evidenza oggi: <b>${S[evid].it}</b>` : GACHA[k].sub;
-        return `<button class="meta-btn gacha macchina" data-g="${k}" ${canPull ? "" : "disabled"}>
+        return `<button class="meta-btn gacha macchina" data-g="${k}" ${meta.vouchers >= gachaQuante ? "" : "disabled"}>
             <span class="mac-tit">${GACHA[k].emoji} ${GACHA[k].it}</span>
-            <span class="mac-sub">${sub}</span>
+            <span class="mac-sub">${gachaQuante > 1 ? gachaQuante + " uova in un colpo · " : ""}${sub}</span>
           </button>`;
       }).join("");
     showMetaScreen(`
@@ -9577,13 +9791,21 @@
       <div class="gacha-stage">${stage}</div>
       <div class="macchine">${macchine}</div>
       <div class="meta-actions"><button class="meta-btn ghost" data-a="back">Indietro</button></div>`);
+    metaEl().querySelectorAll("[data-q]").forEach(b => b.onclick = () => {
+      if (b.disabled) return;
+      gachaQuante = parseInt(b.dataset.q, 10);
+      showGacha(null, dove);
+    });
     metaEl().querySelectorAll(".macchina").forEach(b => b.onclick = () => {
-      if (meta.vouchers <= 0) return;
+      const quante = result ? 1 : gachaQuante;      // il tasto «Ancora» tira uno
+      if (meta.vouchers < quante) return;
       gachaScelto = b.dataset.g;
-      meta.vouchers--;
-      const egg = pullEgg(b.dataset.g);
+      meta.vouchers -= quante;
+      const usciti = [];
+      for (let i = 0; i < quante; i++) usciti.push(pullEgg(b.dataset.g));
       saveMeta();
-      showGacha(egg, dove);
+      const ultimo = usciti[usciti.length - 1];
+      showGacha(quante > 1 ? Object.assign({}, ultimo, { blocco: usciti }) : ultimo, dove);
     });
     const chiudi = metaEl().querySelector('[data-a="chiudi"]');
     if (chiudi) chiudi.onclick = () => showGacha(null, dove);   // via l'uovo, torna la macchina
@@ -11787,7 +12009,14 @@
       apply: (p, pk) => addHeld(p, pk.boost) },
     { tier: "GREAT", weight: 3, id: "mushroom", label: "Fungo della memoria", desc: "fa ricordare una mossa dimenticata", icon: "big_mushroom",
       target: "mon", valid: p => mosseDimenticate(p).length > 0, avail: someone(p => mosseDimenticate(p).length > 0),
-      apply: p => { const mv = rndOf(mosseDimenticate(p)); insegnaTm(mv, p); } },
+      /* 🔴 Sceglie CHI la ricorda, non il gioco. Nell'originale
+         (`RememberMoveModifierType`) la mossa e' un argomento che arriva dal
+         giocatore: gli si mette davanti l'elenco di quelle dimenticate.
+         Da noi ne pescava una a caso, e su un Pokemon con dieci mosse
+         imparate per livello voleva dire prendere quella sbagliata quasi
+         sempre. */
+      ricorda: true,
+      apply: (p, pk, id) => insegnaTm(id || rndOf(mosseDimenticate(p)), p) },
 
     /* ===================== ULTRA ====================== */
     /* Toglie SOLO i cali, i bonus restano. Serve quando esci da una lotta
@@ -13245,6 +13474,29 @@
      sola, e nell'originale la scegli tu (il pannello squadra si apre in modo
      MOVE_MODIFIER). Qui e' una schermata sua, con i PP di ognuna e il tastino
      che dice cosa fa la mossa. */
+  /* Elenco delle mosse che quel Pokemon ha imparato per livello ma non ha
+     piu': e' quello che il Fungo della memoria puo' restituire. */
+  function scegliMossaDimenticata(pick, mon, onDone, back) {
+    const perse = mosseDimenticate(mon);
+    if (!perse.length) { back(); return; }
+    const righe = perse.map(id => {
+      const mv = M[id];
+      return `<button class="btn move-btn" data-mv="${id}" style="background:${T[mv.type].color}">
+        <span class="move-name">${mv.it}</span>
+        <span class="move-meta">
+          <span class="ticon t-${mv.type}"></span><span class="cicon c-${mv.category}"></span>
+          <span class="move-pp">${mv.power > 0 ? "P" + mv.power + " \u00b7 " : ""}${mv.pp}/${mv.pp}</span>
+        </span></button>`;
+    }).join("");
+    showMetaScreen(`
+      <div class="meta-title" style="font-size:clamp(19px,5.6vw,30px)">🍄 Fungo della memoria</div>
+      <div class="meta-sub">quale mossa deve ricordare ${mon.name}?</div>
+      <div class="ms-mosse-scelta">${righe}</div>
+      <div class="meta-actions"><button class="meta-btn ghost" data-act="back">\u21a9 Indietro</button></div>`);
+    metaEl().querySelectorAll("[data-mv]").forEach(b => b.onclick = () => onDone(b.dataset.mv));
+    metaEl().querySelector('[data-act="back"]').onclick = back;
+  }
+
   function chooseMove(pick, mon, onDone, back) {
     const item = pick.item;
     const utile = (m, i) => item.ppUp ? (m.ppUp || 0) < 3 : m.pp < m.maxPp;
@@ -13335,6 +13587,8 @@
       chooseTarget(pick, p => {
         // gli oggetti "su una mossa" chiedono ANCHE quale
         if (item.mossa) chooseMove(pick, p, (i) => conRacconto(p, () => item.apply(p, pick, i)), back);
+        // il Fungo chiede QUALE mossa far ricordare
+        else if (item.ricorda) scegliMossaDimenticata(pick, p, (id) => conRacconto(p, () => item.apply(p, pick, id)), back);
         else conRacconto(p, () => item.apply(p, pick));
       }, back);
     } else {
