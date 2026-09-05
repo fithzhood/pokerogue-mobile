@@ -704,7 +704,7 @@ html, body {
 /* Le due targhette (tipo e categoria) da sole si prendevano 90 px dei 171
    utili, e i PP finivano tagliati a meta: rimpicciolite un filo ci sta tutto.
    Misurato: 48+42 -> 39+34, e i PP passano da 71 px a 88. */
-.move-btn .ticon, .move-btn .cicon { zoom: .82; }
+.move-btn .ticon, .move-btn .cicon { zoom: .78; }
 /* [ATTENZIONE] Il segno dell efficacia sta nell ANGOLO, fuori dal flusso: in
    riga si mangiava lo spazio dei PP, che finivano tagliati a P4... In
    Scarlatto/Violetto quel segno sta al bordo della riga, non in mezzo ai dati. */

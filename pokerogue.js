@@ -1244,10 +1244,13 @@
     const Ld = (game.lati && !ha(attacker, "INFILTRATOR")) ? game.lati[latoDi(defender)] : null;
     const schermo = (!crit && Ld && (Ld.auroravelo > 0 || (isPhysical ? Ld.reflect > 0 : Ld.lightscreen > 0)))
       ? 0.5 : 1;
+    /* Colpo AD AREA: quando i bersagli sono piu' d'uno ognuno prende il 25% in
+       meno, come nell'originale (`targetMultiplier = numTargets > 1 ? .75 : 1`). */
+    const area = game._colpoLargo ? 0.75 : 1;
     /* Fangata e Docciascudo: indeboliscono un tipo per tutto il campo. */
     const sport = (game.fangata > 0 && move.type === "ELECTRIC") ? (1 / 3)
                 : (game.doccia > 0 && move.type === "FIRE") ? (1 / 3) : 1;
-    dmg = Math.floor(dmg * stab * eff * critMult * rand * burn * abMult * schermo * sport);
+    dmg = Math.floor(dmg * stab * eff * critMult * rand * burn * abMult * schermo * sport * area);
     if (dmg < 1) dmg = 1;                          // almeno 1 se non immune
 
     return { damage: dmg, effectiveness: eff, crit, immune: false };
@@ -1440,8 +1443,14 @@
       if (!game.player) return "serve una run in corso";
       const sp = k && S[k] ? k : SPECIES_KEYS[Math.floor(Math.random() * SPECIES_KEYS.length)];
       game.pendingHatches = game.pendingHatches || [];
+      /* ⚠️ Serve anche il `nato`, o `offriNato` esce subito e l'offerta di
+         portarselo dietro non compare mai: la sonda non provava meta' della
+         strada che voleva provare. */
+      const a = rollIVs(), b = rollIVs(), ivs = {};
+      for (const k in a) ivs[k] = Math.max(a[k], b[k]);
       game.pendingHatches.push({ sp, shiny: false, shinyVar: 0, tipo: "MOVE", tier: tier || "COMMON",
-                                 extra: [`Prova di schiusa: ${S[sp].it}.`] });
+                                 extra: [`Prova di schiusa: ${S[sp].it}.`],
+                                 nato: { ivs, nature: rollNature(), abilIndex: null } });
       hideMeta();
       processHatches(() => { game.phase = "CHOICE"; showMainMenu(); });
       return "schiusa avviata: " + S[sp].it;
@@ -2890,6 +2899,26 @@
   const onField = () => [game.player, game.player2, game.enemy, game.enemy2].filter(Boolean);
   const isEnemySide = f => f === game.enemy || f === game.enemy2;
   /* Un bersaglio a caso dal lato opposto (per l'IA e per le mosse senza scelta). */
+  /* 🔴 MOSSE AD AREA. 101 mosse d'attacco hanno un bersaglio multiplo
+     (`ALL_NEAR_ENEMIES` come Bora e Foglielama, `ALL_NEAR_OTHERS` come
+     Terremoto e Surf) e in doppio ne colpivano UNA SOLA: Terremoto era un
+     attacco singolo da 100, e il rischio di prendere anche il compagno — che
+     e' tutto il suo carattere — non esisteva.
+     Restituisce i bersagli IN PIU' rispetto a quello principale. */
+  function bersagliExtra(actor, move, principale) {
+    if (!game.double || !move) return [];
+    const t = move.target;
+    if (t !== "ALL_NEAR_ENEMIES" && t !== "ALL_NEAR_OTHERS" && t !== "ALL") return [];
+    const nemici = isEnemySide(actor) ? alliesOnField() : enemiesOnField();
+    const alleato = (actor === game.player ? game.player2
+                   : actor === game.player2 ? game.player
+                   : actor === game.enemy ? game.enemy2 : game.enemy);
+    const tutti = nemici.slice();
+    // ALL_NEAR_OTHERS prende anche il compagno: e' il prezzo di Terremoto
+    if ((t === "ALL_NEAR_OTHERS" || t === "ALL") && alleato) tutti.push(alleato);
+    return tutti.filter(x => x && x !== principale && x !== actor && !x.fainted);
+  }
+
   function pickFoeFor(f) {
     const lato = isEnemySide(f) ? alliesOnField() : enemiesOnField();
     return lato.length ? lato[Math.floor(Math.random() * lato.length)] : null;
@@ -4628,7 +4657,17 @@
       const m = roster[parseInt(b.dataset.i, 10)];
       game.theftballs--;
       hideMeta();
-      const caught = rollCapture(m, 2, 1);
+      /* 🔴 Il furto si LEGGEVA soltanto: nessun lancio, nessun dondolio.
+         E' l'unico modo di rubare un Pokemon a un allenatore, e passava come
+         una riga di testo. Adesso il derubato torna in campo e la ball vola
+         addosso a lui, con le scosse che ha retto davvero — la stessa
+         animazione dell'ultima ball. */
+      const esito = rollCaptureDettaglio(m, 2, 1);
+      const caught = esito.preso;
+      game.enemy = m;                       // torna in campo per farsi vedere
+      m.spr = null;
+      loadFighterSprite(m, "front").then(sp => { m.spr = sp; redrawScene(); });
+      renderScene();
       const msgs = [`Lanci una Clepto Ball su ${m.name}…`];
       if (caught) {
         const mon = makeFighter(m.speciesId, m.level, { shiny: m.shiny, shinyVar: m.shinyVar, ivs: m.ivs, variant: m.variant, abilIndex: m.abilIndex, gender: m.gender });
@@ -4636,8 +4675,12 @@
         accogliPokemon(mon, msgs, "🕶 Rubato!");
         registerCaught(m.speciesId, m.shiny, m.ivs, msgs, m.variant, m.abilIndex, m.nature, m.shinyVar, m.gender, m.boss);
       } else msgs.push(`${m.name} è sfuggito alla Clepto Ball!`);
-      renderScene();
-      queueMessages(msgs, () => chiediPostoInSquadra(() => openShop()));
+      game.phase = "MESSAGE";
+      cmd().innerHTML = `<div class="msgbox"><div class="log-line">Lanci una Clepto Ball su ${m.name}…</div></div>`;
+      animaBall("theftballs", esito, () => {
+        renderScene();
+        queueMessages(msgs, () => chiediPostoInSquadra(() => openShop()));
+      });
     });
     metaEl().querySelector('[data-act="skip"]').onclick = () => { hideMeta(); openShop(); };
   }
@@ -5174,9 +5217,11 @@
   function mostraContinua(ritardo) {
     clearTimeout(game.contTimer);
     const mostra = () => {
+      game.prontoAvanzare = true;      // da adesso il tocco avanza
       const c = cmd().querySelector(".msgbox .cont");
       if (c) c.classList.add("pronto");
     };
+    game.prontoAvanzare = !ritardo;    // con un'attesa in corso si aspetta
     if (!ritardo) { mostra(); return; }
     game.contTimer = setTimeout(mostra, ritardo);
   }
@@ -5585,6 +5630,13 @@
   function advanceMessages() {
     chiudiStadi();                     // non lasciare il riquadro sopra la scena
     if (game.phase !== "MESSAGE") return;
+    /* 🔴 Finche' l'animazione della mossa e' in corso, il tocco NON avanza.
+       Prima tagliava l'animazione e passava oltre: toccando in fretta si
+       saltava tutto e si arrivava al comando dopo senza aver visto niente —
+       e in doppio si finiva per far partire un'altra mossa sopra la prima.
+       Il triangolino ▸ dice quando è il momento: adesso e' anche la regola,
+       non solo un suggerimento. */
+    if (!game.prontoAvanzare) return;
     nextEvent();
   }
 
@@ -5704,7 +5756,17 @@
       const calamita = onField().find(x => x && !x.fainted && x.volatile.centro
                                         && isEnemySide(x) === isEnemySide(foe));
       if (calamita && calamita !== act.actor) foe = calamita;
+      /* Mosse ad area: il bersaglio principale e poi gli altri, ognuno con il
+         suo tiro di danno e i suoi effetti. Il colpo vale il 25% in meno per
+         tutti quando sono piu' d'uno. */
+      const altri = bersagliExtra(act.actor, M[act.move.id], foe);
+      game._colpoLargo = altri.length > 0;
       resolveAction(act.actor, foe, act.move, log);
+      for (const extra of altri) {
+        if (act.actor.fainted || extra.fainted) continue;
+        resolveAction(act.actor, extra, act.move, log, false, true);
+      }
+      game._colpoLargo = false;
     }
     game._coda = null;
 
@@ -6060,7 +6122,7 @@
   }
 
   // Esegue una singola mossa: blocchi pre-mossa, PP, precisione, danno, effetti.
-  function resolveAction(actor, foe, moveInst, messages, mossaChiamata) {
+  function resolveAction(actor, foe, moveInst, messages, mossaChiamata, extra) {
     const move = M[moveInst.id];
 
     /* 1-zero-zero. SONNOLALIA si usa DORMENDO: se passasse dal controllo qui
@@ -6254,14 +6316,17 @@
       return;
     }
 
-    // 2. consuma PP e annuncia
-    moveInst.pp = Math.max(0, moveInst.pp - 1);
+    /* 2. consuma PP e annuncia.
+       ⚠️ Sul bersaglio IN PIU' di una mossa ad area non si riconsuma il PP e
+       non si riannuncia la mossa: e' lo stesso colpo, non un secondo colpo. */
+    if (!extra) moveInst.pp = Math.max(0, moveInst.pp - 1);
     // PRESSIONE: chi attacca chi ce l'ha consuma un PP in piu'
-    if (foe !== actor && ha(foe, "PRESSURE")) moveInst.pp = Math.max(0, moveInst.pp - 1);
+    if (!extra && foe !== actor && ha(foe, "PRESSURE")) moveInst.pp = Math.max(0, moveInst.pp - 1);
     /* Indice dell'annuncio: e' QUI che va appesa l'animazione della mossa,
        perche' e' l'unico evento che fotografa il campo prima del colpo. */
     const iAnnuncio = messages.length;
-    messages.push(`${actor.name} usa ${move.it}!`);
+    if (extra) messages.push(`…e colpisce anche ${foe.name}!`);
+    else messages.push(`${actor.name} usa ${move.it}!`);
     // Mosse a due turni (Volo, Solarraggio...): da noi colpiscono subito, ma
     // l'animazione di CARICA si vede lo stesso, su chi la usa, prima del colpo.
     if (move.charging && messages.anim) messages.anim("CHARGE_" + move.id, sideOf(actor));
@@ -8827,7 +8892,7 @@
           <span class="move-meta">
             <span class="ticon t-${mv.type}"></span>
             <span class="cicon c-${mv.category}"></span>
-            <span class="move-pp">${mv.power ? "P" + mv.power + " · " : ""}PP ${mi.pp}/${mi.maxPp}</span>
+            <span class="move-pp">${mv.power ? "P" + mv.power + " · " : ""}${mi.pp}/${mi.maxPp}</span>
             ${chipEfficacia(mv)}
           </span>
         </button>`;
@@ -8868,7 +8933,13 @@
      ⚠️ Prima l'elenco era `enemiesOnField()` e basta: le mosse che curano o
      potenziano il compagno non avevano modo di raggiungerlo. */
   const BERSAGLIO_ALTRI = new Set(["NEAR_OTHER", "OTHER", "ALL_NEAR_OTHERS", "ALL_OTHERS"]);
-  const BERSAGLIO_SENZA_SCELTA = new Set(["USER", "PARTY", "USER_SIDE", "USER_AND_ALLIES"]);
+  /* ⚠️ Anche le mosse AD AREA non danno una scelta: colpiscono tutti quelli
+     che possono colpire, quindi chiedere «chi vuoi colpire?» per Terremoto è
+     una domanda senza risposte diverse. Partono e basta (vedi `bersagliExtra`,
+     che poi le porta su tutti). */
+  const BERSAGLIO_SENZA_SCELTA = new Set(["USER", "PARTY", "USER_SIDE", "USER_AND_ALLIES",
+                                          "ALL_NEAR_ENEMIES", "ALL_NEAR_OTHERS", "ALL",
+                                          "BOTH_SIDES", "ENEMY_SIDE"]);
   function bersagliDiMossa(mv, chi) {
     const nemici = enemiesOnField();
     const alleato = game.double
@@ -9646,18 +9717,22 @@
      al livello 1 dell'originale, a metà run, sarebbe solo un peso. */
   function offriNato(nato, poi) {
     if (!nato.nato || !game.player || !S[nato.sp]) { poi(); return; }
-    const pieno = game.party.length >= PARTY_MAX;
+    /* 🔴 A squadra piena le uniche scelte erano «nel box» o «lascia
+       stare»: non c'era modo di METTERLO IN SQUADRA al posto di qualcuno.
+       Adesso si passa da `accogliPokemon`, la stessa strada di una cattura:
+       se c'è posto entra, se non c'è si apre la schermata di chi cede il
+       posto — che il PC ce l'ha già come alternativa. */
     const sp = S[nato.sp];
+    const pieno = game.party.length >= PARTY_MAX;
     showMetaScreen(`
       <div class="meta-title" style="font-size:clamp(19px,5.6vw,30px)">${sp.it}${nato.shiny ? " ✨" : ""} è nato!</div>
-      <div class="meta-sub">${pieno
-        ? "la squadra è al completo: può aspettarti nel box"
-        : "vuoi portarlo con te in questa run?"}</div>
+      <div class="meta-sub">vuoi portarlo con te in questa run?</div>
       <div class="cap-info">
         <div class="cap-riga nuovo">🥚 IV da uovo: il meglio di due tiri</div>
+        ${pieno ? `<div class="cap-riga">la squadra è al completo: sceglierai chi gli cede il posto</div>` : ""}
       </div>
       <div class="meta-actions two-col">
-        <button class="meta-btn primary" data-act="si">${pieno ? "📦 Nel box" : "➕ In squadra"}</button>
+        <button class="meta-btn primary" data-act="si">➕ Portalo con te</button>
         <button class="meta-btn ghost" data-act="no">Lascia stare</button>
       </div>`);
     const chiudi = () => { hideMeta(); poi(); };
@@ -9672,9 +9747,11 @@
         ivs: nato.nato.ivs, abilIndex: nato.nato.abilIndex,
       });
       if (nato.nato.nature) { mon.nature = nato.nato.nature; recomputeStats(mon); }
-      const dove = game.party.length < PARTY_MAX ? (game.party.push(mon), "squadra") : (game.box.push(mon), "box");
+      const msgs = [];
+      accogliPokemon(mon, msgs, "");
       hideMeta();
-      queueMessages([`${mon.name} si unisce a te (${dove === "squadra" ? "in squadra" : "nel box"})!`], poi);
+      // a squadra piena `accogliPokemon` mette in coda la scelta del posto
+      queueMessages(msgs, () => chiediPostoInSquadra(poi));
     };
   }
 

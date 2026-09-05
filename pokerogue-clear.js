@@ -6267,6 +6267,15 @@
       if (Math.random() * 100 >= chance) { stessoMomento(messages, `${actor.name} ha mancato il bersaglio!`); return; }
     }
 
+    /* Le tre immunita' che riguardano le mosse di STATO (vedi `statoImmune`).
+       Non passano da `doDamage`, quindi senza questo controllo andavano a
+       segno comunque: Spora addormentava gli Erba e Ondatrona paralizzava i
+       Terra. */
+    if (statoImmune(move, actor, foe)) {
+      stessoMomento(messages, `Non ha effetto su ${foe.name}...`);
+      actor.volatile.fallita = true;
+      return;
+    }
     actor.volatile.fallita = false;   // e' partita: Pestone torna a potenza normale
     /* 🔴 MOSSE ESPLOSIVE: chi le usa va KO, sempre, anche se il colpo non
        fa danno o il bersaglio e' immune. Nei dati non c'e' traccia del
@@ -8744,11 +8753,42 @@
   const EFF_COL = { 0: "#929292", 0.25: "#FF7400", 0.5: "#FE8E00",
                     2: "#4AA500", 4: "#4BB400", 8: "#52C200" };
   const effNumero = m => String(m).replace(".", ",");
+  /* 🔴 LE MOSSE DI STATO E LA TABELLA DEI TIPI.
+     Sembra ovvio che valga come per gli attacchi, e invece è quasi il
+     contrario: nell'originale (`getMoveEffectiveness`) una mossa di STATO
+     IGNORA l'efficacia di tipo — il moltiplicatore viene forzato a 1. Ruggito
+     funziona benissimo su uno Spettro, anche se è di tipo Normale.
+     Le uniche immunita' che la riguardano sono tre, e sono casi speciali
+     scritti a mano (`Move.isTypeImmune`), non la tabella:
+       · ONDATRONA (l'unica con `RespectAttackTypeImmunityAttr`) non tocca i Terra;
+       · le mosse POLVERE non toccano gli Erba;
+       · con BURLA, le mosse di stato non toccano i Buio.
+     E nessuna delle tre vale se la mossa è su di sé: `isTypeImmune` esce
+     subito quando il bersaglio è `USER`.
+     ⚠️ Prima il motore non applicava NESSUNA di queste: Spora addormentava
+     gli Erba e Ondatrona paralizzava i Terra. E il pulsante mostrava «✕ nulla»
+     su qualunque mossa di stato di tipo sfavorevole, autopotenziamenti
+     compresi — cioe' un avviso sbagliato sopra una mossa che funzionava. */
+  const BERSAGLIA_NEMICO = new Set(["NEAR_OTHER", "NEAR_ENEMY", "ALL_NEAR_ENEMIES", "ALL_NEAR_OTHERS"]);
+  function statoImmune(mv, chi, f) {
+    if (!mv || !f || mv.category !== "STATUS") return false;
+    if (!BERSAGLIA_NEMICO.has(mv.target)) return false;     // su di sé o sul campo: mai
+    if (mv.id === "THUNDER_WAVE" && typeMultiplier(mv.type, f.types) === 0) return true;
+    if (mv.polvere && f.types.includes("GRASS")) return true;
+    if (chi && ha(chi, "PRANKSTER") && f.types.includes("DARK")) return true;
+    return false;
+  }
+
   function efficaciaMossa(mv, contro) {
     const nemici = (contro || enemiesOnField()).filter(Boolean);
     if (!nemici.length || !mv) return null;
+    /* Una mossa di stato non fa danno: di moltiplicatori non ne ha. Si segnala
+       solo quando NON FUNZIONA proprio, e solo se punta l'avversario. */
+    if (mv.category === "STATUS") {
+      const chi = currentChooser() || game.player;
+      return nemici.every(f => statoImmune(mv, chi, f)) ? 0 : null;
+    }
     const m = Math.max(...nemici.map(f => typeMultiplier(mv.type, f.types)));
-    if (mv.category === "STATUS" && m !== 0) return null;
     if (m === 1) return null;
     return m;
   }
