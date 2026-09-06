@@ -5089,3 +5089,11 @@ Il nostro composito si era fermato al vetro. Mancavano:
 
 Verificato: la macchina leggendaria mostra Ho-Oh nella cupola e la manopola sul
 fianco.
+
+⚠️ **Il guardiano della versione clear ha bocciato il primo tentativo**: nelle
+stringhe base64 di due data URI (la macchina SHINY e lo zaino) era comparsa per
+caso la sequenza `GIF` / `gif`, che è una delle parole proibite nella build
+senza easter egg. Non è un errore di codice: è il base64 che può contenere
+qualunque cosa. La cura è ricodificare il PNG con parametri diversi
+(`optimize=False`) finché la stringa esce pulita, e verificarlo prima di
+pubblicare. Da ricordare ogni volta che si aggiunge un'immagine come data URI.
