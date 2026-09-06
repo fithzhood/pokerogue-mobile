@@ -4922,7 +4922,7 @@
        quarta della potenza (`captureChancePct` eleva a 4), quindi da 2 a 5 il
        tiro raddoppia scarso. Un Copperajah si prende quasi sempre, un Heatran
        resta una scommessa — ed è giusto cosi'. */
-    { key: "theftballs",  it: "Clepto Ball", mult: 5, theft: true },
+    { key: "theftballs",  it: "Clepto Ball", mult: 5, theft: true },   // ×1,5 sui selvatici: vedi `multBall`
     { key: "masterballs", it: "Master Ball", mult: 255 },
   ];
   function totalBalls() { return BALL_TYPES.reduce((s, b) => s + (game[b.key] || 0), 0); }
@@ -4935,6 +4935,16 @@
      Prima il 2 era scritto a mano anche qui, e cambiarlo in un posto lasciava
      l'altro indietro. */
   const MULT_CLEPTO = (BALL_TYPES.find(b => b.key === "theftballs") || { mult: 5 }).mult;
+  /* 🔴 LA CLEPTO BALL E' FORTE SOLO DOVE SERVE.
+     Vale 5 perche' e' l'unico modo di prendere il Pokemon di un ALLENATORE:
+     un tiro solo, su un bersaglio a piena vita che non puoi indebolire ne'
+     addormentare. Su un selvatico quella potenza non ha nessuna
+     giustificazione — li' hai tutta la lotta per lavorartelo — e ne farebbe
+     una Master Ball a buon mercato. Contro i selvatici vale quindi quanto una
+     Mega Ball. */
+  const MULT_CLEPTO_SELVATICO = 1.5;
+  const multBall = (ball, bersaglio) =>
+    (ball.theft && bersaglio && !bersaglio.trainer) ? MULT_CLEPTO_SELVATICO : ball.mult;
 
   function offerSteal() {
     game.phase = "STEAL";
@@ -4978,6 +4988,7 @@
       const msgs = [`Lanci una Clepto Ball su ${m.name}…`];
       if (caught) {
         const mon = makeFighter(m.speciesId, m.level, { shiny: m.shiny, shinyVar: m.shinyVar, ivs: m.ivs, variant: m.variant, abilIndex: m.abilIndex, gender: m.gender });
+        ereditaRoba(mon, m);          // strumenti, bacche, vitamine, natura
         ereditaPs(mon, m);
         accogliPokemon(mon, msgs, `${ico("clepto")} Rubato!`);
         registerCaught(m.speciesId, m.shiny, m.ivs, msgs, m.variant, m.abilIndex, m.nature, m.shinyVar, m.gender, m.boss);
@@ -5009,6 +5020,50 @@
      allenatore"), e un boss ha i PS moltiplicati — copiare il numero crudo
      darebbe un pieno o un quasi-morto a caso. Mai sotto 1: nella ball ci e'
      entrato vivo. */
+  /* 🔴 QUELLO CHE TENEVA ADDOSSO SE LO PORTA DIETRO.
+     Catturare ricostruisce il Pokemon da zero con `makeFighter`, e passavano
+     solo l'aspetto e i numeri di nascita (cromatico, forma, IV, abilita',
+     sesso). Restavano indietro tre cose che erano SUE:
+       · gli STRUMENTI e le BACCHE — un selvatico con gli Avanzi o una Bacca
+         Sitrus te li mostrava per tutta la lotta e poi arrivava a mani vuote;
+       · le VITAMINE, che nei nemici alzano davvero le statistiche base;
+       · la NATURA, che veniva ripescata a caso: `registerCaught` registrava
+         nel dex quella che avevi davanti, e l'esemplare in squadra ne aveva
+         un'altra.
+     Nell'originale non si perde niente perche' non si ricostruisce niente:
+     `pokemon.addToParty` promuove lo STESSO individuo, e gli strumenti che
+     teneva vengono ri-aggiunti come tuoi
+     (`attempt-capture-phase.ts`: `findModifiers(...).map(addModifier)`).
+     ⚠️ Gli oggetti INCHIODATI (`_heldFisso`, il Piccolo buco nero del boss
+     finale) non passano: non si possono nemmeno rubare.
+     ⚠️ Le vitamine cambiano le statistiche, quindi vanno messe PRIMA di
+     `recomputeStats`, e i PS si ereditano DOPO — la percentuale va applicata
+     al massimale nuovo, non a quello di prima. */
+  function ereditaRoba(mon, da) {
+    if (!mon || !da) return;
+    const fissi = da._heldFisso || [];
+    for (const k in (da.held || {})) {
+      if (k === "typeboost" || fissi.includes(k)) continue;
+      mon.held[k] = (mon.held[k] || 0) + da.held[k];
+    }
+    if (da.held && da.held.typeboost) {
+      mon.held.typeboost = mon.held.typeboost || {};
+      for (const t in da.held.typeboost) {
+        mon.held.typeboost[t] = (mon.held.typeboost[t] || 0) + da.held.typeboost[t];
+      }
+    }
+    for (const b in (da.berries || {})) {
+      mon.berries[b] = (mon.berries[b] || 0) + da.berries[b];
+    }
+    let cambiaStat = false;
+    for (const v in (da.vits || {})) {
+      mon.vits[v] = (mon.vits[v] || 0) + da.vits[v];
+      cambiaStat = true;
+    }
+    if (da.nature && mon.nature !== da.nature) { mon.nature = da.nature; cambiaStat = true; }
+    if (cambiaStat) recomputeStats(mon);
+  }
+
   function ereditaPs(mon, da) {
     if (!mon || !da || !da.maxHp) return;
     mon.hp = Math.max(1, Math.min(mon.maxHp, Math.round(mon.maxHp * (da.hp / da.maxHp))));
@@ -5219,7 +5274,7 @@
     const enemy = game.enemy;
     const esito = ball.mult >= 255
       ? { preso: true, scosse: 1, critica: true }
-      : rollCaptureDettaglio(enemy, ball.mult, psUltimaBall(enemy));
+      : rollCaptureDettaglio(enemy, multBall(ball, enemy), psUltimaBall(enemy));
     // stessa animazione del lancio in battaglia (§ dondolio)
     game.phase = "MESSAGE";
     cmd().innerHTML = `<div class="msgbox"><div class="log-line">Lanci una ${ball.it} su ${enemy.name}…</div></div>`;
@@ -5230,6 +5285,7 @@
     const messages = [];
     if (caught) {
       const mon = makeFighter(enemy.speciesId, enemy.level, { shiny: enemy.shiny, shinyVar: enemy.shinyVar, ivs: enemy.ivs, variant: enemy.variant, abilIndex: enemy.abilIndex, gender: enemy.gender });
+      ereditaRoba(mon, enemy);      // strumenti, bacche, vitamine, natura
       ereditaPs(mon, enemy);        // i PS che aveva quando la ball si e' chiusa
       accogliPokemon(mon, messages, "Preso!");
       // meta-progressione: starter sbloccato + caramella + IV migliori
@@ -9220,7 +9276,7 @@
     const BALL_IMG = { balls: "pb", greatballs: "gb", ultraballs: "ub", rogueballs: "rb", theftballs: "tb", masterballs: "mb" };
     const owned = BALL_TYPES.filter(b => (game[b.key] || 0) > 0);
     const btns = owned.map(b => {
-      const pct = b.mult >= 255 ? 100 : captureChancePct(game.enemy, b.mult, psUltimaBall(game.enemy));
+      const pct = b.mult >= 255 ? 100 : captureChancePct(game.enemy, multBall(b, game.enemy), psUltimaBall(game.enemy));
       return `<button class="btn ball-btn" data-b="${b.key}">
         <img class="ball-icon" src="${ballIcon(BALL_IMG[b.key])}" alt="">
         <span class="move-name">${b.it}</span>
@@ -9289,7 +9345,7 @@
     if (!owned.length) { notAvailable("Non hai nessuna ball!"); return; }
     const btns = owned.map(b => {
       const blocked = ballBlockReason(b);
-      const pct = b.mult >= 255 ? 100 : captureChancePct(game.enemy, b.mult);
+      const pct = b.mult >= 255 ? 100 : captureChancePct(game.enemy, multBall(b, game.enemy));
       return `<button class="btn ball-btn" data-b="${b.key}" ${blocked ? "disabled" : ""}>
         <img class="ball-icon" src="${ballIcon(BALL_IMG[b.key])}" alt="">
         <span class="move-name">${b.it}</span>
@@ -9333,7 +9389,7 @@
        ball deve dondolare esattamente le volte che ha retto davvero. */
     const esito = ball.mult >= 255
       ? { preso: true, scosse: 1, critica: true }
-      : rollCaptureDettaglio(enemy, ball.mult);
+      : rollCaptureDettaglio(enemy, multBall(ball, enemy));
     game.phase = "MESSAGE";                    // niente comandi durante il lancio
     cmd().innerHTML = `<div class="msgbox"><div class="log-line">Lanci una ${ball.it} su ${enemy.name}…</div></div>`;
     animaBall(ballKey, esito, () => risolviLancio(ballKey, ball, enemy, esito.preso));
@@ -9344,6 +9400,7 @@
 
     if (caught) {
       const mon = makeFighter(enemy.speciesId, enemy.level, { shiny: enemy.shiny, shinyVar: enemy.shinyVar, ivs: enemy.ivs, variant: enemy.variant, abilIndex: enemy.abilIndex, gender: enemy.gender });
+      ereditaRoba(mon, enemy);      // strumenti, bacche, vitamine, natura
       ereditaPs(mon, enemy);        // i PS che aveva quando la ball si e' chiusa
       const stolen = !!enemy.trainer;
       accogliPokemon(mon, log, stolen ? `${ico("clepto")} Rubato!` : "Preso!");

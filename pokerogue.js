@@ -9259,10 +9259,18 @@
      nome, tipi e percentuale. Adesso le due schermate condividono queste. */
   function infoCattura(e) {
     const radice = rootOf(e.speciesId);
-    const maiPreso = !meta.unlocked[e.speciesId];
+    /* 🔴 «MAI CATTURATO» SI GUARDA SULLA RADICE, non sulla specie in campo.
+       Quello che si SCHIERA e' il capostipite: prendere un Venusaur sblocca
+       Bulbasaur, e da quel momento la linea ce l'hai tutta. Ma la riga
+       controllava `meta.unlocked[e.speciesId]`, cioe' l'esemplare esatto:
+       davanti a un Ivysaur selvatico continuava a dire «Mai catturato» anche
+       con Bulbasaur gia' in mano da cinquanta ondate — e su una schermata che
+       serve a decidere se spendere l'ULTIMA ball, quello e' un consiglio
+       sbagliato.
+       Adesso: se hai la base, la linea e' tua. */
+    const maiPreso = !meta.unlocked[e.speciesId] && !giaStarter(radice);
     const rigaDex = maiPreso
-      ? `<div class="cap-riga nuovo">📖 Mai catturato${!giaStarter(radice)
-           ? ` · sblocca <b>${S[radice].it}</b> come starter` : ""}</div>`
+      ? `<div class="cap-riga nuovo">📖 Mai catturato · sblocca <b>${S[radice].it}</b> come starter</div>`
       : `<div class="cap-riga">📖 Già nel dex</div>`;
     const cromNuovo = e.shiny && (meta.unlocked[radice] || 0) < 2;
     const rigaCrom = cromNuovo

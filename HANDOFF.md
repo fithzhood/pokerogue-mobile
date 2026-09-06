@@ -4873,3 +4873,18 @@ Contro i selvatici vale ora quanto una Mega Ball (×1,5), via `multBall`.
 
 Misurato in gioco: sul Mightyena selvatico la Clepto dà ~35%, identica alla
 Mega Ball; sul Pelipper dell'allenatore è l'unica utilizzabile, al 40%.
+
+### 55.3 «Mai catturato» si guarda sulla RADICE
+
+Quello che si schiera è il capostipite: prendere un Venusaur sblocca Bulbasaur,
+e da quel momento la linea ce l'hai tutta. Ma la riga controllava
+`meta.unlocked[e.speciesId]`, cioè l'esemplare esatto: davanti a un Ivysaur
+selvatico continuava a dire «Mai catturato» anche con Bulbasaur in mano da
+cinquanta ondate — e su una schermata che serve a decidere se spendere
+l'**ultima** ball, quello è un consiglio sbagliato.
+
+Ora `maiPreso = !meta.unlocked[specie] && !giaStarter(radice)`.
+
+Prova (schermata furto, che usa lo stesso `infoCattura`): Ivysaur → «Già nel
+dex»; Seel, la cui radice non è sbloccata → «Mai catturato · sblocca Seel come
+starter».
