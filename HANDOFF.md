@@ -4795,3 +4795,38 @@ a dieci volte) finché non esce qualcosa di ammesso:
 Latios ha 600 di totale, quindi la sua soglia è la 55.
 
 ⚠️ È un filtro sui **selvatici**. Per gli allenatori vale la quota della §51.5.
+
+## 54. Sprite al posto delle emoji (rev 164)
+
+Regola del proprietario: **dove esiste uno sprite del gioco, l'emoji sparisce;
+dove non esiste, resta**. Le emoji le disegna il sistema operativo — cambiano
+faccia da un telefono all'altro e non c'entrano niente con la pixel art del
+resto — e per metà di loro l'oggetto vero ce l'abbiamo già negli asset.
+
+`ico("chiave")` restituisce un `<img class="ico-sp">` che si allinea alla riga
+come farebbe un carattere.
+
+| emoji | sprite | dove |
+|---|---|---|
+| 🎟 | `items/coupon.png` | voucher, ovunque |
+| 🥚 | `items/mystery_egg.png` | uova, mosse da uovo, IV da uovo |
+| 🍬 | `items/rare_candy.png` | caramelle, costi passiva/sconto |
+| 🎒 | `items/berry_pouch.png` | oggetti tenuti |
+| 🕶 | `pokeball/tb.png` | Clepto Ball, furto |
+| 🔴 | `pokeball/pb.png` | contatore ball nell'HUD |
+| 🔴 (Gigamax) | `items/dynamax_band.png` | pulsante e messaggio |
+| 🎰 | `GACHA_IMG` | macchine uova |
+
+⚠️ `assets/ui/egg.png` **non** va bene: è un foglio con tutte le qualità d'uovo
+affiancate (138×31), e come `<img>` le mostrerebbe tutte. L'uovo singolo è
+`items/mystery_egg.png`.
+
+⚠️ La macchina del gacha è 106×131, più alta che larga: con il riquadro quadrato
+delle altre icone si schiaccia. Ha una classe sua (`.ico-sp.alta`).
+
+⚠️ In `PASSIVA_IT` le emoji restano: quei testi finiscono dentro `<option>` di
+una `<select>`, e lì l'HTML non viene reso.
+
+**Restano** (nessuno sprite che le sostituisca): 👑 boss, ✨ cromatico, ♂/♀,
+🔒 bloccato, 🍀 fortuna, 🏆 record, ⭐ starter, 🎀 fiocco, 📖 dex, 🎁, 💠 scudo,
+🌱 natura, 📈 IV, 🔍 lente, 👥 squadra, 💾, 📦 PC, ▶ ↩ ⓘ ▸ ➕ ⚔ dei pulsanti.

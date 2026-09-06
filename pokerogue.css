@@ -1458,6 +1458,15 @@ button.pd-card:not(:disabled):active { background: rgba(255,255,255,.14); }
 #trainer-balls .tb.active { box-shadow: 0 0 0 2px #ffe066, 0 0 6px #ffe066; border-radius: 50%; }
 
 /* Mystery encounter */
+/* Icona presa dagli sprite del gioco, in linea nel testo al posto di
+   un'emoji. Si allinea alla riga come farebbe un carattere. */
+.ico-sp {
+  width: 1.3em; height: 1.3em; vertical-align: -0.32em;
+  image-rendering: pixelated; flex: 0 0 auto;
+}
+/* la macchina del gacha è più alta che larga: box su misura, o si schiaccia */
+.ico-sp.alta { width: 1.15em; height: 1.45em; vertical-align: -0.38em; }
+
 /* Titolo con lo sprite dell'oggetto al posto di un'emoji: e' lo stesso
    disegno che si vede fra i premi, quindi si riconosce a colpo d'occhio. */
 .tit-oggetto { display: flex; align-items: center; justify-content: center; gap: 8px; }

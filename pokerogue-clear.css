@@ -1458,6 +1458,23 @@ button.pd-card:not(:disabled):active { background: rgba(255,255,255,.14); }
 #trainer-balls .tb.active { box-shadow: 0 0 0 2px #ffe066, 0 0 6px #ffe066; border-radius: 50%; }
 
 /* Mystery encounter */
+/* Titolo con lo sprite dell'oggetto al posto di un'emoji: e' lo stesso
+   disegno che si vede fra i premi, quindi si riconosce a colpo d'occhio. */
+.tit-oggetto { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.tit-icona { width: 1.5em; height: 1.5em; image-rendering: pixelated; flex: 0 0 auto; }
+
+/* Elenco di mosse fra cui scegliere (i due funghi): la mossa larga e, di
+   fianco, il tondino che apre la scheda. */
+.mv-riga { display: flex; gap: 6px; align-items: stretch; }
+.mv-riga .move-btn { flex: 1; min-width: 0; }
+.mv-info {
+  flex: 0 0 auto; width: 44px; border: 1px solid #ffffff26; border-radius: 12px;
+  background: #ffffff10; color: var(--ink); font-family: inherit;
+  font-size: clamp(17px, 4.6vw, 21px); line-height: 1; cursor: pointer;
+}
+.mv-info.aperta { background: #ffffff2e; border-color: #ffffff5c; }
+.mv-info:active { transform: translateY(2px); }
+
 /* Perche' le altre mosse sono spente: furia, rotolamento, baraonda, carica. */
 .vincolo-nota {
   margin: 0 2px 5px; padding: 5px 9px; border-radius: 9px;
