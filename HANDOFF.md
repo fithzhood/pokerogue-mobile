@@ -5214,3 +5214,192 @@ e ora **né la potenza né i PP si restringono** (`flex: 0 0 auto` su entrambi).
 Misurato nel caso peggiore (Idropompa, «P110 · 120/120») a 384 px di larghezza
 **con la scala caratteri al 130%**, cioè le condizioni del telefono:
 `scrollWidth 145 = clientWidth 145`. Nessun taglio su nessuna delle quattro.
+
+
+## 61. Stati e KO: due schermate che mancavano (rev 175)
+
+Due segnalazioni della stessa serata, tutte e due sul «non si vede / non si
+sceglie».
+
+### 61.1 Lo stato stava dentro il nome, che ha l'ellissi
+
+La targhetta SCOTTATURA / PARALISI era dentro `.name`, insieme al nome e al
+simbolo del sesso. `.name` ha `text-overflow: ellipsis`: con un nome lungo
+(«Tauros di Paldea», «Geyser Foton…») la targhetta veniva tagliata via. Cioè
+lo stato spariva **proprio quando il nome era lungo**, che non c'entra niente.
+
+Ora sta sulla riga dei PS, **a sinistra**: quella riga ha due numeri e spazio
+libero garantito, e nessuna ellissi che la mangi.
+
+```
+.hp-text { display:flex; justify-content: space-between; }   /* stato | 34/98 */
+```
+
+### 61.2 Quando cadi vincendo, il prossimo lo scegli tu
+
+`nextWave` apriva l'ondata dopo con `firstAliveIndex()` se l'attivo era caduto
+vincendo quella prima (colpo finale scambiato, veleno che se lo porta via dopo
+il KO nemico). Ti trovavi in campo **il primo della lista**, contro un
+avversario che non conoscevi ancora. Durante la lotta la scelta c'era già
+(`promptForceSwitch`); mancava proprio nel caso più frequente.
+
+Ora c'è `scegliChiApre()` → `renderParty("apre")`, e `nextWave` si richiama da
+capo dopo la scelta (è l'unico modo di infilare una schermata in mezzo a una
+funzione non asincrona). Con un solo Pokémon vivo non si chiede niente.
+
+### 61.3 La mossa da imparare ha la faccia delle altre
+
+Nel menù di apprendimento la mossa nuova era una **frase su fondo grigio** e le
+quattro da dimenticare erano **pulsanti colorati col tipo**. Due linguaggi per
+la stessa cosa, e il confronto lo dovevi fare a memoria. Ora la nuova ha lo
+stesso riquadro, lo stesso colore di tipo, gli stessi dati (potenza, PP), con
+un filo di bordo chiaro che la stacca — e non è cliccabile, perché non è lei
+che si sceglie.
+
+
+## 62. L'economia: i soldi li danno gli allenatori (rev 176)
+
+> «Controlla la progressione dello shop, sembra diversa dall'originale.»
+
+**L'emporio era già identico.** Stesse sette righe, stessi moltiplicatori,
+stessa formula di sblocco `ceil((ondata+10)/30)`, stesso costo del rimescolo
+`ceil(ondata/10)×250×2^n`. L'unica differenza era l'arrotondamento: noi
+tagliavamo alle decine per difetto, l'originale fa `Math.round`. Corretto —
+ora Pozione all'ondata 1 costa 36₽ come là, non 30₽.
+
+**Quello che era diverso davvero erano le ENTRATE.**
+
+| | noi (prima) | originale |
+|---|---|---|
+| chi paga | **ogni ondata vinta**, selvatici compresi | **solo gli allenatori** |
+| quanto | `(90 \| 260 \| 500) + ondata×12` — una retta | `waveMoney(moltiplicatore)` — la stessa curva dei prezzi |
+| all'ondata 50, incassato in tutto | ~21.000₽ | ~4.500₽ |
+
+Cioè: i prezzi salivano come una potenza e le entrate come una retta partita
+molto più in alto. Fino a metà run eri ricco cinque volte tanto, l'emporio non
+era una scelta e il rimescolo dei premi si poteva pagare a ogni giro.
+
+Ora è come `TrainerVictoryPhase` → `MoneyRewardPhase`: paga solo chi ha un
+allenatore dietro, e paga `waveMoney(moltiplicatore)`. I moltiplicatori sono
+quelli veri di `trainer-config.ts`:
+
+| chi | ×  | | chi | × |
+|---|---|---|---|---|
+| il Bullo | 0,5 | | Campeggiatore | 1,1 |
+| Montanaro · Cinturanera · Recluta | 1 | | Pescatore | 1,25 |
+| Nuotatore | 1,3 | | Sensitivo · Mangiafuoco · Ranger | 1,4 |
+| Streghetta | 1,5 | | Bellezza | 1,55 |
+| Scienziato | 1,7 | | Fantallenatore | 2,25 |
+| Capopalestra · boss malvagio | 2,5 | | Superquattro | 3,25 |
+| Rivale (1°→6°) | 1 · 1,25 · 1,5 · 1,75 · 2,5 · 3 | | Campione | 10 |
+
+⚠️ Restano tutte le altre entrate dell'originale: Pepita / Granpepita /
+Dobloantico fra i premi, Raccolta, Introiti e Pugno dorato, il tesoro di
+Gimmighoul, gli incontri misteriosi. Monetamuleto (+20% a pezzo) e Cuccagna
+(×2) si applicano come prima.
+
+Verificato in gioco: selvatico battuto → 400₽ restano 400₽, nessun messaggio;
+la Bellezza battuta all'ondata 2 → «Ricevi ₽300!», cioè `waveMoney(1,55)`
+esatto. Emporio all'ondata 1: 36 / 72 / 360.
+
+Nuovo aggancio di prova: `__items.soldi()` dice il moltiplicatore
+dell'avversario in campo, il premio, e la tabella di quanto pagherebbe ogni
+ruolo a questa ondata.
+
+
+## 63. Ogni colpo con i suoi effetti, dopo la sua animazione (rev 176)
+
+> «Gli effetti degli attacchi devono vedersi dopo che le animazioni sono
+> concluse. In particolare nelle mosse multiple o con multilente dopo ogni
+> animazione si devono vedere gli effetti dei singoli hit.»
+
+Due difetti distinti, tutti e due nei colpi multipli.
+
+### 63.1 La barra calava PRIMA del pugno
+
+`nextEvent` tiene il fotogramma `pre` finché l'animazione gira e applica quello
+vero all'impatto (§43). Ma `pre` è l'istantanea presa **quando l'evento
+nasce** — e l'evento del singolo colpo si creava DOPO aver tolto i PS. Quindi
+`pre` conteneva già i PS scesi: si vedeva il risultato e poi il pugno.
+
+Ordine nuovo dentro il ciclo: `push` (istantanea di partenza) → `fx` →
+sottrazione dei PS → `snap()` → «Colpo critico!». Misurato: colpo 1 di 2 con
+`pre.ehp 300 → ehp 286`, colpo 2 `286 → 272`.
+
+### 63.2 Gli effetti arrivavano tutti in fondo
+
+Il dado si tirava già una volta per colpo (§52), ma il **risultato** si
+applicava tutto insieme alla fine: cinque animazioni di Semitraglia e poi, in
+coda, «è paralizzato». Non si capiva quale colpo avesse fatto cosa, e con la
+Multilente sembrava che il colpo in più non contasse.
+
+`applyMoveAttrs` ha ora un `modo`:
+
+| modo | quando | cosa fa |
+|---|---|---|
+| `"tutto"` | colpo singolo | come sempre |
+| `"solo-secondari"` | a ogni colpo, se i colpi sono >1 | solo stato, confusione, tentennamento, sbalzi **con** `effectChance` |
+| `"senza-secondari"` | chiamata finale, se i colpi erano >1 | tutto il resto |
+
+⚠️ La riga che regge tutto è la distinzione fra effetto **a percentuale** e
+calo **garantito**. I cali che una mossa si autoinfligge (Vampata −2 A.Sp,
+Zuffa −1 Dif/D.Sp) hanno `effectChance: -1` e restano **uno per mossa**:
+metterli fra i per-colpo voleva dire che la Multilente li raddoppiava.
+Verificato: Vampata + Multilente → 2 colpi, A.Sp **−2** (non −4).
+
+
+## 64. Il Pokérus cammina, e si vede (rev 176)
+
+Ce l'aveva chi partiva con una delle tre specie del giorno e restava suo per
+sempre: un bonus fisso su un Pokémon solo. Nell'originale
+(`trySpreadPokerus`, chiamato a fine di ogni ondata) il virus **si sposta**:
+ogni infetto può passarlo ai due **vicini di posto** in squadra, una volta su
+dieci per vicino; chi si è appena contagiato in quel giro non lo ripassa
+subito.
+
+⚠️ I vicini sono quelli di **posizione**, non chi ha combattuto. Vuol dire che
+l'ordine della squadra è parte della meccanica: mettere un Pokémon accanto a un
+infetto è una mossa vera.
+
+E ora si vede: targhetta verde **PKRS** nella casella della squadra, accanto a
+quella dello stato, con la spiegazione nel `title`. Il contagio si annuncia
+(«Il Pokérus di X contagia Y!»), che è come si impara che esiste.
+
+
+## 65. La mappa dei luoghi (rev 176)
+
+> «Con la mappa non solo si dovrebbe poter fare la scelta di dove andare ma si
+> dovrebbe anche vedere il grafo, fatto bene, il più aderente possibile allo
+> stile di gioco.»
+
+Aveva ragione: la Mappa è proprio l'oggetto che dovrebbe farti **vedere** dove
+sei, e si limitava a tre nomi su tre rettangoli colorati. Tre nomi non dicono
+se quella strada finisce in un vicolo cieco o si apre in quattro.
+
+**Due schermate, stesso vocabolario** — caselle col colore del bioma (cielo
+sopra, terra sotto, come lo sfondo che troverai) e fili curvi con la freccia
+del verso.
+
+1. **La scelta** (`schermataSceltaZona`): dove sono in cima, le due o tre vie
+   sotto, e sotto ognuna **cosa c'è un passo oltre**. Le caselle grandi si
+   toccano, quelle piccole no.
+2. **La mappa intera** (`showGrafoZone`): tutti i 35 luoghi in righe per
+   distanza da Città, tutte le strade in grigio chiaro, e quelle del luogo
+   scelto accese in oro. Si tocca un luogo per illuminare le sue. Sotto, la
+   legenda scritta: «si va a…», «si arriva da…». Si apre dalla scelta
+   («Mappa completa») e dal menù ☰ della run, se hai la Mappa.
+
+Un pallino scuro marca i luoghi dove sei già passato in questa run
+(`game.zoneViste`, salvato in `CAMPI_RUN`).
+
+⚠️ **I fili non sono a coordinate fisse.** Si tracciano dopo l'impaginazione
+leggendo la posizione vera delle caselle (`getBoundingClientRect`), in un
+`<svg>` inserito **sotto** di loro. È l'unico modo perché reggano con i nomi
+lunghi («Prateria Fiorita»), con la scala caratteri al 130% e su schermi
+diversi: una griglia a numeri fissi si spacca al primo nome lungo.
+
+⚠️ Il filo va **da centro a centro** e le caselle, che hanno il fondo pieno, ne
+coprono i capi. Quindi lo spazio fra le righe è **funzionale**: con le righe
+troppo vicine il filo spariva del tutto sotto le due caselle, e infatti la via
+di mezzo — quella perfettamente in verticale — non aveva la freccia. Da lì
+`.zn-scelta { gap: 28px }` e `.zn-col { gap: 22px }`.
