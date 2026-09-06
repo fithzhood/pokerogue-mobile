@@ -708,7 +708,19 @@ html, body {
   font-size: clamp(10px, 3vw, 14px); font-weight: 600; opacity: .95;
   max-width: 100%; overflow: hidden;
 }
-.move-btn .move-pp { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 🔴 A CEDERE DEV'ESSERE LA POTENZA, NON I PP.
+   Prima potenza e PP stavano in UNA sola casella ("P80 · 17/24") con
+   l'ellissi in fondo: quando lo spazio non bastava spariva la CODA, cioe'
+   proprio i PP massimi — si leggeva "P80 · 17/…". Il numero che dice se una
+   mossa e' ancora usabile e' quello; la potenza sta gia' scritta nella scheda.
+   Adesso sono due caselle: i PP non si restringono mai (`flex: 0 0 auto`),
+   la potenza si' — e se proprio non ci sta, sparisce lei. */
+.move-btn .move-pp  { flex: 0 0 auto; white-space: nowrap; }
+.move-btn .move-pot { flex: 0 1 auto; overflow: hidden; white-space: nowrap; min-width: 0; }
+/* ⚠️ Il puntino va scritto COME CARATTERE, non come escape CSS: scritto
+   come sequenza di quattro cifre esadecimali senza spazio finale il parser
+   ne legge solo due, e a schermo usciva «P60 ◆b7 8/24». */
+.move-btn .move-pot::after { content: "·"; margin-left: 4px; opacity: .7; }
 .move-btn .ticon, .move-btn .cicon { flex: 0 0 auto; }
 /* Le due targhette (tipo e categoria) da sole si prendevano 90 px dei 171
    utili, e i PP finivano tagliati a meta: rimpicciolite un filo ci sta tutto.
@@ -1485,6 +1497,19 @@ button.pd-card:not(:disabled):active { background: rgba(255,255,255,.14); }
 
 /* Elenco di mosse fra cui scegliere (i due funghi): la mossa larga e, di
    fianco, il tondino che apre la scheda. */
+/* Testata della schermata «impara una mossa»: sprite, nome e ABILITA'.
+   L'abilita' e' un pulsante come le mosse: si tocca e si apre la sua scheda. */
+.learn-id { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.learn-ab { display: flex; flex-wrap: wrap; gap: 5px; }
+.learn-abchip {
+  border: 1px solid #ffffff26; border-radius: 999px; background: #ffffff10;
+  color: var(--ink); font-family: inherit; font-size: clamp(11px, 3vw, 13.5px);
+  padding: 3px 9px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;
+}
+.learn-abchip.on { background: #ffffff2e; border-color: #ffffff5c; }
+.learn-abchip.vuota { opacity: .6; cursor: default; }
+.learn-abchip .chip-i { font-size: .95em; opacity: .75; }
+
 .mv-riga { display: flex; gap: 6px; align-items: stretch; }
 .mv-riga .move-btn { flex: 1; min-width: 0; }
 .mv-info {

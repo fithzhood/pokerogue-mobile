@@ -5097,3 +5097,83 @@ senza easter egg. Non è un errore di codice: è il base64 che può contenere
 qualunque cosa. La cura è ricodificare il PNG con parametri diversi
 (`optimize=False`) finché la stringa esce pulita, e verificarlo prima di
 pubblicare. Da ricordare ogni volta che si aggiunge un'immagine come data URI.
+
+## 59. Last Ball, Sciarpa nera, abilità nel menu mosse (rev 173)
+
+### 59.1 LAST BALL — nera, per chi è già a terra
+
+Il tiro di cortesia di fine ondata si calcola come se l'avversario fosse
+**integro** (`psUltimaBall` restituisce `maxHp`): è una scelta voluta, se no
+bastava abbatterlo per prenderlo quasi sempre, e indebolire, addormentare e
+lanciare durante la lotta non sarebbero serviti più a niente.
+
+La Last Ball è l'unica che quel conto lo fa **davvero sui PS rimasti**, cioè
+zero. Misurato sul tiro di fine ondata:
+
+| specie | Poké | Mega | Ultra | Rogue | **Last** |
+|---|---|---|---|---|---|
+| comune (190) | 35% | 48% | 59% | 80% | **100%** |
+| medio (45) | 12% | 16% | 20% | 27% | **45%** |
+| raro (3) | 2% | 3% | 3% | 4% | **6%** |
+
+⚠️ In lotta vale **1**, come una Poké Ball: contro un Pokémon in piedi non ha
+niente di speciale e non ruba il mestiere a nessun'altra. Verificato in gioco:
+su un Eevee sano dà 12%, identica alla Poké Ball.
+
+Sprite: la Poké Ball portata su una rampa **nera** (`xb`). Il nero non era
+preso da nessuna: rosso Poké, blu Mega, giallo-su-bianco Ultra, indaco Rogue,
+verdeacqua Clepto, viola Master, oro Legend.
+
+### 59.2 La Legend Ball la lasciano i leggendari che ti sfuggono
+
+Battere un leggendario selvatico e non riuscire a prenderlo è il momento più
+amaro della run — l'occasione che non torna — e finiva con una riga di testo.
+Ora lascia cadere la ball fatta apposta per lui, così la volta dopo ci arrivi
+attrezzato. Vale anche rinunciando al tiro: il leggendario l'hai battuto
+comunque.
+
+⚠️ Solo **selvatici** e solo se **non** l'hai preso: se l'hai catturato il
+premio ce l'hai già, ed è il Pokémon.
+
+### 59.3 SCIARPA NERA — non esisteva niente del genere
+
+Cercato: in tutto il gioco l'unica cosa che tocca la probabilità degli effetti
+aggiuntivi è l'abilità **Leggiadro** (raddoppia). Nell'originale un oggetto così
+non c'è, e per metà delle mosse quella percentuale è l'unica cosa che le
+distingue da un attacco secco.
+
+Fascia ULTRA, held: **+50% alla probabilità per pezzo**, si somma a Leggiadro e
+si ferma a 100. Sprite: la Sciarpa seta su una rampa scura.
+
+⚠️ La sciarpa è quasi tutta bianca: senza schiacciare la scala (luminanza al
+quadrato) restava grigia invece che nera.
+
+### 59.4 L'abilità nel menu di apprendimento
+
+Lì si decide quale mossa buttare, e metà delle volte la risposta dipende
+dall'abilità: con Forzabruta gli effetti aggiuntivi non partono (quindi una
+mossa presa per l'effetto non serve), con Leggiadro partono il doppio,
+Piromania e Erbaiuto cambiano quale tipo conviene tenere. La schermata mostrava
+nome, livello e sei statistiche, e non diceva con che abilità combatte.
+
+Ora c'è, **passiva compresa**, come pastiglia che apre la scheda (`snippetAbilita`).
+
+### 59.5 🔴 I PP MASSIMI TAGLIATI DAI PUNTINI
+
+Potenza e PP stavano in **una sola casella** ("P80 · 17/24") con l'ellissi in
+fondo: quando lo spazio non bastava spariva la coda, cioè proprio i PP massimi
+— si leggeva «P80 · 17/…». Il numero che dice se una mossa è ancora usabile è
+quello; la potenza sta già scritta nella scheda.
+
+Adesso sono due caselle: i PP non si restringono mai (`flex: 0 0 auto`), la
+potenza sì — e se proprio non ci sta, sparisce lei.
+
+⚠️ **Due trappole nel giro di dieci minuti**, entrambe invisibili a
+`node --check`:
+- il separatore scritto come escape CSS a quattro cifre senza spazio finale
+  viene letto a metà: a schermo usciva «P60 ◆b7 8/24». Va scritto come
+  carattere.
+- e la *spiegazione* di quella trappola, scritta in un commento dentro una
+  stringa Python non raw, ha infilato un **byte nullo** nel CSS. Da lì in poi
+  `grep` trattava il file come binario. Se un file di testo diventa "binary",
+  è quello.
