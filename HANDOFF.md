@@ -5637,3 +5637,31 @@ posti che si riempiono dalla coda, vassoio 4/4 e 2/2 a fine lotta, dialogo di
 sconfitta e premio corretti (₽90 = `waveMoney(0,5)` del Bullo all'ondata 2).
 
 Prova: `__items.allenatore(quanti, true)` forza il doppio.
+
+
+## 73. Le squadre importanti erano tutte corte (rev 180)
+
+> «È giusto che i superquattro abbiano solo 4 pokemon a testa?»
+
+No: nell'originale ne hanno **sei**. E andando a controllare gli altri, erano
+corti quasi tutti. Là il numero non è scritto a mano — viene dai
+`trainerPartyTemplates`, che sono elenchi di «quanti di che forza». Contati:
+
+| ruolo | template | quanti | noi (prima) |
+|---|---|---|---|
+| Superquattro | `ELITE_FOUR` 1+3+1+1 | **6** | 4 |
+| Campione | `CHAMPION` 4+2 | 6 | 6 ✔ |
+| Boss malvagio | `EVIL_LEADER` 1+2+2+1 | **6** | 5 |
+| Admin | `RIVAL_5` 1+1+3+1 | **6** | 3 |
+| Recluta | a scaglioni | **2 / 3 / 6** | 2 sempre |
+| Capopalestra | `GYM_LEADER_1..5` | **2/3/4/5/6** | `3 + ondata/60` → 3/4/4/5/5/6 |
+| Rivale | `RIVAL_1..6` | 2/3/4/5/6/6 | uguale ✔ |
+
+⚠️ Per capipalestra e reclute il numero **cresce con l'ondata**, ed è una scala
+a gradini precisa, non una formula: si copia com'è (`quantiPokemon`). Le soglie
+delle reclute sono le ondate dei loro incontri (35, 62/64, poi gli admin),
+quindi cadono esattamente sui loro appuntamenti.
+
+Verificato: `__items.squadre()` → capipalestra 30:3 · 60:4 · 90:5 · 120:6 ·
+150:6 · 180:6; reclute 35:2 · 62:3 · 64:3; admin e boss 6; Superquattro 6;
+Campione 6. E in gioco, Shauntal all'ondata 182 arriva col vassoio da sei.
