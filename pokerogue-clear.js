@@ -1006,11 +1006,19 @@
     // boss: barra HP a SEGMENTI (come nell'originale): il danno che sfonderebbe
     // un segmento viene scartato — il boss va "rotto" un segmento alla volta.
     if (boss) {
-      const segs = 2 + Math.floor(level / 25);          // 2-3+ segmenti
-      f.segTotal = segs;
-      f.segBroken = 0;
-      f.segBounds = [];
-      for (let i = segs - 1; i >= 1; i--) f.segBounds.push(Math.floor(f.maxHp * i / segs)); // decrescenti
+      /* 🔴 GLI SCUDI ERANO FUORI SCALA. Qui stava `2 + floor(level / 25)`:
+         a livello 100 sono SEI scudi, a 200 ne sono DIECI, e una lotta contro
+         un boss di fine run diventava una fila di dieci barre da sfondare.
+         La formula vera dell'originale (`getEncounterBossSegments`) e' molto
+         piu' avara e non guarda quasi il livello:
+             2, +1 se il livello e' almeno 100, +1 se il totale base della
+             specie e' almeno 670, +1 ogni 250 ondate.
+         In una run che finisce alla 200 il massimo e' QUATTRO, e lo vedono
+         solo i pesi massimi. La funzione giusta — `bossSegmentsFor` — c'era
+         gia' e la usavano i boss finali: era `makeFighter`, cioe' la strada di
+         tutti gli altri boss, a tenersi la vecchia. */
+      const bstBase = Object.values(sp.baseStats).reduce((a, b) => a + b, 0);
+      setSegments(f, bossSegmentsFor(level, bstBase, game.wave || 1));
     }
     return f;
   }
@@ -1183,6 +1191,23 @@
     // `opts.potenza` sovrascrive la potenza: la usano le mosse a potenza
     // VARIABILE (Colpo Basso, Vortexpalla, Flagello…), che nel dato hanno -1
     let power = opts.potenza != null ? opts.potenza : move.power;
+    /* ROTOLAMENTO / PALLA GELO: raddoppia a ogni colpo di fila, fino a cinque
+       (30 · 60 · 120 · 240 · 480), e RADDOPPIA ANCORA se prima hai usato
+       Ricciolscudo. Il contatore lo tiene `aggiornaVincolo`, che gira prima
+       del danno: al primo colpo vale 1, quindi 2^0 = potenza base. */
+    const rot = attacker.volatile && attacker.volatile.rotola;
+    if (rot && rot.id === move.id) {
+      power *= Math.pow(2, Math.min(4, rot.colpi - 1));
+      if (attacker.volatile.arricciato) power *= 2;
+    }
+    /* FORBICIDÀNZA (×2 fino a tre) ed ECHEGGIAVOCE (+40 fino a cinque):
+       crescono usandole di fila, ma non vincolano niente. */
+    const con = attacker.volatile && attacker.volatile.consec;
+    if (con && con.id === move.id && CRESCE[move.id]) {
+      power = CRESCE[move.id].doppia
+        ? power * Math.pow(2, con.n - 1)
+        : power * con.n;
+    }
     const lowHp = findAb(attacker, "lowHpTypeBoost");
     if (lowHp && move.type === lowHp.moveType && attacker.hp <= attacker.maxHp / 3) power *= lowHp.mult;
     const tb = findAb(attacker, "typeBoost");
@@ -5751,11 +5776,131 @@
   /*  RISOLUZIONE DEL TURNO                                                  */
   /* ---------------------------------------------------------------------- */
   // L'IA nemica sceglie una mossa (a caso tra quelle con PP).
+  /* ======================================================================
+     🔴 LE MOSSE CHE VINCOLANO IL TURNO DOPO
+
+     Tre famiglie, tre regole diverse, e nessuna delle tre c'era.
+
+     FURIA (Colpo, Petalodanza, Oltraggio, Ira Furente) — `FrenzyAttr`
+       nell'originale. Chi la usa la ripete per 1-2 turni in piu' senza poter
+       scegliere altro, e quando finisce resta CONFUSO. Da noi erano quattro
+       mosse da 120 di potenza senza contropartita: le migliori del gioco.
+
+     ROTOLAMENTO (Rotolamento, Palla Gelo). Fino a CINQUE turni di fila, e la
+       potenza RADDOPPIA ogni volta: 30 · 60 · 120 · 240 · 480 (il doppio
+       ancora se prima hai usato Ricciolscudo). Basta un colpo a vuoto e
+       riparte da 30. Nell'originale sono marcate `.partial()` — «non
+       vincolano, e la potenza non cresce bene» — quindi qui la regola giusta
+       e' quella dei giochi, non quella del codice sorgente.
+
+     BARAONDA. Tre turni di fila, e mentre dura NESSUNO puo' addormentarsi.
+
+     E due che crescono senza vincolare: Forbicidànza (×2 fino a tre volte) e
+     Echeggiavoce (+40 fino a cinque).
+     ====================================================================== */
+  const FURIA = new Set(["THRASH", "PETAL_DANCE", "OUTRAGE", "RAGING_FURY"]);
+  const ROTOLA = { ROLLOUT: 5, ICE_BALL: 5 };
+  const CRESCE = { FURY_CUTTER: { max: 3, doppia: true }, ECHOED_VOICE: { max: 5, doppia: false } };
+  const VINCOLO_IT = {
+    charging: "si sta caricando",
+    furia: "è in preda alla furia",
+    rotola: "non riesce a fermarsi",
+    baraonda: "sta facendo baraonda",
+  };
+
+  /* La mossa che quel Pokemon DEVE usare, se ne ha una imposta. Ritorna
+     l'istanza (con i suoi PP) e il perche', che serve a scriverlo a schermo. */
+  function mossaObbligata(chi) {
+    if (!chi || chi.fainted || !chi.moves) return null;
+    const v = chi.volatile || {};
+    const quale = v.charging ? ["charging", v.charging.move]
+      : v.furia ? ["furia", v.furia.id]
+      : v.rotola ? ["rotola", v.rotola.id]
+      : v.baraonda ? ["baraonda", v.baraonda.id]
+      : null;
+    if (!quale) return null;
+    const inst = chi.moves.find(m => m.id === quale[1]);
+    return inst ? { inst, perche: VINCOLO_IT[quale[0]], tipo: quale[0] } : null;
+  }
+
+  /* Il vincolo si SPEZZA: colpo a vuoto, bersaglio immune, o mossa finita.
+     ⚠️ La confusione della furia arriva solo se il vincolo si rompe all'ultimo
+     turno utile — nell'originale `FrenzyTag.onRemove` la mette se `turnCount`
+     e' sceso sotto 2, cioe' se la furia era comunque agli sgoccioli. */
+  function spezzaVincolo(chi, messages, naturale) {
+    const v = chi.volatile;
+    if (v.furia) {
+      const agliSgoccioli = naturale || v.furia.turni <= 1;
+      v.furia = null;
+      if (agliSgoccioli && !chi.fainted) {
+        stessoMomento(messages, `${chi.name} si placa…`);
+        applyConfuse(chi, messages);
+      }
+    }
+    if (v.rotola) v.rotola = null;
+    if (v.baraonda) {
+      v.baraonda = null;
+      if (messages) stessoMomento(messages, `${chi.name} si è calmato.`);
+    }
+    v.consec = null;
+  }
+
+  /* Aggiorna i contatori DOPO che la mossa e' partita davvero (precisione
+     superata). Va prima del danno, perche' la potenza di Rotolamento dipende
+     da quanti colpi ha gia' messo a segno. */
+  function aggiornaVincolo(actor, move, moveInst, messages) {
+    const v = actor.volatile;
+    if (FURIA.has(move.id)) {
+      if (!v.furia) v.furia = { id: moveInst.id, turni: 1 + Math.floor(Math.random() * 2) };
+      else if (--v.furia.turni <= 0) { v.furia = null; v._furiaFinita = true; }
+    } else if (ROTOLA[move.id]) {
+      v.rotola = (v.rotola && v.rotola.id === moveInst.id)
+        ? { id: v.rotola.id, colpi: v.rotola.colpi + 1 }
+        : { id: moveInst.id, colpi: 1 };
+      if (v.rotola.colpi >= ROTOLA[move.id]) { v._rotolaFinita = v.rotola; }
+    } else if (move.id === "UPROAR") {
+      if (!v.baraonda) {
+        // 3 turni IN TUTTO: questo piu' altri due, non questo piu' tre
+        v.baraonda = { id: moveInst.id, turni: 2 };
+        messages.push(`${actor.name} scatena una baraonda!`);
+      } else if (--v.baraonda.turni <= 0) { v.baraonda = null; v._baraondaFinita = true; }
+    } else {
+      // una mossa qualunque azzera i contatori di quelle a raffica
+      if (v.rotola) v.rotola = null;
+    }
+    // contatori delle mosse che crescono e basta
+    if (CRESCE[move.id]) {
+      v.consec = (v.consec && v.consec.id === moveInst.id)
+        ? { id: v.consec.id, n: Math.min(CRESCE[move.id].max, v.consec.n + 1) }
+        : { id: moveInst.id, n: 1 };
+    } else if (v.consec) v.consec = null;
+  }
+
+  /* Le code dei vincoli: i messaggi di chiusura vanno DOPO il colpo, o si
+     leggerebbe «si placa» prima ancora di vedere il danno. */
+  function chiudiVincoli(actor, messages) {
+    const v = actor.volatile;
+    /* ⚠️ Qui la furia e' GIA' stata tolta da `aggiornaVincolo`: non si puo'
+       passare da `spezzaVincolo`, che si regola su `v.furia` e non troverebbe
+       piu' niente da chiudere. La confusione va messa a mano. */
+    if (v._furiaFinita) {
+      v._furiaFinita = false;
+      if (!actor.fainted) {
+        stessoMomento(messages, `${actor.name} si placa…`);
+        applyConfuse(actor, messages);
+      }
+    }
+    if (v._rotolaFinita) { v._rotolaFinita = null; v.rotola = null; }
+    if (v._baraondaFinita) { v._baraondaFinita = false; stessoMomento(messages, `${actor.name} si è calmato.`); }
+  }
+
   function enemyChooseMove() { return aiChooseMove(game.enemy); }
   /* Sceglie una mossa per un combattente guidato dal computer (vale sia per gli
      avversari sia per il secondo alleato nelle lotte in doppio). */
   function aiChooseMove(f) {
     if (!f || !f.moves || !f.moves.length) return null;
+    const obb = mossaObbligata(f);       // furia, rotolamento, baraonda, carica
+    if (obb) return obb.inst;
     const usable = f.moves.filter(m => m.pp > 0);
     return usable.length ? usable[Math.floor(Math.random() * usable.length)] : f.moves[0];
   }
@@ -5882,6 +6027,21 @@
       if (!e || e.fainted || e === cambiato) continue;   // chi e' appena entrato non attacca
       const mv = e === game.enemy ? enemyChooseMove() : aiChooseMove(e);
       if (mv) actions.push({ actor: e, foe: pickFoeFor(e), move: mv });
+    }
+    /* 🔴 IL VINCOLO VALE ANCHE SE LA SCELTA E' GIA' STATA FATTA.
+       Chi è in furia, sta rotolando o è in piena baraonda non decide: il corpo
+       ripete. I pulsanti già lo impediscono, ma la scelta può essere stata
+       messa in coda PRIMA che il vincolo scattasse (in doppio il primo alleato
+       sceglie, poi il turno si risolve) — qui è dove si fa valere davvero. */
+    for (const act of actions) {
+      const obb = mossaObbligata(act.actor);
+      if (!obb) continue;
+      act.move = obb.inst;
+      /* Un turno obbligato non paga i PP: nell'originale è `MoveUseMode.IGNORE_PP`
+         — il PP l'hai speso quando la mossa l'hai scelta tu, non ogni volta che
+         il corpo la ripete. Si accredita adesso, così il consumo normale che
+         arriva dopo torna a zero. */
+      act.move.pp = Math.min(act.move.maxPp, act.move.pp + 1);
     }
     // Rapidartigli: 10% per pezzo di partire per primi comunque
     for (const act of actions) {
@@ -6350,6 +6510,9 @@
       segnaFx(messages, messages.length - 1, move.type, sideOf(foe), move.id, sideOf(actor));
       return;
     }
+    /* RICCIOLSCUDO: oltre ad alzare la Difesa lascia un segno che raddoppia
+       Rotolamento e Palla Gelo. Dura finche' resta in campo. */
+    if (move.id === "DEFENSE_CURL") actor.volatile.arricciato = true;
     if (move.id === "BIDE") {
       moveInst.pp = Math.max(0, moveInst.pp - 1);
       actor.volatile.bide = { turni: 2, danno: 0 };
@@ -6516,7 +6679,14 @@
       const lente = 1 + 0.05 * ((actor.held && actor.held.widelens) || 0);
       const chance = move.accuracy * accMult(actor.stages.acc + tempAccStages(actor) - foe.stages.eva)
         * abStatMult(actor, "ACC") * lente / abStatMult(foe, "EVA");
-      if (Math.random() * 100 >= chance) { stessoMomento(messages, `${actor.name} ha mancato il bersaglio!`); return; }
+      if (Math.random() * 100 >= chance) {
+        stessoMomento(messages, `${actor.name} ha mancato il bersaglio!`);
+        /* Un colpo a vuoto SPEZZA il vincolo: la furia si placa (e chi si placa
+           resta confuso), il rotolamento riparte da trenta. E' la regola dei
+           giochi ed e' `frenzyMissFunc` nell'originale. */
+        spezzaVincolo(actor, messages, false);
+        return;
+      }
     }
 
     /* Le tre immunita' che riguardano le mosse di STATO (vedi `statoImmune`).
@@ -6526,9 +6696,14 @@
     if (statoImmune(move, actor, foe)) {
       stessoMomento(messages, `Non ha effetto su ${foe.name}...`);
       actor.volatile.fallita = true;
+      spezzaVincolo(actor, messages, false);
       return;
     }
     actor.volatile.fallita = false;   // e' partita: Pestone torna a potenza normale
+    /* I VINCOLI (furia, rotolamento, baraonda) si contano da qui: la mossa e'
+       partita e ha superato la precisione. Prima del danno, perche' la potenza
+       di Rotolamento dipende da quanti colpi ha gia' messo a segno. */
+    if (!extra) aggiornaVincolo(actor, move, moveInst, messages);
     /* 🔴 MOSSE ESPLOSIVE: chi le usa va KO, sempre, anche se il colpo non
        fa danno o il bersaglio e' immune. Nei dati non c'e' traccia del
        sacrificio (nell'originale e' `SacrificialAttr`, che l'estrattore non
@@ -6615,6 +6790,9 @@
       if (messages.snap) messages.snap();
       messages.push(`${actor.name} si sacrifica nell'esplosione!`);
     }
+    // la furia che si spegne, il rotolamento arrivato al quinto: si legge ORA,
+    // dopo il colpo, non prima
+    if (!extra) chiudiVincoli(actor, messages);
   }
 
   /* ======================================================================
@@ -7376,6 +7554,11 @@
       if (t === "MISTY") { messages.push(`Il Campo Nebbioso protegge ${target.name}!`); return; }
       if (t === "ELECTRIC" && status === "SLEEP") { messages.push(`Il Campo Elettrico tiene sveglio ${target.name}!`); return; }
     }
+    // BARAONDA: finche' dura, il frastuono tiene sveglio chiunque
+    if (status === "SLEEP" && baraondaInCorso()) {
+      messages.push(`La baraonda tiene sveglio ${target.name}!`);
+      return;
+    }
     /* Salvaguardia: il lato protetto non prende problemi di stato.
        ⚠️ Non vale per quelli che uno si da' da solo (Riposo): li' `sourceAbility`
        manca e chi li subisce e' chi li ha voluti — il controllo sta in chi
@@ -7551,6 +7734,10 @@
     if (sigillo) return `${move.it} è sigillata da ${sigillo.name}!`;
     return null;
   }
+
+  /* Mentre c'e' una BARAONDA in corso nessuno dorme: e' la sua ragione
+     d'essere, e senza questo era solo un attacco speciale da 90. */
+  const baraondaInCorso = () => onField().some(f => f && !f.fainted && f.volatile.baraonda);
 
   function applyConfuse(target, messages) {
     if (target.fainted || target.volatile.confusion > 0) return;
@@ -9058,10 +9245,14 @@
 
   function showMoves() {
     const chi = currentChooser() || game.player;
+    /* Con un vincolo addosso la scelta non c'è: si lascia acceso solo quello
+       che il corpo sta già facendo, e si dice perché. Meglio un pulsante
+       spento con una spiegazione che un tocco che ti brucia il turno. */
+    const obb = mossaObbligata(chi);
     const buttons = chi.moves.map((mi, i) => {
       const mv = M[mi.id];
       const ty = T[mv.type];
-      const disabled = mi.pp <= 0 ? "disabled" : "";
+      const disabled = (mi.pp <= 0 && !(obb && obb.inst === mi)) || (obb && obb.inst !== mi) ? "disabled" : "";
       return `
         <button class="btn move-btn" data-i="${i}" ${disabled}
                 style="background:${ty.color};">
@@ -9076,6 +9267,7 @@
     }).join("");
 
     cmd().innerHTML = `
+      ${obb ? `<div class="vincolo-nota">${chi.name} ${obb.perche}: deve usare <b>${M[obb.inst.id].it}</b></div>` : ""}
       <div class="grid2">${buttons}</div>
       <div class="back-row two">
         <button class="btn back" data-act="desc">📖 Descrizioni</button>
@@ -10288,7 +10480,7 @@
     },
     {
       // fiery-fallout — due Volcarona scatenano un'ondata di calore
-      id: "fiery", tier: "COMMON", emoji: "🔥", title: "Passione Ardente",
+      id: "fiery", tier: "COMMON", emoji: "🔥", mon: "VOLCARONA", title: "Passione Ardente",
       text: "Un caldo innaturale avvolge la zona. Qualcosa, poco più avanti, sta bruciando.",
       waves: [40, 180],
       setup(e) { e._mon = encFoe("VOLCARONA", 1.2, { boss: true }); },
@@ -10314,7 +10506,7 @@
     },
     {
       // fight-or-flight — un Pokemon forte custodisce un oggetto
-      id: "fightflight", tier: "COMMON", emoji: "⚔️", title: "Lotta o Scappa",
+      id: "fightflight", tier: "COMMON", emoji: "⚔️", monGenerato: true, title: "Lotta o Scappa",
       text: "Un Pokémon dall'aria minacciosa sorveglia qualcosa di luccicante.",
       setup(e) { e._mon = encFoe(null, 1.25, { boss: true }); },
       optionsFor(e) {
@@ -10365,7 +10557,7 @@
     },
     {
       // lost-at-sea — serve un Pokemon d'Acqua o Volante per uscirne
-      id: "lostsea", tier: "COMMON", emoji: "🌊", title: "Perso nel Mare",
+      id: "lostsea", tier: "COMMON", emoji: "🌊", mon: "LAPRAS", title: "Perso nel Mare",
       text: "La nebbia si è alzata e hai perso l'orientamento. L'acqua è ovunque.",
       optionsFor() {
         const acqua = aliveParty().filter(p => p.types.includes("WATER"));
@@ -10436,7 +10628,7 @@
     },
     {
       // the-strong-stuff — lo Shuckle offre il suo "succo"
-      id: "strongstuff", tier: "COMMON", emoji: "🧃", title: "La Roba Forte",
+      id: "strongstuff", tier: "COMMON", emoji: "🧃", mon: "SHUCKLE", title: "La Roba Forte",
       text: "Uno Shuckle enorme ti fissa. Accanto a lui, una boccia di liquido denso e dorato.",
       setup(e) { e._mon = encFoe("SHUCKLE", 1.3, { boss: true }); },
       optionsFor(e) {
@@ -10456,7 +10648,7 @@
     },
     {
       // uncommon-breed — un esemplare raro con una mossa particolare
-      id: "uncommon", tier: "COMMON", emoji: "✨", title: "Una forma non comune",
+      id: "uncommon", tier: "COMMON", emoji: "✨", monGenerato: true, title: "Una forma non comune",
       text: "Questo Pokémon ha qualcosa di diverso dagli altri della sua specie.",
       setup(e) { e._mon = encFoe(null, 1.2, { shiny: Math.random() < 0.25 }); },
       optionsFor(e) {
@@ -10485,7 +10677,7 @@
     /* ========================= GREAT (9) ========================= */
     {
       // absolute-avarice — il Greedent ti ruba TUTTE le bacche
-      id: "avarice", tier: "GREAT", emoji: "🐿️", title: "Cupidigia Assoluta",
+      id: "avarice", tier: "GREAT", emoji: "🐿️", mon: "GREEDENT", title: "Cupidigia Assoluta",
       text: "Un Greedent ti coglie di sorpresa: tutte le tue bacche sono sparite!",
       waves: [20, 180],
       setup(e) {
@@ -10510,7 +10702,7 @@
     },
     {
       // an-offer-you-cant-refuse — ti comprano un Pokemon
-      id: "offer", tier: "GREAT", emoji: "🤝", npc: "clerk_m", title: "Un'offerta che non puoi rifiutare",
+      id: "offer", tier: "GREAT", emoji: "🤝", npc: "rich_m", title: "Un'offerta che non puoi rifiutare",
       text: "Un ragazzino ben vestito ha adocchiato uno dei tuoi Pokémon e apre il portafoglio.",
       cond: () => game.party.length > 1,
       setup(e) { e._i = Math.floor(Math.random() * game.party.length); e._prezzo = waveMoney(4); },
@@ -10567,7 +10759,7 @@
     },
     {
       // dancing-lessons — l'Oricorio che vuole ballare
-      id: "dancing", tier: "GREAT", emoji: "💃", title: "Lezioni di danza",
+      id: "dancing", tier: "GREAT", emoji: "💃", mon: "ORICORIO", title: "Lezioni di danza",
       text: "Un Oricorio si muove a tempo, come se cercasse qualcuno con cui danzare.",
       waves: [30, 180],
       setup(e) { e._mon = encFoe("ORICORIO", 1.2, { boss: true }); },
@@ -10592,7 +10784,7 @@
     },
     {
       // delibirdy — dai qualcosa ai Delibird, ricevi di meglio
-      id: "delibirdy", tier: "GREAT", emoji: "🎁", title: "Gruppo di Delibird",
+      id: "delibirdy", tier: "GREAT", emoji: "🎁", mon: "DELIBIRD", title: "Gruppo di Delibird",
       text: "Un gruppo di Delibird ti guarda trepidante, come se aspettasse un regalo.",
       setup(e) { e._costo = waveMoney(2); },
       optionsFor(e) {
@@ -10619,7 +10811,7 @@
     },
     {
       // fun-and-games — il Colpisci-o-matic di Wobbuffet
-      id: "funandgames", tier: "GREAT", emoji: "🎪", title: "Divertimento e Giochi!",
+      id: "funandgames", tier: "GREAT", emoji: "🎪", mon: "WOBBUFFET", title: "Divertimento e Giochi!",
       text: "Una bancarella con un Wobbuffet imbottito: colpiscilo più forte che puoi!",
       setup(e) { e._costo = waveMoney(1); },
       optionsFor(e) {
@@ -10677,7 +10869,7 @@
     },
     {
       // slumbering-snorlax — lo Snorlax che blocca la strada
-      id: "snorlax", tier: "GREAT", emoji: "😴", title: "Snorlax assopito",
+      id: "snorlax", tier: "GREAT", emoji: "😴", mon: "SNORLAX", title: "Snorlax assopito",
       text: "Uno Snorlax enorme dorme di traverso sul sentiero, russando come un tuono.",
       waves: [15, 150],
       setup(e) { e._mon = encFoe("SNORLAX", 1.35, { boss: true }); e._mon.status = "SLEEP"; e._mon.sleepTurns = 3; },
@@ -10781,7 +10973,7 @@
     },
     {
       // trash-to-treasure — il cumulo di rifiuti col Garbodor
-      id: "trash", tier: "ULTRA", emoji: "🗑️", title: "Da Monnezza a Meraviglia",
+      id: "trash", tier: "ULTRA", emoji: "🗑️", mon: "GARBODOR", title: "Da Monnezza a Meraviglia",
       text: "Una montagna di rifiuti alta come un palazzo. Qualcosa luccica là in mezzo.",
       waves: [100, 180],
       setup(e) { e._mon = encFoe("GARBODOR", 1.4, { boss: true }); },
@@ -10798,7 +10990,7 @@
     },
     {
       // clowning-around — il clown Mr. Mime
-      id: "clown", tier: "ULTRA", emoji: "🤡", title: "Pagliacciate",
+      id: "clown", tier: "ULTRA", emoji: "🤡", mon: "MR_MIME", title: "Pagliacciate",
       text: "Un clown ti sbarra la strada facendo smorfie. Qualcosa non torna in questo incontro.",
       waves: [80, 180],
       setup(e) { e._mon = encFoe("MR_MIME", 1.3, { boss: true }); },
@@ -10986,7 +11178,20 @@
     const avail = opts.filter(o => !o.cond || o.cond());
     const btns = avail.map((o, i) =>
       `<button class="me-opt" data-i="${i}"><span class="me-opt-l">${o.label}</span>${o.sub ? `<span class="me-opt-s">${o.sub}</span>` : ""}</button>`).join("");
-    const npc = enc.npc
+    /* 🔴 L'EMOJI AL POSTO DEL POKEMON.
+       In «Cupidigia Assoluta» compariva uno scoiattolo 🐿️: l'incontro
+       parla di un Greedent, lo fa combattere, te lo fa perfino guadagnare — e
+       in cima alla schermata c'era un'emoji generica. Vale per tutti gli
+       incontri che hanno un protagonista preciso: nell'originale ognuno porta
+       il suo `spriteKey`, e per questi e' il Pokemon stesso.
+       Adesso: se l'incontro ne ha uno (`mon`, oppure quello appena generato in
+       `setup` quando è lui il soggetto), si mostra la sua icona vera; se no
+       resta l'allenatore, e l'emoji e' l'ultima spiaggia. */
+    const specie = enc.mon || (enc.monGenerato && enc._mon && enc._mon.speciesId);
+    const dexEnc = specie && S[specie] ? S[specie].dex : null;
+    const npc = dexEnc
+      ? `<div class="me-mon">${miniIcon(dexEnc, 4.4)}</div>`
+      : enc.npc
       ? `<span class="me-npc" id="meNpc"></span>`
       : `<div class="me-emoji">${enc.emoji}</div>`;
     showMetaScreen(`

@@ -4509,3 +4509,139 @@ strongstuff→Shuckle, lostsea→Lapras, dancing→Oricorio, delibirdy→Delibir
 funandgames→Wobbuffet, snorlax→Snorlax, trash→Garbodor, clown→Mr. Mime,
 uncommon e fightflight→quello generato. E `offer` passa da `clerk_m` a `rich_m`,
 che è il `rich_kid_m` dell'originale.
+
+## 51. Le nove di Spola, più cinque a voce (rev 160)
+
+### 51.1 🔴 RIAPRENDO L'APP LA LOTTA ERA UN'ALTRA
+
+Si salvava solo **fra** un'ondata e l'altra. Riaprendo, quell'ondata si
+rigiocava con un avversario **nuovo**: chiudevi contro un Gyarados a metà vita
+e riaprivi contro un Machoke intero. Niente andava perso — la squadra tornava
+com'era a inizio ondata — ma le lotte lunghe (allenatori da cinque, boss a
+scudi) ricominciavano da zero.
+
+Nell'originale la sessione contiene anche la squadra avversaria
+(`SessionSaveData.enemyParty`). Ora `statoLotta()` salva avversari, coda,
+allenatore, meteo, terreno, effetti di campo a tempo, e `riprendiLotta()` la
+rimette in piedi. Il salvataggio si scrive in `showMainMenu`, che è l'unico
+punto fermo di una battaglia — nessuna animazione a metà.
+
+⚠️ `trainerRoster` contiene **gli stessi oggetti** di `enemy`/`enemyQueue`, non
+copie: passando da JSON quell'identità si perde e la Clepto Ball ruberebbe un
+gemello che in campo non c'è. Si salvano le **posizioni** (−1 in campo, −2 il
+secondo, 0.. la panchina) e al ritorno si riagganciano gli oggetti veri.
+
+⚠️ Con una lotta salvata `d.wave` è l'ondata **in corso**, non quelle superate:
+il riassunto dello slot deve saperlo (`d.wave + (d.lotta ? 0 : 1)`).
+
+### 51.2 🔴 LE SCRITTE ACCAVALLATE NELLA SCHERMATA PREMI — non erano i margini
+
+Alle ondate alte il titolo va a capo («Ondata 164 superata!») e i soldi
+diventano «₽ 257918». Il risultato era il titolo stampato sulla barra della
+fortuna e «Scegli un premio» sopra i contatori.
+
+Prima ipotesi (sbagliata): il flex schiacciava i blocchi. Ho messo
+`flex-shrink: 0` e non è cambiato niente. Misurando le posizioni vere:
+
+```
+shopfull   top=157 h=555 scrollH=666      ← contenuto più alto di 111px
+ └ luck-bar top=52                        ← CENTO PIXEL SOPRA IL PADRE
+```
+
+La causa è `justify-content: center`: quando il contenuto supera il riquadro,
+il flex centra lo stesso e l'eccedenza esce **da tutte e due le parti**. La
+metà di sopra finiva addosso al titolo. `safe center` centra finché ci sta e,
+quando non ci sta, riparte dall'alto — `#meta` lo usava già, `.shopfull` no.
+
+### 51.3 🔴 LA CURA DOPO OGNI BOSS NON DOVEVA ESSERCI
+
+«Dopo aver combattuto contro Rose i miei Pokémon sono stati guariti, perché?»
+Perché c'era una riga `if (wasBoss) healParty()` che l'originale non ha.
+
+Nell'originale la squadra si rimette a nuovo in **un solo** momento: quando si
+cambia zona (`select-biome-phase.ts`: `if (nextWaveIndex % 10 === 1)
+PartyHealPhase`). Da noi quella cura c'era già (`curaSquadraDecina`); la riga in
+più la raddoppiava sulle x10 e la **regalava** dove l'originale non dà niente:
+boss dei team cattivi (115, 165) e boss degli incontri misteriosi.
+
+### 51.4 Doppioni nelle squadre avversarie
+
+Rose aveva due Bastiodon. Ogni posto pescava per conto suo. Nell'originale
+`genNewPartyMemberSpecies` ha un `checkDuplicateSpecies` che rilancia il dado
+fino a dieci volte — e vale per **tutti** gli allenatori, non solo quelli di
+storia, quindi l'ho fatto uguale.
+
+⚠️ Il confronto va sulla **radice** della linea evolutiva: Shieldon + Bastiodon
+è comunque due volte lo stesso Pokémon.
+
+### 51.5 🔴 I LEGGENDARI ERANO OVUNQUE
+
+`pickThemed` sceglie per fascia di potenza: `target = min(600, 240 + lv*6)`, chi
+ha il totale base entro 110. Dal livello 60 in su il bersaglio è incollato a
+600, cioè la finestra **490-710** — dentro ci sono i pseudo-leggendari ma anche
+Mewtwo, Rayquaza, Zacian, Arceus. A metà run ogni allenatore di passaggio
+schierava roba da copertina.
+
+Nell'originale i leggendari stanno nei ripiani ULTRA_RARE/SUPER_RARE, sotto
+l'1% dei tiri. Da noi una quota per tiro: 2% di serie, 12% per Superquattro e
+Campione, 50% sull'asso del boss di un team cattivo.
+
+⚠️ Il dado si tira **per tiro**, non per specie: filtrare il pool e poi pescare
+darebbe a ogni leggendario la stessa probabilità di un Rattata, ed essendo tanti
+tornerebbero a riempire la squadra. Misurato dopo: 0 leggendari su 150 Pokémon
+di allenatori comuni a livello 130.
+
+### 51.6 🔴 PRESARTIGLI FUNZIONAVA — mancava la roba da rubare
+
+«Ok che ha solo il 10%, ma non sono riuscito a rubare nulla in 100 lotte.»
+
+Misurato: con un bersaglio che tiene qualcosa, **23 furti su 200** — il 10%
+esatto, uguale all'originale
+(`ContactHeldItemTransferChanceModifierType(..., 10)`). Il problema stava
+altrove: all'ondata 45, **28 avversari su 35 non avevano niente addosso**.
+Tasso vero: **0,7% per colpo**. Per un premio di fascia ROGUE è come non averlo.
+
+`giveEnemyHeldItems` dava una possibilità su 18 per ogni decina d'ondata. Ora
+una su 12. Misurato dopo:
+
+| ondata | avversari con qualcosa | furti per colpo |
+|---|---|---|
+| 45 | 11/25 (era 7/35) | 3,0% |
+| 100 | 25/25 | 13,0% |
+| 160 | 25/25 | 5,0% |
+
+Ne beneficiano anche Prestigiatore, Ladrocinio e Bramosia. E la descrizione
+adesso dice la verità: «10% al contatto di rubargli un oggetto (**se ne ha**)».
+
+### 51.7 Le altre
+
+- **Clepto Ball da ×2 a ×5.** Valeva come un'Ultra Ball, che però si compra
+  quando vuoi: la Clepto la lascia cadere solo un team cattivo (cinque volte in
+  tutta la run), è l'unico modo di prendere il Pokémon di un allenatore, e hai
+  **un tiro solo** su un bersaglio a piena vita. Non diventa una Master Ball:
+  `captureChancePct` eleva a 4, quindi da 2 a 5 il tiro raddoppia scarso — un
+  Copperajah si prende quasi sempre, uno Zacian resta al 29%.
+- **La schermata del furto dice quello che dice quella di cattura**
+  (`infoCattura`, estratta da `renderCaptureScreen`): mai catturato / sblocca X
+  come starter / che abilità ha / se ce l'hai già / IV. ⚠️ `badgeIV` filtrava su
+  `isEnemySide`, e i candidati al furto sono in panchina: la riga spariva
+  proprio dove la scelta è irreversibile.
+- **Il boss finale si può catturare anche dopo averlo battuto.** Durante la
+  lotta era già catturabile (scelta nostra, l'originale lo blocca), ma la
+  schermata di vittoria partiva subito: l'unico Pokémon della run che non
+  potevi provare a prendere era proprio quello per cui hai giocato 200 ondate.
+- **Le mosse su di sé non le para nessuno.** Protezione, Volo/Sub/Fossa e le
+  protezioni di squadra fermavano anche Danzaspada, Agilità, Riposo, Ballo
+  Pioggia. Nell'originale il controllo (`ProtectedTag.apply`) gira solo sul
+  **bersaglio** del colpo: se il bersaglio sei tu, non lo attraversa mai.
+- **L'ordine della squadra segue il campo.** Nell'originale il cambio è uno
+  scambio di posti (`party[slotIndex] = lastPokemon; party[fieldIndex] =
+  switchedIn`), quindi in testa c'è sempre chi è in campo — il primo in
+  singolo, i primi due in doppio. Da noi si spostava solo `game.active`, e dopo
+  un doppio l'ordine non voleva più dire niente.
+
+### 51.8 Sonde nuove
+
+```js
+__items.furto(2)        // apre la schermata del furto senza vincere la lotta
+```

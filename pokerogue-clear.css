@@ -1420,6 +1420,19 @@ button.pd-card:not(:disabled):active { background: rgba(255,255,255,.14); }
 #trainer-balls .tb.active { box-shadow: 0 0 0 2px #ffe066, 0 0 6px #ffe066; border-radius: 50%; }
 
 /* Mystery encounter */
+/* Perche' le altre mosse sono spente: furia, rotolamento, baraonda, carica. */
+.vincolo-nota {
+  margin: 0 2px 5px; padding: 5px 9px; border-radius: 9px;
+  background: rgba(255,214,74,.12); border: 1px solid rgba(255,214,74,.35);
+  color: #ffe08a; font-size: clamp(12px, 3.4vw, 15px); line-height: 1.25; text-align: center;
+}
+.vincolo-nota b { color: #fff; }
+
+/* Il protagonista dell'incontro, quando e' un Pokemon: stessa altezza che
+   avrebbe avuto l'emoji, cosi' la carta non cambia forma. */
+.me-mon { text-align: center; margin: 1vh 0; min-height: clamp(62px, 20vw, 104px);
+          display: flex; align-items: center; justify-content: center; }
+.me-mon .mini-icon { filter: drop-shadow(0 4px 8px rgba(0,0,0,.45)); }
 .me-emoji { text-align: center; font-size: clamp(56px, 18vw, 96px); line-height: 1.1; margin: 1vh 0; filter: drop-shadow(0 4px 8px rgba(0,0,0,.4)); }
 .me-text { text-align: center; font-size: clamp(13px, 3.8vw, 18px); line-height: 1.4; opacity: .92; padding: 0 2vw; }
 .me-opts { display: flex; flex-direction: column; gap: 1.4vh; }
