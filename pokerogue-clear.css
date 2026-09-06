@@ -514,6 +514,11 @@ html, body {
   padding: 1px 5px; font-size: .82em; font-weight: 800; letter-spacing: .3px;
 }
 .cap-iv { display: flex; justify-content: center; margin: 0; }
+/* Nella schermata del furto i candidati sono cinque: le stesse righe, strette. */
+.me-opt.furto { align-items: stretch; }
+.me-opt.furto .cap-info { gap: 3px; margin: 5px 0 1px; width: 100%; }
+.me-opt.furto .cap-riga { font-size: clamp(10px, 2.9vw, 13px); padding: 3px 9px; line-height: 1.2; }
+.me-opt.furto .cap-iv .iv-chip { font-size: 10px; padding: 3px 5px; }
 .cap-iv .iv-badges { justify-content: center; }
 .cap-iv .iv-chip { font-size: 11px; padding: 4px 7px; }
 
@@ -825,7 +830,7 @@ html, body {
 .cap-sub { font-size: clamp(10px, 2.8vw, 13px); font-weight: 600; opacity: .95; margin-top: 3px; }
 
 /* Schermata finale (vittoria/sconfitta) */
-.endbox { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3vh; text-align: center; padding: 10px; }
+.endbox { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: safe center; gap: 3vh; text-align: center; padding: 10px; }
 .endbox .title { font-size: clamp(28px, 8vw, 44px); font-weight: 800; }
 .endbox .title.win  { color: var(--hp-green); }
 .endbox .title.lose { color: var(--hp-red); }
@@ -907,6 +912,30 @@ html, body {
    in quel caso il centraggio non lascia vuoti; le schermate corte (home/ME/
    risultato) restano invece centrate verticalmente. Larghezza max leggibile. */
 #meta > * { width: 100%; max-width: 460px; margin-inline: auto; }
+/* 🔴 LE SCRITTE CHE SI ACCAVALLANO.
+   `#meta` e' una colonna flex, e in flex gli elementi si RESTRINGONO di
+   default. Quando il contenuto supera l'altezza dello schermo — e succede
+   nella schermata dei premi alle ondate alte, dove il titolo va a capo
+   («Ondata 164 superata!») e la riga dei soldi diventa «₽ 257918» — il
+   riquadro di ogni blocco veniva compresso sotto la sua altezza vera, ma il
+   TESTO dentro no: usciva e finiva sopra il blocco dopo. Da qui il titolo
+   scritto sulla barra della fortuna e «Scegli un premio» sopra i contatori.
+   Non era un problema di margini: era il flex che schiacciava.
+   Adesso queste righe tengono la loro altezza e, se non ci stanno, si scorre —
+   `#meta` ha gia' `overflow-y: auto`. L'unico che puo' cedere spazio resta il
+   blocco a lista (`.shopfull`, `.st-list`), che ha il suo `flex: 1`. */
+#meta > .meta-title,
+#meta > .meta-sub,
+#meta > .meta-stats,
+#meta > .shop-head,
+#meta > .luck-bar,
+#meta > .cap-info,
+#meta > .me-text,
+#meta > .me-mon,
+#meta > .me-emoji,
+#meta > .meta-actions,
+.shopfull > .meta-sub,
+.shopfull > .luck-bar { flex-shrink: 0; }
 .meta-title { text-align: center; font-size: clamp(24px, 7vw, 40px); font-weight: 800; letter-spacing: .5px; }
 .meta-title .accent2 { color: #ff9c54; }
 .meta-sub { text-align: center; font-size: clamp(12px, 3.2vw, 16px); opacity: .8; margin-top: .4vh; }
@@ -945,7 +974,7 @@ html, body {
 .meta-btn .sub { display: block; font-size: clamp(11px, 3vw, 14px); font-weight: 600; opacity: .9; margin-top: 3px; }
 
 /* Gacha */
-.gacha-stage { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2vh; text-align: center; }
+.gacha-stage { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: safe center; gap: 2vh; text-align: center; }
 .egg-big { font-size: clamp(70px, 22vw, 120px); line-height: 1; filter: drop-shadow(0 6px 10px rgba(0,0,0,.4)); }
 .egg-big.shake { animation: eggshake .5s ease infinite; }
 @keyframes eggshake { 0%,100%{transform:rotate(0)} 25%{transform:rotate(-12deg)} 75%{transform:rotate(12deg)} }
@@ -1057,7 +1086,16 @@ html, body {
 .ball-icon { width: 30px; height: 30px; object-fit: contain; image-rendering: pixelated; }
 
 /* Negozio a schermo intero (dentro #meta) */
-.shopfull { display: flex; flex-direction: column; justify-content: center; gap: 1.8vh; flex: 1; min-height: 0; }
+/* 🔴 `safe` NON E' UN DETTAGLIO: e' la causa delle scritte accavallate.
+   Con `justify-content: center` e contenuto piu' alto del riquadro, il flex
+   centra lo stesso e l'eccedenza esce DA TUTTE E DUE LE PARTI: meta' sotto e
+   meta' SOPRA. Alle ondate alte la lista dei premi supera l'altezza, e i primi
+   figli (la barra della fortuna, «Scegli un premio») finivano cento pixel
+   sopra il proprio riquadro, cioe' stampati addosso al titolo e ai contatori.
+   Non era un problema di margini ne' di font: era il centraggio.
+   `safe center` centra finche' ci sta e, quando non ci sta, riparte dall'alto.
+   `#meta` lo usava gia'; questo blocco no. */
+.shopfull { display: flex; flex-direction: column; justify-content: safe center; gap: 1.8vh; flex: 1; min-height: 0; }
 .shop-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 1.4vh; }
 .shop-card {
   border: none; border-radius: 14px; color: #fff; font-family: inherit; cursor: pointer;

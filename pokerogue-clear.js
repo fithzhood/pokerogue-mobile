@@ -1374,7 +1374,31 @@
   };
 
   // Rende attivo il Pokemon `i` della squadra (aggiorna game.player).
-  function setActive(i) { game.active = i; game.player = game.party[i]; }
+  /* 🔴 L'ORDINE DELLA SQUADRA SEGUE IL CAMPO.
+     Nell'originale il cambio e' uno SCAMBIO DI POSTI, non un puntatore che si
+     sposta: `switch-summon-phase.ts` fa
+         party[slotIndex] = lastPokemon;  party[fieldIndex] = switchedInPokemon;
+     cioe' chi entra prende il posto di chi esce. Cosi' la squadra ha SEMPRE in
+     testa chi sta in campo: il primo in singolo, i primi due in doppio.
+     Da noi l'array non si toccava e si muoveva solo `game.active`. Bastavano
+     due cambi — e in doppio bastava la lotta — perche' l'ordine nel pannello
+     squadra non volesse piu' dire niente, e chi scendeva in campo all'ondata
+     dopo diventava una sorpresa.
+     ⚠️ Va tenuto anche l'invariante `game.active === indice di game.player`:
+     lo leggono le schermate che spostano Pokemon nel PC. */
+  function scambiaInSquadra(p, posto) {
+    const i = game.party.indexOf(p);
+    if (i < 0 || i === posto || posto < 0 || posto >= game.party.length) return;
+    const altro = game.party[posto];
+    game.party[posto] = p;
+    game.party[i] = altro;
+  }
+  function ordinaSquadra() {
+    if (game.player) scambiaInSquadra(game.player, 0);
+    if (game.player2 && game.player2 !== game.player) scambiaInSquadra(game.player2, 1);
+    if (game.player) game.active = game.party.indexOf(game.player);
+  }
+  function setActive(i) { game.active = i; game.player = game.party[i]; ordinaSquadra(); }
   function aliveParty() { return game.party.filter(p => !p.fainted); }
   function firstAliveIndex() { return game.party.findIndex(p => !p.fainted); }
   // Cura completa dell'intera squadra (dopo un boss / cambio zona).
@@ -1448,6 +1472,15 @@
     get pool() { return REWARD_POOL; },
     stock: (w) => { const o = game.wave; game.wave = w; const s = shopStock(); game.wave = o; return s; },
     stones: () => usefulStones(),
+    /* Apre la schermata del FURTO sull'allenatore in campo, senza dover prima
+       vincere la lotta: e' l'unico modo di guardarla senza arrivarci giocando
+       (serve un team cattivo, che compare cinque volte in tutta la run). */
+    furto: (quante) => {
+      if (!game.trainerRoster || !game.trainerRoster.length) return "serve un allenatore in campo";
+      game.theftballs = quante || 2;
+      offerSteal();
+      return "furto aperto su " + game.trainerName;
+    },
     /* Fa vedere UN LANCIO con un numero di oscillazioni deciso da te, senza
        consumare ball ne' chiudere il turno: e' l'unico modo di confrontare a
        occhio «una scossa» e «due», che giocando escono a caso.
@@ -2526,6 +2559,10 @@
      ⚠️ Prima lo faceva `resetForBattle`, che pero' veniva chiamata anche a ogni
      CAMBIO: cambiare Pokemon spazzava via il meteo a meta' battaglia. */
   function fineBattaglia() {
+    /* Chiusa la lotta, l'ordine si assesta: in doppio i due che erano in campo
+       restano primo e secondo, ed e' l'ordine con cui li ritrovi all'ondata
+       dopo. Senza questo, dopo un doppio la squadra tornava mescolata. */
+    ordinaSquadra();
     game.weather = null; game.terrain = null;
     game.tentativiFuga = 0;      // ogni lotta riparte da capo
     game.cambiAi = 0;            // e cosi' i cambi dell'avversario
@@ -2935,11 +2972,59 @@
   }
   // Pesca una specie di uno dei `types`, con forza adeguata al livello:
   // a livelli bassi preferisce base-stat basse, a livelli alti quelle alte.
-  function pickThemed(types, level) {
+  /* Una specie a tema che NON sia gia' nella squadra che si sta costruendo.
+     🔴 Gli allenatori uscivano con due Pokemon uguali — Rose con due
+     Bastiodon — perche' ogni posto pescava per conto suo. Nell'originale non
+     succede: `genNewPartyMemberSpecies` ha un `checkDuplicateSpecies` che
+     rilancia il dado fino a dieci volte (`trainer.ts`), e vale per TUTTI gli
+     allenatori, non solo per quelli di storia.
+     ⚠️ Il confronto e' sulla RADICE della linea evolutiva: due Bastiodon si
+     riconoscono anche se uno arriva da Shieldon e l'altro no, e una squadra
+     con Shieldon + Bastiodon resta comunque una squadra con due volte lo
+     stesso Pokemon. */
+  function pickThemedNuovo(types, level, presi, quotaLeggendari) {
+    for (let t = 0; t < 10; t++) {
+      const k = pickThemed(types, level, quotaLeggendari);
+      if (!presi.has(rootOf(k))) { presi.add(rootOf(k)); return k; }
+    }
+    return pickThemed(types, level, quotaLeggendari);   // pool troppo stretto: ci si arrende
+  }
+
+  /* Chi sta nella FASCIA LEGGENDARIA: leggendari, semi-leggendari (ci stanno
+     le Ultracreature) e misteriosi. Gli stessi filtri di `specieDaIncontro`. */
+  const fasciaLeggendaria = k => {
+    const sp = S[k];
+    return !!sp && !!(sp.leggendario || sp.semiLeggendario || sp.misterioso
+                      || sp.eggTier === "LEGENDARY" || (sp.starterCost || 0) >= 8);
+  };
+
+  /* 🔴 I LEGGENDARI ERANO OVUNQUE.
+     `pickThemed` sceglie per FASCIA DI POTENZA: `target = min(600, 240 + lv*6)`
+     e prende chi ha il totale base entro 110 da li'. Dal livello 60 in su il
+     bersaglio e' incollato a 600, cioe' la finestra 490-710 — dentro ci sono
+     tutti i pseudo-leggendari ma anche Mewtwo, Rayquaza, Zacian, Arceus. Il
+     risultato e' che a meta' run ogni allenatore di passaggio schierava roba
+     da copertina.
+     Nell'originale i leggendari stanno nei ripiani ULTRA_RARE/SUPER_RARE dei
+     pool degli allenatori, cioe' sotto l'1% dei tiri (`genNewPartyMemberSpecies`
+     sorteggia su 512 e solo i valori 0-5 arrivano li').
+     Da noi: una quota per tiro. Bassa di serie, piu' alta per chi nei giochi
+     un leggendario ce l'ha davvero — Superquattro, Campione, boss dei team. */
+  const QUOTA_LEGGENDARI = 0.02;
+
+  function pickThemed(types, level, quotaLeggendari) {
     if (!SPECIES_BY_TYPE) buildTypeIndex();
     let pool = [];
     if (types && types.length) for (const t of types) pool = pool.concat(SPECIES_BY_TYPE[t] || []);
     if (!pool.length) pool = SPECIES_KEYS;
+    const quota = quotaLeggendari == null ? QUOTA_LEGGENDARI : quotaLeggendari;
+    /* ⚠️ Il dado si tira PER TIRO, non per specie: filtrare il pool e poi
+       pescare darebbe a ogni leggendario la stessa probabilita' di un Rattata,
+       ed essendo tanti tornerebbero a riempire la squadra. */
+    if (Math.random() >= quota) {
+      const senza = pool.filter(k => !fasciaLeggendaria(k));
+      if (senza.length >= 4) pool = senza;      // se il tema ne ha pochi, si tiene tutto
+    }
     const bst = k => { const b = S[k].baseStats; return b.hp + b.atk + b.def + b.spatk + b.spdef + b.spd; };
     // fascia di potenza in base al livello (BST tipica: 200 debole → 600 forte)
     const target = Math.min(600, 240 + level * 6);
@@ -3072,8 +3157,9 @@
        (se no, aggiunti alla wave 195, sarebbero cuccioli); quelli che c'erano
        gia' non si toccano: crescono da soli con `evolvedFormFor`. */
     while (r.length < count) {
+      // il confronto va sulla RADICE: Applin e Hydrapple sono lo stesso Pokemon
       let k = null;
-      for (let t = 0; t < 25 && (!k || r.some(x => x.sp === k)); t++) k = pickThemed(null, eLevel);
+      for (let t = 0; t < 25 && (!k || r.some(x => rootOf(x.sp) === rootOf(k))); t++) k = pickThemed(null, eLevel);
       r.push({ sp: k || pickThemed(null, eLevel) });
     }
     const mons = [];
@@ -3167,9 +3253,10 @@
   // Usata per Superquattro (monotipo) e Campione (qualsiasi tipo).
   function buildElite(types, eLevel, count, ownerName) {
     const mons = [];
+    const presi = new Set();
     for (let i = 0; i < count; i++) {
       const isAce = i === count - 1;
-      const key = evolvedFormFor(pickThemed(types, eLevel + 20), eLevel + 20);
+      const key = evolvedFormFor(pickThemedNuovo(types, eLevel + 20, presi, 0.12), eLevel + 20);
       const f = makeFighter(key, eLevel + (isAce ? 4 : 0), { boss: isAce, isTrainer: true, trainerTypes: types });
       f.trainer = ownerName; f.elite = true;
       mons.push(f);
@@ -3518,9 +3605,10 @@
   function buildGymLeader(leader, eLevel) {
     const count = 3 + Math.floor(game.wave / 60);   // 3-5 Pokemon
     const mons = [];
+    const presi = new Set();                        // niente due volte la stessa specie
     for (let i = 0; i < count; i++) {
       const isAce = i === count - 1;
-      const key = evolvedFormFor(pickThemed([leader.type], eLevel + (isAce ? 8 : 0)), eLevel + (isAce ? 6 : 0));
+      const key = evolvedFormFor(pickThemedNuovo([leader.type], eLevel + (isAce ? 8 : 0), presi), eLevel + (isAce ? 6 : 0));
       const f = makeFighter(key, eLevel + (isAce ? 3 : 0), { boss: isAce, isTrainer: true, trainerTypes: [leader.type] });
       f.trainer = leader.name; f.gym = true;
       mons.push(f);
@@ -3762,9 +3850,11 @@
       else if (evilKind === "admin") { const a = evil.admins[Math.floor(Math.random() * evil.admins.length)]; who = `${a[0]} (${evil.name})`; sprite = a[1]; }
       else { who = `Recluta ${evil.name}`; sprite = evil.grunt[Math.floor(Math.random() * evil.grunt.length)]; }
       const mons = [];
+      const presi = new Set();
       for (let i = 0; i < count; i++) {
         const isAce = i === count - 1;
-        const key = evolvedFormFor(pickThemed(evil.types, lvl), lvl);
+        const key = evolvedFormFor(pickThemedNuovo(evil.types, lvl, presi,
+          evilKind === "boss" && isAce ? 0.5 : evilKind === "boss" ? 0.06 : QUOTA_LEGGENDARI), lvl);
         const f = makeFighter(key, lvl + (isAce ? 2 : 0),
           { boss: isAce && evilKind === "boss", isTrainer: true, trainerTypes: evil.types });
         f.trainer = who; f.evil = true;
@@ -3801,9 +3891,10 @@
       const count = game.wave >= 20 ? 3 : 2;
       const cls = TRAINER_CLASSES[Math.floor(Math.random() * TRAINER_CLASSES.length)];
       const mons = [];
+      const presi = new Set();
       for (let i = 0; i < count; i++) {
         // squadra COERENTE col tema della classe (dex completa = varietà vera)
-        const key = evolvedFormFor(pickThemed(cls.types, eLevel), eLevel);
+        const key = evolvedFormFor(pickThemedNuovo(cls.types, eLevel, presi), eLevel);
         const f = makeFighter(key, eLevel, { shiny: rollShiny(), isTrainer: true, trainerTypes: cls.types });
         f.trainer = cls.name;
         mons.push(f);
@@ -4331,11 +4422,28 @@
       // 🎀 IL FIOCCO si prende QUI, e solo qui: e' il premio della vittoria
       const fiocchi = [];
       assegnaFiocchi(fiocchi);
+      /* 🔴 L'ULTIMA BALL SUL BOSS FINALE.
+         Durante la lotta il boss finale E' catturabile — `ballBlockReason` lo
+         lascia passare apposta, ed e' una scelta nostra, diversa
+         dall'originale che lo blocca. Ma se lo battevi invece di prenderlo, la
+         schermata di vittoria partiva subito e il tiro di cortesia di fine
+         ondata non arrivava mai: l'unico Pokemon della run che non potevi
+         nemmeno provare a prendere era proprio quello per cui hai giocato
+         duecento ondate.
+         Adesso l'ultima ball viene PRIMA della vittoria — la run e' comunque
+         vinta, il tiro e' un di piu'. */
       queueMessages(fiocchi.concat([
         `${game.enemy.name} è stato sconfitto!`,
         `«…magnifico.»`,                       // `secondStageWin` dei testi ufficiali
         `🏆 HAI COMPLETATO LA MODALITÀ CLASSICA!`,
-      ]), () => renderRunVictory());
+      ]), () => {
+        if (!game.capturedThisWave && totalBalls() > 0) {
+          dopoUltimaBall = () => renderRunVictory();
+          offerCapture();
+          return;
+        }
+        renderRunVictory();
+      });
       return;
     }
     const wasEvilBoss = !!game.enemy.evil && !!game.enemy.boss;
@@ -4420,8 +4528,17 @@
     tickEggs(messages);
     // i boss danno un voucher per il gacha
     if (wasBoss) { meta.vouchers++; saveMeta(); messages.push("🎟 Ottieni un Voucher Uovo!"); }
-    // dopo un boss: ci si ferma a riposare, squadra curata
-    if (wasBoss) { healParty(); messages.push("Ti fermi a riposare: la squadra recupera le forze!"); }
+    /* 🔴 QUI C'ERA UNA CURA COMPLETA DOPO OGNI BOSS, e non doveva esserci.
+       Nell'originale la squadra si rimette a nuovo in UN SOLO momento: quando
+       si cambia zona, cioe' quando l'ondata dopo e' una x1
+       (`select-biome-phase.ts`: `if (nextWaveIndex % 10 === 1) PartyHealPhase`).
+       Da noi la cura c'era gia' li' (`curaSquadraDecina`, da `showBiomeChoice`),
+       e questa riga la RADDOPPIAVA sulle ondate x10 — ma soprattutto la
+       regalava dove l'originale non da' niente: i boss dei team cattivi
+       (115 e 165) e i boss degli incontri misteriosi (Greedent, Snorlax,
+       Volcarona, Shuckle, Garbodor, Mr. Mime). Battevi Rose a meta' vita e ti
+       ritrovavi la squadra intera in piedi, senza spiegazione.
+       Il voucher qui sopra invece resta: quello e' un premio, non una cura. */
     // THEFT BALL: bottino esclusivo dei team cattivi (più forte = più ball)
     if (game.enemy.evil) {
       // quantità dal RANGO dell'avversario: recluta 1 · admin 2 · boss 4
@@ -4761,7 +4878,17 @@
        Pokemon agli allenatori. Nella stessa famiglia stanno il Team Clepto
        (Team Snagem) e la Cleptatrice (Snag Machine).
        ⚠️ La chiave interna resta `theftballs`: sta dentro i salvataggi. */
-    { key: "theftballs",  it: "Clepto Ball", mult: 2, theft: true },
+    /* 🔴 Valeva 2, come un'Ultra Ball, e non aveva senso: un'Ultra Ball la
+       compri all'emporio quando vuoi, una Clepto Ball la lascia cadere solo un
+       team cattivo (1 recluta · 2 admin · 4 boss, cinque volte in tutta la
+       run) ed e' l'UNICO modo di prendere il Pokemon di un allenatore — che
+       non puoi indebolire, addormentare, o riprovare. Un tiro solo, contro un
+       bersaglio a piena vita. Adesso vale 5: fra la Rogue Ball e la Master.
+       ⚠️ Non diventa una Master Ball: la percentuale cresce come la radice
+       quarta della potenza (`captureChancePct` eleva a 4), quindi da 2 a 5 il
+       tiro raddoppia scarso. Un Copperajah si prende quasi sempre, un Heatran
+       resta una scommessa — ed è giusto cosi'. */
+    { key: "theftballs",  it: "Clepto Ball", mult: 5, theft: true },
     { key: "masterballs", it: "Master Ball", mult: 255 },
   ];
   function totalBalls() { return BALL_TYPES.reduce((s, b) => s + (game[b.key] || 0), 0); }
@@ -4770,15 +4897,29 @@
      Meccanica esclusiva di questo gioco: nell'originale i Pokémon degli
      allenatori NON sono catturabili. Probabilità come Ultra Ball (x2), il
      Rivale è immune. */
+  /* La potenza della Clepto Ball sta in un posto solo: la tabella delle ball.
+     Prima il 2 era scritto a mano anche qui, e cambiarlo in un posto lasciava
+     l'altro indietro. */
+  const MULT_CLEPTO = (BALL_TYPES.find(b => b.key === "theftballs") || { mult: 5 }).mult;
+
   function offerSteal() {
     game.phase = "STEAL";
     clearTimeout(game.timer);
     const roster = game.trainerRoster.filter(m => !S[m.speciesId].noSprite);
+    /* 🔴 Qui si sceglie su CHI spendere l'unica Clepto Ball della run, e la
+       riga diceva soltanto nome, tipi e percentuale. La stessa identica
+       domanda, sull'ultima ball di fine lotta, ha davanti tre righe che la
+       rendono decidibile — mai catturato? che abilita' ha? ce l'ho gia' nello
+       starter? — piu' gli IV. Adesso le due schermate mostrano le stesse cose
+       (`infoCattura`), qui in versione stretta perche' i candidati sono cinque.
+       Lo scanner e' sempre acceso, come nella schermata di cattura: e' una
+       decisione irreversibile, non si tiene nascosto niente. */
     const rows = roster.map((m, i) => {
-      const pct = captureChancePct(m, 2, 1);
-      return `<button class="me-opt" data-i="${i}">
+      const pct = captureChancePct(m, MULT_CLEPTO, 1);
+      return `<button class="me-opt furto" data-i="${i}">
         <span class="me-opt-l">${miniIcon(m.dex, 1.1)}${m.name} Lv.${m.level}</span>
-        <span class="me-opt-s">${m.types.map(t => T[t].it).join("/")} · riuscita ~${pct}%</span></button>`;
+        <span class="me-opt-s">${m.types.map(t => T[t].it).join("/")} · riuscita ~${pct}%</span>
+        ${infoCattura(m)}</button>`;
     }).join("");
     showMetaScreen(`
       <div class="meta-title" style="font-size:clamp(19px,5.6vw,29px)">🕶 Furto</div>
@@ -4794,7 +4935,7 @@
          una riga di testo. Adesso il derubato torna in campo e la ball vola
          addosso a lui, con le scosse che ha retto davvero — la stessa
          animazione dell'ultima ball. */
-      const esito = rollCaptureDettaglio(m, 2, 1);
+      const esito = rollCaptureDettaglio(m, MULT_CLEPTO, 1);
       const caught = esito.preso;
       game.enemy = m;                       // torna in campo per farsi vedere
       m.spr = null;
@@ -4899,6 +5040,7 @@
       game.party[i] = mon;
       // se se n'e' andato quello in campo, scende subito il nuovo
       if (game.active === i) setActive(i);
+      else ordinaSquadra();          // e comunque in testa restano quelli in campo
       renderScene();
       chiudi(`${uscito.name} va al PC. ${mon.name} prende il suo posto!`);
     });
@@ -5011,8 +5153,17 @@
     saveMeta();
   }
 
+  /* Dove si va dopo l'ultima ball. Di solito l'emporio; dopo il boss finale la
+     schermata di vittoria (vedi `vittoriaOndata`). Si azzera da sola. */
+  let dopoUltimaBall = null;
+  const finitaLaCattura = () => {
+    const poi = dopoUltimaBall || openShop;
+    dopoUltimaBall = null;
+    poi();
+  };
+
   function offerCapture() {
-    if (totalBalls() <= 0) { openShop(); return; } // nessuna ball → salta
+    if (totalBalls() <= 0) { finitaLaCattura(); return; } // nessuna ball → salta
     game.phase = "CAPTURE";
     renderCaptureScreen();
   }
@@ -5052,7 +5203,7 @@
     } else {
       messages.push(`Oh no! ${enemy.name} si è liberato!`);
     }
-    queueMessages(messages, () => chiediPostoInSquadra(() => openShop()));
+    queueMessages(messages, () => chiediPostoInSquadra(finitaLaCattura));
   }
 
   // Estrae frame 0 + dimensioni foglio da un atlas, gestendo i due formati
@@ -6240,7 +6391,7 @@
       // ---- SECONDO slot: si sostituisce `player2`, il primo ha gia' scelto --
       log.push(conBall(`Ritirati, ${game.player2.name}!`, "ritiro", "player2"));
       richiamaNellaBall(game.player2);
-      game.player2 = entrante;
+      game.player2 = entrante; ordinaSquadra();
       entraInCampo(entrante, log);
       entrante.spr = null;
       loadFighterSprite(entrante, "back").then(s => { entrante.spr = s; redrawScene(); });
@@ -6376,7 +6527,7 @@
       if (game.player2 && game.player2.fainted) {
         const riserva = game.party.find(p => !p.fainted && p !== game.player && p !== game.player2);
         richiamaNellaBall(game.player2);   // esce dal campo: via gli sbalzi
-        game.player2 = riserva || null;
+        game.player2 = riserva || null; ordinaSquadra();
         if (game.player2) { entraInCampo(game.player2); loadFighterSprite(game.player2, "back").then(s => { game.player2.spr = s; redrawScene(); }); }
       }
       // se il PRIMO avversario cade ma il secondo e' vivo, la lotta continua:
@@ -6535,7 +6686,7 @@
     if (actor.volatile.charging) actor.volatile.charging = null;
 
     // 1-quater. il bersaglio e' IN VOLO / SOTT'ACQUA / SOTTOTERRA: non lo prendi
-    if (foe.volatile.charging && foe.volatile.charging.semiInvuln && foe !== actor) {
+    if (foe.volatile.charging && foe.volatile.charging.semiInvuln && foe !== actor && paraBile(move)) {
       moveInst.pp = Math.max(0, moveInst.pp - 1);
       messages.push(`${actor.name} usa ${move.it}!`);
       messages.push(`Ma ${foe.name} è irraggiungibile!`);
@@ -6543,7 +6694,7 @@
     }
 
     // 1-bis. PROTEZIONE del bersaglio: para tutto per questo turno
-    if (foe.volatile.protect && foe !== actor) {
+    if (foe.volatile.protect && foe !== actor && paraBile(move)) {
       if (foe.volatile.protect === "endure") {
         // Resistenza non para: fa sopravvivere con 1 PS (gestito in doDamage)
       } else {
@@ -6556,7 +6707,7 @@
 
     /* 1-bis-bis. PROTEZIONI DI SQUADRA. Non riparano chi le usa: riparano
        TUTTO il suo lato, e ognuna para una categoria diversa di colpo. */
-    const Lg = (game.lati && foe !== actor) ? game.lati[latoDi(foe)] : null;
+    const Lg = (game.lati && foe !== actor && paraBile(move)) ? game.lati[latoDi(foe)] : null;
     if (Lg) {
       const paraSquadra =
           (Lg.wideguard > 0 && (move.target === "ALL_NEAR_ENEMIES" || move.target === "ALL_NEAR_OTHERS")) ? "Ampiaguardia"
@@ -8224,7 +8375,12 @@
      oggetto che si compra, non un regalo. */
   function badgeIV(f, forza) {
     const acceso = forza ? !!(game.charms && game.charms.ivScanner) : scannerOn();
-    if (!acceso || !f || !f.ivs || !isEnemySide(f)) return "";
+    /* ⚠️ `isEnemySide` guarda CHI E' IN CAMPO, e nella schermata del furto i
+       candidati sono in panchina: la riga degli IV spariva proprio dove serve
+       di piu', perche' li' la scelta e' irreversibile e si spende l'unica
+       Clepto Ball. Con `forza` chi chiama ha gia' deciso che il bersaglio e'
+       legittimo (schermata di cattura, schermata di furto): non si ricontrolla. */
+    if (!acceso || !f || !f.ivs || (!forza && !isEnemySide(f))) return "";
     const notevoli = ivNotevoli(f).slice(0, 3);
     const chip = notevoli.length
       ? notevoli.map(x => `<span class="iv-chip ${x.v === IV_MAX ? "perfetto" : "meglio"}"
@@ -8529,6 +8685,10 @@
     game.double && game.chooser === 0 && game.player2 && !game.player2.fainted;
 
   function showMainMenu() {
+    /* Il salvataggio della LOTTA si scrive qui: e' l'unico punto fermo di una
+       battaglia — nessuna animazione in corso, nessuna azione a meta'. In
+       doppio solo alla prima scelta, o si scriverebbe due volte per turno. */
+    if (game.chooser === 0 && game.enemy && game.party.length) salvaRun(true);
     ensureSprites();          // garantisce che gli sprite caricati siano dipinti
     hideTrainerPortrait();    // il ritratto si vede solo durante l'intro
     evidenziaBersagli(null);  // rete di sicurezza: nessun anello resta acceso
@@ -8980,6 +9140,38 @@
      — identico al difetto gia' corretto per `showBallMenu`, e con la stessa
      cura. Niente scorrimento da inventare: qui lo spazio c'e' davvero, e la
      lotta e' finita, quindi non c'e' nulla da guardare dietro. */
+  /* Le righe che dicono SE VALE LA PENA spendere una ball su questo esemplare.
+     🔴 Stavano dentro `renderCaptureScreen`, quindi le vedevi solo sull'ultima
+     ball di fine lotta. La schermata del FURTO faceva la stessa identica
+     domanda — su chi spendo l'unica Clepto Ball? — e non diceva niente:
+     nome, tipi e percentuale. Adesso le due schermate condividono queste. */
+  function infoCattura(e) {
+    const radice = rootOf(e.speciesId);
+    const maiPreso = !meta.unlocked[e.speciesId];
+    const rigaDex = maiPreso
+      ? `<div class="cap-riga nuovo">📖 Mai catturato${!giaStarter(radice)
+           ? ` · sblocca <b>${S[radice].it}</b> come starter` : ""}</div>`
+      : `<div class="cap-riga">📖 Già nel dex</div>`;
+    const cromNuovo = e.shiny && (meta.unlocked[radice] || 0) < 2;
+    const rigaCrom = cromNuovo
+      ? `<div class="cap-riga nuovo">✨ Prima livrea cromatica di ${S[radice].it}</div>` : "";
+    /* L'abilità si confronta con quelle SCEGLIIBILI (`abilitaSbloccate`), non
+       con la maschera grezza: e' quello che vedrai davvero nella schermata
+       starter, ed e' la domanda a cui si vuole rispondere. */
+    const ab = e.ability;
+    const abGiaMia = ab && abilitaSbloccate(radice).includes(ab.id);
+    const nascosta = e.abilIndex === 2;
+    const rigaAb = ab
+      ? `<div class="cap-riga ${abGiaMia ? "" : "nuovo"}">🧬 ${ab.it}${
+          nascosta ? ' <span class="cap-hidden">NASCOSTA</span>' : ""} — ${
+          abGiaMia ? "già disponibile nello starter" : "<b>nuova per lo starter</b>"}</div>`
+      : "";
+    // Qui lo scanner è SEMPRE acceso: la lente spenta non nasconde nulla.
+    const chipIv = e.ivs ? badgeIV(e, true) : "";
+    return `<div class="cap-info">${rigaDex}${rigaCrom}${rigaAb}${
+      chipIv ? `<div class="cap-iv">${chipIv}</div>` : ""}</div>`;
+  }
+
   function renderCaptureScreen() {
     const BALL_IMG = { balls: "pb", greatballs: "gb", ultraballs: "ub", rogueballs: "rb", theftballs: "tb", masterballs: "mb" };
     const owned = BALL_TYPES.filter(b => (game[b.key] || 0) > 0);
@@ -9005,32 +9197,7 @@
          · se quell'abilità ce l'hai già fra quelle scegliibili nello starter.
        L'ultima è la più utile delle tre: un doppione non vale una ball, una
        NASCOSTA (1 su 256) vale quasi sempre la pena. */
-    const e = game.enemy;
-    const radice = rootOf(e.speciesId);
-    const maiPreso = !meta.unlocked[e.speciesId];
-    const radiceNuova = !giaStarter(radice);
-    const cromNuovo = e.shiny && (meta.unlocked[radice] || 0) < 2;
-    const rigaDex = maiPreso
-      ? `<div class="cap-riga nuovo">📖 Mai catturato${radiceNuova
-           ? ` · sblocca <b>${S[radice].it}</b> come starter` : ""}</div>`
-      : `<div class="cap-riga">📖 Già nel dex${cromNuovo ? "" : ""}</div>`;
-    const rigaCrom = cromNuovo
-      ? `<div class="cap-riga nuovo">✨ Prima livrea cromatica di ${S[radice].it}</div>` : "";
-    /* L'abilità si confronta con quelle SCEGLIIBILI (`abilitaSbloccate`), non
-       con la maschera grezza: e' quello che vedrai davvero nella schermata
-       starter, ed e' la domanda a cui si vuole rispondere. */
-    const ab = e.ability;
-    const abGiaMia = ab && abilitaSbloccate(radice).includes(ab.id);
-    const nascosta = e.abilIndex === 2;
-    const rigaAb = ab
-      ? `<div class="cap-riga ${abGiaMia ? "" : "nuovo"}">🧬 ${ab.it}${
-          nascosta ? ' <span class="cap-hidden">NASCOSTA</span>' : ""} — ${
-          abGiaMia ? "già disponibile nello starter" : "<b>nuova per lo starter</b>"}</div>`
-      : "";
-    // Qui lo scanner è SEMPRE acceso: la lente spenta non nasconde nulla.
-    const chipIv = e.ivs ? badgeIV(e, true) : "";
-    const ivRiga = `<div class="cap-info">${rigaDex}${rigaCrom}${rigaAb}${
-      chipIv ? `<div class="cap-iv">${chipIv}</div>` : ""}</div>`;
+    const ivRiga = infoCattura(game.enemy);
     showMetaScreen(`
       <div class="meta-title" style="font-size:clamp(19px,5.6vw,30px)">Ultima ball!</div>
       <div class="meta-sub">${game.enemy.name} è a terra: hai un solo tiro per prenderlo</div>
@@ -9051,7 +9218,7 @@
       ritornoSquadra = () => { game.phase = "CAPTURE"; renderCaptureScreen(); };
       renderParty("check");
     };
-    metaEl().querySelector('[data-act="skip"]').onclick = () => { hideMeta(); openShop(); };
+    metaEl().querySelector('[data-act="skip"]').onclick = () => { hideMeta(); finitaLaCattura(); };
   }
 
   /* ---------------- LANCIO BALL IN BATTAGLIA ----------------
@@ -9211,6 +9378,20 @@
      su qualunque mossa di stato di tipo sfavorevole, autopotenziamenti
      compresi — cioe' un avviso sbagliato sopra una mossa che funzionava. */
   const BERSAGLIA_NEMICO = new Set(["NEAR_OTHER", "NEAR_ENEMY", "ALL_NEAR_ENEMIES", "ALL_NEAR_OTHERS"]);
+  /* 🔴 LE MOSSE CHE NON TOCCANO L'AVVERSARIO NON SI POSSONO PARARE.
+     Protezione, Volo/Sub/Fossa e le protezioni di squadra fermavano QUALUNQUE
+     mossa, anche Danzaspada, Agilita', Riposo o Ballo Pioggia: l'avversario si
+     proteggeva e tu non potevi nemmeno potenziarti. Nei giochi non e' cosi' e
+     non potrebbe esserlo — quelle mosse non arrivano dall'altra parte del
+     campo, quindi non c'e' niente da parare. Nell'originale il controllo di
+     Protezione sta in `ProtectedTag.apply`, che gira solo sul BERSAGLIO del
+     colpo: se il bersaglio sei tu, non lo attraversa mai.
+     Qui: tutto quello che punta se stessi, la propria squadra o il campo. */
+  const NON_TOCCA_IL_NEMICO = new Set([
+    "USER", "USER_SIDE", "USER_AND_ALLIES", "USER_OR_NEAR_ALLY", "NEAR_ALLY",
+    "PARTY", "BOTH_SIDES", "ALL",
+  ]);
+  const paraBile = mv => !!mv && !NON_TOCCA_IL_NEMICO.has(mv.target);
   function statoImmune(mv, chi, f) {
     if (!mv || !f || mv.category !== "STATUS") return false;
     if (!BERSAGLIA_NEMICO.has(mv.target)) return false;     // su di sé o sul campo: mai
@@ -9507,10 +9688,57 @@
     return p;
   }
 
-  function salvaRun() {
+  /* ======================================================================
+     🔴 LA LOTTA IN CORSO SI SALVA ANCHE LEI.
+
+     Prima si salvava solo FRA un'ondata e l'altra, e riaprendo l'app si
+     rigiocava quell'ondata con un avversario NUOVO: chiudevi contro un
+     Gyarados a meta' vita e riaprivi contro un Machoke intero. Niente andava
+     perso — la squadra tornava com'era a inizio ondata — ma la lotta non era
+     la stessa, e quelle lunghe (allenatori da cinque, boss a scudi)
+     ricominciavano da zero.
+     Nell'originale la sessione contiene anche la squadra avversaria
+     (`SessionSaveData.enemyParty`): si riprende esattamente da li'.
+
+     ⚠️ `trainerRoster` contiene GLI STESSI oggetti di `enemy`/`enemyQueue`,
+     non copie: passando da JSON quell'identita' si perde, e la Clepto Ball
+     finirebbe per rubare un gemello che in campo non c'e'. Si salvano quindi
+     le POSIZIONI (-1 = quello in campo, -2 = il secondo, 0.. = la panchina) e
+     al ritorno si riagganciano gli oggetti veri. */
+  function statoLotta() {
+    if (!game.enemy || game.phase === "GAMEOVER") return null;
+    const coda = game.enemyQueue || [];
+    const dove = m => m === game.enemy ? -1 : m === game.enemy2 ? -2 : coda.indexOf(m);
+    return {
+      wave: game.wave,
+      enemy: monSalva(game.enemy),
+      enemy2: game.enemy2 ? monSalva(game.enemy2) : null,
+      coda: coda.map(monSalva),
+      roster: (game.trainerRoster || []).map(dove),
+      double: !!game.double,
+      player2: game.player2 ? game.party.indexOf(game.player2) : -1,
+      trainerName: game.trainerName || null,
+      trainerSprite: game.trainerSprite || null,
+      trainerTotal: game.trainerTotal || 0,
+      trainerDefeated: game.trainerDefeated || 0,
+      trainerIsRival: !!game.trainerIsRival,
+      evilRank: game.evilRank || null,
+      weather: game.weather, terrain: game.terrain,
+      capturedThisWave: !!game.capturedThisWave,
+      tentativiFuga: game.tentativiFuga || 0,
+      cambiAi: game.cambiAi || 0,
+      // effetti di campo a tempo: durano la lotta, quindi vanno con lei
+      fangata: game.fangata || 0, doccia: game.doccia || 0, gravita: game.gravita || 0,
+      distorto: game.distorto || 0, mirabil: game.mirabil || 0,
+      magica: game.magica || 0, plasma: game.plasma || 0,
+    };
+  }
+
+  function salvaRun(conLotta) {
     if (!game.slot || !game.party.length) return;
     const d = { v: SLOT_V, quando: Date.now(), wave: game.wave,
                 party: game.party.map(monSalva), box: (game.box || []).map(monSalva) };
+    if (conLotta) d.lotta = statoLotta();
     for (const k of CAMPI_RUN) d[k] = game[k];
     try { localStorage.setItem(SLOT_KEY(game.slot), JSON.stringify(d)); }
     catch (e) {
@@ -9567,7 +9795,47 @@
     hideMeta();
     applyBiomeBackground();
     loadFighterSprite(game.player, "back").then(s => { game.player.spr = s; redrawScene(); });
+    if (d.lotta && riprendiLotta(d.lotta)) return;
     nextWave();
+  }
+
+  /* Rimette in piedi la lotta salvata. Ritorna false se il salvataggio e'
+     incompleto: in quel caso si ricade sulla strada vecchia (ondata nuova),
+     che e' sempre giocabile. */
+  function riprendiLotta(L) {
+    if (!L || !L.enemy) return false;
+    game.wave = L.wave;
+    game.enemy = monCarica(L.enemy);
+    game.enemy2 = L.enemy2 ? monCarica(L.enemy2) : null;
+    game.enemyQueue = (L.coda || []).map(monCarica);
+    // le posizioni tornano oggetti: -1 in campo, -2 il secondo, 0.. la panchina
+    const daPosizione = i => i === -1 ? game.enemy : i === -2 ? game.enemy2 : game.enemyQueue[i];
+    game.trainerRoster = (L.roster || []).map(daPosizione).filter(Boolean);
+    game.double = !!L.double;
+    game.player2 = (L.player2 >= 0 && game.party[L.player2] && !game.party[L.player2].fainted)
+      ? game.party[L.player2] : null;
+    if (!game.player2) game.double = !!game.enemy2;
+    game.trainerName = L.trainerName; game.trainerSprite = L.trainerSprite;
+    game.trainerTotal = L.trainerTotal || 0; game.trainerDefeated = L.trainerDefeated || 0;
+    game.trainerIsRival = !!L.trainerIsRival; game.evilRank = L.evilRank || null;
+    game.weather = L.weather || null; game.terrain = L.terrain || null;
+    game.capturedThisWave = !!L.capturedThisWave;
+    game.tentativiFuga = L.tentativiFuga || 0; game.cambiAi = L.cambiAi || 0;
+    for (const k of ["fangata", "doccia", "gravita", "distorto", "mirabil", "magica", "plasma"]) {
+      game[k] = L[k] || 0;
+    }
+    /* Gli sprite non stanno nel salvataggio (sono immagini): si ricaricano, e
+       la scena si ridisegna quando arrivano. */
+    const daCaricare = [[game.enemy, "front"], [game.enemy2, "front"], [game.player2, "back"]];
+    for (const coppia of daCaricare) {
+      const f = coppia[0];
+      if (f) loadFighterSprite(f, coppia[1]).then(sp => { f.spr = sp; redrawScene(); });
+    }
+    renderTrainerBalls();
+    renderScene();
+    game.phase = "CHOICE"; game.chooser = 0; game.queued = null;
+    showMainMenu();
+    return true;
   }
 
   /* CONTROLLO GENERALE — passa in rassegna tutte le specie e tutte le mosse e
@@ -9651,7 +9919,7 @@
       const d = leggiSlot(n);
       if (!d) return `${n}: vuoto`;
       if (d.rotto) return `${n}: ILLEGGIBILE`;
-      return `${n}: ondata ${d.wave + 1} · ${d.biome} · ${d.party.length} mon · ₽${d.money}`;
+      return `${n}: ondata ${d.wave + (d.lotta ? 0 : 1)} · ${d.biome} · ${d.party.length} mon · ₽${d.money}`;
     }),
     salva: () => { salvaRun(); return "slot " + game.slot; },
     riprendi: (n) => riprendiRun(n),
@@ -9674,7 +9942,8 @@
     // al primissimo salvataggio il bioma non e' ancora assegnato: e' sempre TOWN
     const b = BIOMES[d.biome || "TOWN"];
     const vivi = d.party.filter(p => !p.fainted).length;
-    return { ondata: d.wave + 1, bioma: (b && b.it) || "—", vivi, tot: d.party.length,
+    // con una lotta salvata `d.wave` E' l'ondata in corso, non quelle superate
+    return { ondata: d.wave + (d.lotta ? 0 : 1), bioma: (b && b.it) || "—", vivi, tot: d.party.length,
              soldi: d.money || 0, squadra: d.party };
   }
 
@@ -11991,7 +12260,17 @@
     const boss = !!f.boss;
     let occasioni = Math.ceil(game.wave / 10);
     if (f.finalBoss) occasioni = Math.ceil(occasioni * 2.5);
-    const suUno = boss ? 6 : 18;
+    /* 🔴 UNO SU 18 E' TROPPO POCO, e si vedeva altrove: misurato all'ondata 45,
+       28 avversari su 35 non avevano NIENTE addosso. Con quei numeri i
+       Presartigli — un premio di fascia ROGUE che promette «10% di rubare un
+       oggetto al contatto» — rubavano davvero lo 0,7% delle volte, e sembravano
+       rotti (lo sono sembrati: cento lotte senza un furto). Stessa sorte per
+       Prestigiatore, Ladrocinio e Bramosia.
+       Il 10% e' giusto ed e' quello dell'originale
+       (`ContactHeldItemTransferChanceModifierType(..., 10)`): quello che
+       mancava era la roba da rubare. Uno su 12: all'ondata 45 passa dal 25% al
+       35% scarso di avversari con qualcosa. */
+    const suUno = boss ? 6 : 12;
     let quanti = 0;
     for (let i = 0; i < occasioni; i++) if (Math.floor(Math.random() * suUno) === 0) quanti++;
     if (boss) quanti = Math.max(quanti, Math.floor(occasioni / 2));
@@ -12339,7 +12618,7 @@
       target: "run", apply: () => { game.charms.healing = (game.charms.healing || 0) + 1; } },
     { tier: "MASTER", weight: 18, id: "multilens", label: "Multilente", desc: "held: un colpo in più a danno ridotto", icon: "multi_lens",
       target: "mon", valid: alive, apply: p => addHeld(p, "multilens") },
-    { tier: "ROGUE", weight: 5, id: "gripclaw", label: "Presartigli", desc: "held: 10% di rubare un oggetto al contatto", icon: "grip_claw",
+    { tier: "ROGUE", weight: 5, id: "gripclaw", label: "Presartigli", desc: "held: 10% al contatto di rubargli un oggetto (se ne ha)", icon: "grip_claw",
       target: "mon", valid: alive, apply: p => addHeld(p, "gripclaw") },
     { tier: "MASTER", weight: 10, id: "blackhole", label: "Piccolo buco nero", desc: "held: ruba un oggetto ogni turno", icon: "mini_black_hole",
       target: "mon", valid: alive, apply: p => addHeld(p, "blackhole") },
@@ -13044,8 +13323,8 @@
   /* ---- scambiarsi di posto col compagno (solo in doppio) ---------------- */
   MOSSE_SPECIALI.ALLY_SWITCH = (a, f, m, msg) => {
     if (!game.double) { stessoMomento(msg, "Ma non c'è nessuno con cui scambiarsi!"); return; }
-    if (a === game.player && game.player2) { const t = game.player; game.player = game.player2; game.player2 = t; game.active = game.party.indexOf(game.player); }
-    else if (a === game.player2 && game.player) { const t = game.player; game.player = game.player2; game.player2 = t; game.active = game.party.indexOf(game.player); }
+    if (a === game.player && game.player2) { const t = game.player; game.player = game.player2; game.player2 = t; ordinaSquadra(); }
+    else if (a === game.player2 && game.player) { const t = game.player; game.player = game.player2; game.player2 = t; ordinaSquadra(); }
     else if (a === game.enemy && game.enemy2) { const t = game.enemy; game.enemy = game.enemy2; game.enemy2 = t; }
     else if (a === game.enemy2 && game.enemy) { const t = game.enemy; game.enemy = game.enemy2; game.enemy2 = t; }
     else { stessoMomento(msg, "Ma non c'è nessuno con cui scambiarsi!"); return; }

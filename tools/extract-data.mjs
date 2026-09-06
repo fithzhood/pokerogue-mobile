@@ -564,9 +564,25 @@ function buildAbilities(ids) {
 /* ========================================================================== */
 /* Le icone stanno in più atlas; i frame si chiamano "<dex>" (base), "<dex>s"
    (shiny), "<dex>-<forma>". Serve per mostrare i mini sprite nei menu. */
-function extractIcons() {
+function extractIcons(species, variants) {
   const dir = resolve(APP, "assets/ui/icons");
   const out = {};
+  /* 🔴 TRENTATRE SPECIE RESTAVANO SENZA MINI ICONA.
+     Il filtro `^\d+$` tiene solo il frame base "<dex>" e scarta shiny e forme.
+     Giusto in generale, ma per le specie che ESISTONO SOLO IN FORME quel
+     frame non c'e' proprio: negli atlas Landorus e' `645-incarnate` e
+     `645-therian`, mai `645`. Stessa sorte per Giratina, Arceus, Mimikyu,
+     Unown, Xerneas, Tornadus, Thundurus, Enamorus, Basculin, Deerling,
+     Sawsbuck, Burmy, Wormadam, Cherrim, Shellos, Gastrodon, Keldeo, Meloetta,
+     Vivillon, la linea Flabebe, Maushold, Squawkabilly, Palafin, Tatsugiri,
+     Koraidon, Miraidon, Poltchageist, Sinistcha, Ogerpon, Shaymin.
+     Nella schermata starter comparivano come caselle vuote.
+     Adesso, se il frame base manca, si prende quello della FORMA PREDEFINITA:
+     `variants.json` tiene le forme nell'ordine dell'originale e la prima e'
+     sempre quella base (incarnate, altered, normal, disguised, red-striped).
+     ⚠️ Le forme `-tera` di Ogerpon vanno saltate: sono la stessa maschera
+     con la corona, non la forma di riposo. */
+  const perDex = {};            // dex -> tutti i frame "<dex>-<forma>" trovati
   for (let i = 0; i <= 9; i++) {
     const jf = resolve(dir, `pokemon_icons_${i}.json`);
     if (!existsSync(jf)) continue;
@@ -577,14 +593,29 @@ function extractIcons() {
       : Object.entries(tex.frames).map(([k, v]) => Object.assign({ filename: k }, v));
     const sheetW = (tex.size || (atlas.meta && atlas.meta.size) || {}).w;
     const sheetH = (tex.size || (atlas.meta && atlas.meta.size) || {}).h;
+    const box = (f) => ({ a: i, x: f.frame.x, y: f.frame.y, w: f.frame.w, h: f.frame.h, sw: sheetW, sh: sheetH });
     for (const f of frames) {
       const name = String(f.filename).replace(/\.png$/, "");
-      // solo il frame base "<dex>" (numerico puro): evita shiny e forme
-      if (!/^\d+$/.test(name)) continue;
-      const dex = Number(name);
-      if (out[dex]) continue;
-      out[dex] = { a: i, x: f.frame.x, y: f.frame.y, w: f.frame.w, h: f.frame.h, sw: sheetW, sh: sheetH };
+      // il frame base "<dex>" (numerico puro): evita shiny e forme
+      if (/^\d+$/.test(name)) {
+        const dex = Number(name);
+        if (!out[dex]) out[dex] = box(f);
+        continue;
+      }
+      // riserva: "<dex>-<forma>" (lo shiny e' "<dex>s-...", quindi non entra)
+      const m = /^(\d+)-(.+)$/.exec(name);
+      if (!m || /-tera$/.test(name)) continue;
+      const dex = Number(m[1]);
+      (perDex[dex] = perDex[dex] || {})[m[2]] = box(f);
     }
+  }
+  // le specie che hanno solo forme prendono l'icona della forma predefinita
+  for (const id in (species || {})) {
+    const dex = species[id].dex;
+    if (out[dex] || !perDex[dex]) continue;
+    const forme = (variants || {})[id] || [];
+    const preferita = forme.length ? forme[0].key : null;
+    out[dex] = (preferita && perDex[dex][preferita]) || perDex[dex][Object.keys(perDex[dex])[0]];
   }
   return out;
 }
@@ -901,10 +932,11 @@ const biomes = extractBiomes();
 write("biomes.json", biomes);
 const forms = extractForms();
 write("forms.json", forms);
-const icons = extractIcons();
-write("icons.json", icons);
 const variants = extractVariants(species);
 write("variants.json", variants);
+// ⚠️ Le icone leggono le VARIANTI (forma predefinita): vanno dopo, non prima.
+const icons = extractIcons(species, variants);
+write("icons.json", icons);
 const eggMoves = extractEggMoves();
 write("eggmoves.json", eggMoves);
 const dialoghi = extractDialoghi();

@@ -4645,3 +4645,69 @@ adesso dice la verità: «10% al contatto di rubargli un oggetto (**se ne ha**)�
 ```js
 __items.furto(2)        // apre la schermata del furto senza vincere la lotta
 ```
+
+## 52. Esperienza e icone delle forme (rev 161)
+
+### 52.1 🔴 IL RECUPERO RAPIDO NON DOVEVA ESSERCI
+
+Segnalazione: «Zubat è arrivato al 24 dopo aver fatto fuori il primo Pokémon.»
+Ventitré livelli in una lotta.
+
+Il colpevole era in `assegnaEsperienza`:
+
+```js
+const sotto = Math.max(0, tetto - p.level);
+if (sotto > 5) m *= Math.min(5, 1 + sotto / 8);      // fino a ×5
+```
+
+Chi stava molto sotto il tetto d'ondata prendeva fino a **cinque volte**
+l'esperienza di chi combatteva. Il guaio non era la quantità complessiva, era
+che arrivava tutta insieme: un livello 1 che stende il primo avversario finiva
+dritto al tetto (24 all'ondata 30). Un salto così non si legge come un aiuto,
+si legge come un guasto.
+
+L'avevo messo credendo servisse a chi nasce dall'uovo, che entra al livello 1.
+Ma **nell'originale entra al livello 1 pure lì** — `egg.ts`:
+`addPlayerPokemon(pokemonSpecies, 1, ...)` — e un recupero non esiste affatto:
+`Pokemon.addExp` somma l'esperienza e basta, con il solo tetto d'ondata a
+fermarla.
+
+A far salire in fretta i piccoli ci pensa la **curva**, che ai primi livelli
+costa pochissimo. Misurato dopo la correzione, ondata 30, un livello 1 **in
+panchina** (quota 20%): una lotta → **livello 8**, 561 exp. Fast all'inizio,
+poi rallenta da sola. Chi resta troppo indietro si tira su con le Caramelle
+rare, che è la risposta dell'originale.
+
+Restano le due cose vere: la quota della panchina (20%, l'Esperienza Condivisa)
+e il tetto d'ondata (`getMaxExpLevel`).
+
+### 52.2 🔴 TRENTATRÉ SPECIE SENZA MINI ICONA
+
+«Landorus non ha lo sprite nel menu di selezione, forse perché ha forme
+alternative.» Esatto, ed erano 33.
+
+`extractIcons` teneva solo il frame col nome numerico puro:
+
+```js
+if (!/^\d+$/.test(name)) continue;   // evita shiny e forme
+```
+
+Giusto in generale, ma per le specie che **esistono solo in forme** quel frame
+non c'è proprio: negli atlas Landorus è `645-incarnate` e `645-therian`, mai
+`645`. Stessa sorte per Giratina, Arceus, Mimikyu, Unown, Xerneas, Tornadus,
+Thundurus, Enamorus, Basculin, Deerling, Sawsbuck, Burmy, Wormadam, Cherrim,
+Shellos, Gastrodon, Keldeo, Meloetta, Vivillon, la linea Flabébé, Maushold,
+Squawkabilly, Palafin, Tatsugiri, Koraidon, Miraidon, Poltchageist, Sinistcha,
+Ogerpon, Shaymin. Nella schermata starter erano caselle vuote.
+
+Ora, se il frame base manca, si prende quello della **forma predefinita**:
+`variants.json` tiene le forme nell'ordine dell'originale e la prima è sempre
+quella base (incarnate, altered, normal, disguised, red-striped).
+
+⚠️ Due dettagli d'ordine:
+- `extractIcons` ora **legge le varianti**, quindi `extractVariants` va chiamata
+  **prima**; erano invertite.
+- Le forme `-tera` di Ogerpon vanno saltate: sono la stessa maschera con la
+  corona, non la forma di riposo.
+
+Rigenerato: cambia **solo** `icons.json` (64.671 → 66.701 byte). `DATA_V` 24 → 25.
