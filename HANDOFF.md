@@ -4899,3 +4899,63 @@ Per memoria, come si ottiene: **solo** dalla scelta premio di fine ondata,
 fascia MASTER (peso 0,5 su 100,5 → 0,6% delle scelte con fortuna 0), e dentro
 quella fascia pesa 6 su 70. Fa circa **1 scelta su 1946**; con fortuna 14 sale a
 1 su 904. Non si compra all'emporio e non arriva da nessun'altra strada.
+
+## 56. Legend Ball, e ogni colpo con il suo tiro (rev 168)
+
+### 56.1 LEGEND BALL — un pavimento, non un moltiplicatore
+
+Il problema che risolve: **82 leggendari su 111 hanno tasso di cattura 3**, il
+minimo del gioco. Con una Rogue Ball, a piena vita, sono al 4%; anche ridotti a
+un PS e addormentati restano al 16%. Cioè o si spende l'unica Master Ball della
+run, o non si prendono.
+
+⚠️ Non è un moltiplicatore ma un **pavimento**: contro un leggendario (o
+semi-leggendario, o misterioso) il tasso di cattura vale almeno **45**, quello
+di un Pokémon qualunque. Un moltiplicatore secco avrebbe funzionato solo sui
+più duri: applicato ai 16 leggendari che già stanno a 45 (Zacian, Eternatus…)
+li avrebbe resi certi a piena vita. Col pavimento quei sedici non cambiano di
+una virgola — e non sono loro il problema.
+
+⚠️ Vale **×2, non ×3**: su tutto il resto è *più debole* di una Rogue Ball. È
+una ball specializzata, non un aggiornamento, se no la Rogue non avrebbe più
+motivo di esistere. Premio di fascia ROGUE, tre per pacchetto invece di cinque.
+
+Misurato in gioco su Mewtwo a piena vita (congelato, quindi ×2,5 di stato):
+Poké 4% · Mega 4% · Ultra 5% · Rogue 7% · **Legend 40%**.
+
+Lo sprite è `lb.png` — la Luxury Ball dell'originale, che da noi non esiste —
+ricolorata in **oro** su una rampa di sette toni. L'oro non era già preso: rosso
+la Poké, blu la Mega, indaco la Rogue, verdeacqua la Clepto, viola la Master.
+L'Ultra ha del giallo, ma solo come fascia su corpo bianco e nero: una ball
+tutta dorata non si confonde.
+
+⚠️ Gli asset non viaggiano con l'aggiornamento a caldo: la ball nuova entra come
+**data URI** (`BALL_DATAURI`), o sul telefono resta un riquadro vuoto fino al
+prossimo APK. Il .png sta comunque nel repo per quando si ricostruirà l'APK.
+
+### 56.2 🔴 OGNI COLPO HA IL SUO TIRO
+
+Gli effetti aggiuntivi si applicavano **una volta per mossa**, anche quando la
+mossa colpiva cinque volte: Gelodenti con il 10% di tentennamento tirava il dado
+una volta sola, e la **Multilente** — che aggiunge un colpo — non cambiava
+niente se non il danno.
+
+Nei giochi, e nell'originale, l'effetto si tira **a ogni colpo**: gli attributi
+girano dentro `MoveEffectPhase`, che si ripete per ogni colpo, e quelli che NON
+devono ripetersi lo dichiarano (`MoveEffectAttr` con `lastHitOnly: true`, come
+`FrenzyAttr`). Il comportamento di serie è quindi il contrario del nostro.
+
+Misurato su 300 lanci di Gelodenti (10% tentennamento):
+
+| colpi | tentennamenti | atteso |
+|---|---|---|
+| 1 (nessuna lente) | 9% | 10% |
+| 2 (una Multilente) | 16% | 19% |
+| 4 (tre Multilenti) | 28% | 34% |
+
+⚠️ I **PP restano uno**: si consumano in `resolveAction`, fuori dal ciclo dei
+colpi — un colpo in più non è una mossa in più. Verificato: quattro colpi,
+20 → 19 PP.
+
+⚠️ Gli sbalzi di statistica si **sommano** (tre colpi che passano = tre stadi)
+ma si applicano in una volta sola, per non stampare tre righe uguali.

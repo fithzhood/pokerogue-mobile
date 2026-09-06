@@ -2618,6 +2618,7 @@
     game.greatballs = 0;
     game.ultraballs = 0;
     game.rogueballs = 0;
+    game.legendballs = 0;
     game.theftballs = 0;
     game.pendingTheft = 0;
     game.money = 400;
@@ -4634,9 +4635,12 @@
      addormentare l'avversario alza molto le probabilità.
      `useHp` forza un valore (a fine lotta il selvatico è ormai a 1 HP). */
   const STATUS_CATCH = { POISON: 1.5, PARALYSIS: 1.5, BURN: 1.5, SLEEP: 2.5, FREEZE: 2.5 };
-  function modifiedCatchRate(enemy, ballMult, useHp) {
+  /* `pavimento` = tasso di cattura MINIMO. Lo usa la Legend Ball: vedi
+     `pavimentoBall`. Zero (o assente) = nessun pavimento, formula normale. */
+  function modifiedCatchRate(enemy, ballMult, useHp, pavimento) {
     const maxHp = enemy.maxHp, hp = useHp != null ? useHp : Math.max(1, enemy.hp);
-    const catchRate = (S[enemy.speciesId] && S[enemy.speciesId].catchRate) || 45;
+    const crBase = (S[enemy.speciesId] && S[enemy.speciesId].catchRate) || 45;
+    const catchRate = Math.max(crBase, pavimento || 0);
     const statusMult = enemy.status ? (STATUS_CATCH[enemy.status] || 1) : 1;
     // il boss finale è catturabile ma molto resistente (metà probabilità)
     const bossMult = enemy.finalBoss ? 0.5 : 1;
@@ -4644,15 +4648,15 @@
     return Math.min(255, Math.max(1, mcr));
   }
   function shakeProb(mcr) { return Math.round(65536 / Math.pow(255 / mcr, 0.1875)); }
-  function captureChancePct(enemy, ballMult, useHp) {
-    const p = shakeProb(modifiedCatchRate(enemy, ballMult, useHp)) / 65536;
+  function captureChancePct(enemy, ballMult, useHp, pavimento) {
+    const p = shakeProb(modifiedCatchRate(enemy, ballMult, useHp, pavimento)) / 65536;
     return Math.max(1, Math.min(100, Math.round(Math.pow(Math.min(1, p), 4) * 100)));
   }
   /* Tira la cattura E dice QUANTE scosse ha retto la ball: serve
      all'animazione, che deve dondolare esattamente quelle volte prima di
      aprirsi (o di chiudersi con lo scatto). */
-  function rollCaptureDettaglio(enemy, ballMult, useHp) {
-    const p = shakeProb(modifiedCatchRate(enemy, ballMult, useHp));
+  function rollCaptureDettaglio(enemy, ballMult, useHp, pavimento) {
+    const p = shakeProb(modifiedCatchRate(enemy, ballMult, useHp, pavimento));
     // CATTURA CRITICA (esiste nell'originale): una sola scossa invece di quattro.
     // Il Catturamuleto la rende piu' probabile.
     const critPct = Math.min(0.25, 0.05 * ((game.charms && game.charms.catching) || 0));
@@ -4675,7 +4679,7 @@
      e poi si apre e' un'informazione, non un effetto.
      ⚠️ Vive sopra la scena ma SOTTO gli overlay meta (z-index 20).
      ====================================================================== */
-  const BALL_IMG_KEY = { balls: "pb", greatballs: "gb", ultraballs: "ub", rogueballs: "rb", theftballs: "tb", masterballs: "mb" };
+  const BALL_IMG_KEY = { balls: "pb", greatballs: "gb", ultraballs: "ub", rogueballs: "rb", theftballs: "tb", masterballs: "mb", legendballs: "lb" };
 
   /* Toglie dal campo la ball rimasta dopo una cattura riuscita e rimette a
      posto lo sprite avversario (che era stato "risucchiato"). Va chiamata
@@ -4935,6 +4939,21 @@
        tiro raddoppia scarso. Un Copperajah si prende quasi sempre, un Heatran
        resta una scommessa — ed è giusto cosi'. */
     { key: "theftballs",  it: "Clepto Ball", mult: 5, theft: true },   // ×1,5 sui selvatici: vedi `multBall`
+    /* 🔴 LEGEND BALL — nostra, non esiste nell'originale.
+       Il problema che risolve: 82 leggendari su 111 hanno tasso di cattura 3,
+       il minimo del gioco. Con una Rogue Ball, a piena vita, sono al 4%; anche
+       ridotti a un PS e addormentati restano al 16%. Cioe' o si spende
+       l'unica Master Ball della run, o non si prendono.
+       ⚠️ Non e' un moltiplicatore ma un PAVIMENTO: contro un leggendario il
+       tasso di cattura vale almeno 45 — quello di un Pokemon qualunque. Un
+       moltiplicatore secco avrebbe funzionato solo sui piu' duri: applicato ai
+       leggendari che gia' stanno a 45 (Zacian, Eternatus e altri 14) li
+       avrebbe resi certi a piena vita. Col pavimento quei sedici non cambiano
+       di una virgola, ed e' giusto: non sono loro il problema.
+       ⚠️ Vale ×2 e non ×3: su tutto il resto e' PIU' DEBOLE di una Rogue Ball.
+       E' una ball specializzata, non un aggiornamento — se no la Rogue non
+       avrebbe piu' motivo di esistere. */
+    { key: "legendballs", it: "Legend Ball", mult: 2, legend: true },
     { key: "masterballs", it: "Master Ball", mult: 255 },
   ];
   function totalBalls() { return BALL_TYPES.reduce((s, b) => s + (game[b.key] || 0), 0); }
@@ -4957,6 +4976,12 @@
   const MULT_CLEPTO_SELVATICO = 1.5;
   const multBall = (ball, bersaglio) =>
     (ball.theft && bersaglio && !bersaglio.trainer) ? MULT_CLEPTO_SELVATICO : ball.mult;
+  /* Il pavimento della Legend Ball: contro un leggendario (o semi-leggendario,
+     o misterioso) il tasso di cattura non scende sotto quello di una specie
+     comune. Su tutto il resto non fa niente. */
+  const PAVIMENTO_LEGEND = 45;
+  const pavimentoBall = (ball, bersaglio) =>
+    (ball.legend && bersaglio && fasciaLeggendaria(bersaglio.speciesId)) ? PAVIMENTO_LEGEND : 0;
 
   function offerSteal() {
     game.phase = "STEAL";
@@ -5286,7 +5311,7 @@
     const enemy = game.enemy;
     const esito = ball.mult >= 255
       ? { preso: true, scosse: 1, critica: true }
-      : rollCaptureDettaglio(enemy, multBall(ball, enemy), psUltimaBall(enemy));
+      : rollCaptureDettaglio(enemy, multBall(ball, enemy), psUltimaBall(enemy), pavimentoBall(ball, enemy));
     // stessa animazione del lancio in battaglia (§ dondolio)
     game.phase = "MESSAGE";
     cmd().innerHTML = `<div class="msgbox"><div class="log-line">Lanci una ${ball.it} su ${enemy.name}…</div></div>`;
@@ -6963,6 +6988,7 @@
       return;
     }
     actor.volatile.fallita = false;   // e' partita: Pestone torna a potenza normale
+    game._colpiMessi = 1;            // finche' `doDamage` non dice altro, e' un colpo
     /* I VINCOLI (furia, rotolamento, baraonda) si contano da qui: la mossa e'
        partita e ha superato la precisione. Prima del danno, perche' la potenza
        di Rotolamento dipende da quanti colpi ha gia' messo a segno. */
@@ -7047,7 +7073,7 @@
 
     // 5. effetti (mattoncini). Se la mossa da danno non e' andata a segno, niente effetti.
     // chi ha incassato e' il fantoccio: gli effetti secondari non passano
-    if (landed && !colpisceSub) applyMoveAttrs(actor, foe, move, messages);
+    if (landed && !colpisceSub) applyMoveAttrs(actor, foe, move, messages, game._colpiMessi);
     if (sacrificio && !actor.fainted) {
       actor.hp = 0; actor.fainted = true; actor._justHit = true;
       if (messages.snap) messages.snap();
@@ -7646,6 +7672,9 @@
     if (lastEff > 1) stessoMomento(messages, "È superefficace!");
     else if (lastEff > 0 && lastEff < 1) stessoMomento(messages, "Non è molto efficace...");
     if (done > 1) stessoMomento(messages, `Colpito ${done} volte!`);
+    /* Quanti colpi sono andati a segno: lo legge `applyMoveAttrs` per tirare
+       le percentuali una volta PER COLPO (vedi il riquadro li'). */
+    game._colpiMessi = done;
 
     const drain = attrs.find(a => a.kind === "drain");
     if (drain && total > 0 && actor.hp < actor.maxHp) {
@@ -7727,7 +7756,7 @@
   // Applica gli effetti-mattoncino (stato, statistiche, flinch, confusione, cura).
   // Su mossa STATUS: sempre. Su mossa d'attacco: solo con la chance secondaria
   // (tranne gli auto-effetti self, che sono garantiti).
-  function applyMoveAttrs(actor, foe, move, messages) {
+  function applyMoveAttrs(actor, foe, move, messages, colpi) {
     const isStatus = move.category === "STATUS";
     /* FORZABRUTTA: in cambio del +30% di potenza, gli effetti aggiuntivi non
        partono affatto. E' il patto dell'abilita', non un effetto collaterale. */
@@ -7735,12 +7764,34 @@
     // LEGGIADRO: gli effetti aggiuntivi scattano il doppio delle volte
     const ch = ha(actor, "SERENE_GRACE") && move.effectChance > 0
       ? Math.min(100, move.effectChance * 2) : move.effectChance;
-    const secondary = () => isStatus || (ch > 0 && Math.random() * 100 < ch);
+    /* 🔴 OGNI COLPO HA IL SUO TIRO.
+       Gli effetti aggiuntivi si applicavano UNA VOLTA per mossa, anche quando
+       la mossa colpiva cinque volte: Semitraglia con il 30% di paralisi
+       tirava il dado una volta invece di cinque, e la Multilente — che
+       aggiunge un colpo — non cambiava niente se non il danno.
+       Nei giochi, e nell'originale, l'effetto si tira A OGNI COLPO: gli
+       attributi girano dentro `MoveEffectPhase`, che si ripete per ogni
+       colpo, e quelli che NON devono ripetersi lo dichiarano
+       (`MoveEffectAttr` con `lastHitOnly: true`, come `FrenzyAttr`). Il
+       comportamento di serie e' quindi il contrario del nostro.
+       ⚠️ I PP restano uno: si consumano in `resolveAction`, fuori dal ciclo
+       dei colpi — un colpo in piu' non e' una mossa in piu'.
+       ⚠️ Gli sbalzi di statistica si SOMMANO (tre colpi che passano = tre
+       stadi), ma si applicano in un colpo solo per non stampare tre righe. */
+    const colpiVeri = Math.max(1, colpi || 1);
+    const quanteVolte = () => {
+      if (isStatus) return 1;
+      if (!(ch > 0)) return 0;
+      let n = 0;
+      for (let i = 0; i < colpiVeri; i++) if (Math.random() * 100 < ch) n++;
+      return n;
+    };
+    const secondary = () => isStatus || quanteVolte() > 0;
     for (const a of move.attrs || []) {
       switch (a.kind) {
         case "status":    if (secondary()) { applyStatus(foe, a.status, messages); sincronizza(foe, actor, a.status, messages); } break;
         case "confuse":   if (secondary()) applyConfuse(foe, messages); break;
-        case "flinch":    if (ch > 0 && Math.random() * 100 < ch && !foe.fainted) foe.volatile.flinch = true; break;
+        case "flinch":    if (!foe.fainted && quanteVolte() > 0) foe.volatile.flinch = true; break;
         case "statStage": {
           const suDiSe = statSuDiSe(move, a);
           const tgt = suDiSe ? actor : foe;
@@ -7756,10 +7807,10 @@
              −1 Dif/D.Sp, Dragobolide...). Quelli nei dati hanno
              `effectChance: -1`, cioe' nessuna percentuale dichiarata — ed è
              esattamente li' che il bypass deve restare. */
-          const passa = isStatus ? true
-            : ch > 0 ? (Math.random() * 100 < ch)
-            : suDiSe;
-          if (passa) applyStatStage(tgt, a.stats, a.stages, messages, suDiSe);
+          const volte = isStatus ? 1
+            : ch > 0 ? quanteVolte()
+            : (suDiSe ? 1 : 0);
+          if (volte) applyStatStage(tgt, a.stats, a.stages * volte, messages, suDiSe);
           break;
         }
         case "protect":   applyProtect(actor, messages, a.endure); break;
@@ -9293,10 +9344,10 @@
   }
 
   function renderCaptureScreen() {
-    const BALL_IMG = { balls: "pb", greatballs: "gb", ultraballs: "ub", rogueballs: "rb", theftballs: "tb", masterballs: "mb" };
+    const BALL_IMG = { balls: "pb", greatballs: "gb", ultraballs: "ub", rogueballs: "rb", theftballs: "tb", masterballs: "mb", legendballs: "lb" };
     const owned = BALL_TYPES.filter(b => (game[b.key] || 0) > 0);
     const btns = owned.map(b => {
-      const pct = b.mult >= 255 ? 100 : captureChancePct(game.enemy, multBall(b, game.enemy), psUltimaBall(game.enemy));
+      const pct = b.mult >= 255 ? 100 : captureChancePct(game.enemy, multBall(b, game.enemy), psUltimaBall(game.enemy), pavimentoBall(b, game.enemy));
       return `<button class="btn ball-btn" data-b="${b.key}">
         <img class="ball-icon" src="${ballIcon(BALL_IMG[b.key])}" alt="">
         <span class="move-name">${b.it}</span>
@@ -9361,11 +9412,11 @@
   function showBallMenu() {
     if (game.phase !== "CHOICE") return;
     const owned = BALL_TYPES.filter(b => (game[b.key] || 0) > 0);
-    const BALL_IMG = { balls: "pb", greatballs: "gb", ultraballs: "ub", rogueballs: "rb", theftballs: "tb", masterballs: "mb" };
+    const BALL_IMG = { balls: "pb", greatballs: "gb", ultraballs: "ub", rogueballs: "rb", theftballs: "tb", masterballs: "mb", legendballs: "lb" };
     if (!owned.length) { notAvailable("Non hai nessuna ball!"); return; }
     const btns = owned.map(b => {
       const blocked = ballBlockReason(b);
-      const pct = b.mult >= 255 ? 100 : captureChancePct(game.enemy, multBall(b, game.enemy));
+      const pct = b.mult >= 255 ? 100 : captureChancePct(game.enemy, multBall(b, game.enemy), null, pavimentoBall(b, game.enemy));
       return `<button class="btn ball-btn" data-b="${b.key}" ${blocked ? "disabled" : ""}>
         <img class="ball-icon" src="${ballIcon(BALL_IMG[b.key])}" alt="">
         <span class="move-name">${b.it}</span>
@@ -9409,7 +9460,7 @@
        ball deve dondolare esattamente le volte che ha retto davvero. */
     const esito = ball.mult >= 255
       ? { preso: true, scosse: 1, critica: true }
-      : rollCaptureDettaglio(enemy, multBall(ball, enemy));
+      : rollCaptureDettaglio(enemy, multBall(ball, enemy), null, pavimentoBall(ball, enemy));
     game.phase = "MESSAGE";                    // niente comandi durante il lancio
     cmd().innerHTML = `<div class="msgbox"><div class="log-line">Lanci una ${ball.it} su ${enemy.name}…</div></div>`;
     animaBall(ballKey, esito, () => risolviLancio(ballKey, ball, enemy, esito.preso));
@@ -9779,7 +9830,7 @@
   /* ⚠️ `masterballs` mancava da questo elenco: era l'unica delle sei a non
      essere salvata, quindi la Master Ball — il premio piu' raro del gioco,
      uno su duemila scelte — spariva riaprendo l'app. */
-  const CAMPI_RUN = ["balls", "greatballs", "ultraballs", "rogueballs", "theftballs", "masterballs",
+  const CAMPI_RUN = ["balls", "greatballs", "ultraballs", "rogueballs", "theftballs", "masterballs", "legendballs",
     "pendingTheft", "money", "stones", "charms", "tempBoost", "tempBoostN", "shopMarkup", "lati", "cuccagna",
     "cicloOffset", "encSeen", "encTiersSeen", "leagueIdx", "evilIdx", "finalBossIdx",
     "rivalFemale", "rivalRoster", "hasMegaRing", "hasDynamaxBand", "active", "biome", "starterSpecies"];
@@ -12752,6 +12803,9 @@
     /* ===================== ROGUE ====================== */
     { tier: "ROGUE", weight: 6, id: "rogueballs", label: "Rogue Ball ×5", desc: "cattura ×3", icon: "rb", ball: true,
       target: "run", apply: () => { game.rogueballs = (game.rogueballs || 0) + 5; } },
+    /* Tre e non cinque: e' una ball da tenere per l'occasione, non da spendere. */
+    { tier: "ROGUE", weight: 4, id: "legendballs", label: "Legend Ball ×3", desc: "cattura ×2, ma i leggendari come i comuni", icon: "lb", ball: true,
+      target: "run", apply: () => { game.legendballs = (game.legendballs || 0) + 3; } },
     { tier: "ROGUE", weight: 3, id: "leftovers", label: "Avanzi", desc: "held: rigenera 1/16 a fine turno", icon: "leftovers",
       target: "mon", valid: alive, apply: p => addHeld(p, "leftovers") },
     { tier: "ROGUE", weight: 3, id: "shellbell", label: "Conchinella", desc: "held: recuperi 1/8 del danno", icon: "shell_bell",
@@ -13749,7 +13803,17 @@
   /* La macchina del gacha e' alta e stretta (106×131): con il riquadro
      quadrato delle altre icone verrebbe schiacciata. */
   const icoGacha = () => `<img class="ico-sp alta" src="${GACHA_IMG[gachaScelto] || GACHA_IMG.MOVE}" alt="">`;
-  const ballIcon = n => `assets/ui/pokeball/${n}.png`;
+  /* ⚠️ Gli asset non viaggiano con l'aggiornamento a caldo: una ball NUOVA
+     deve entrare come data URI, o sul telefono resta un riquadro vuoto fino
+     al prossimo APK. `lb` e' lo sprite della Luxury Ball dell'originale —
+     che nessuno usava perche' la Luxury Ball da noi non c'e' — ricolorato in
+     ORO su una rampa di sette toni.
+     ⚠️ L'oro non era gia' preso: il rosso e' della Poke Ball, il blu della
+     Mega, l'indaco della Rogue, il verdeacqua della Clepto, il viola della
+     Master. L'Ultra Ball ha del giallo, ma solo come fascia su corpo bianco e
+     nero: una ball TUTTA dorata non si confonde. */
+  const BALL_DATAURI = { lb: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAwAAAAQCAYAAAAiYZ4HAAABCklEQVR42tWSoWvDUBDGfyklRD0xKiojIqImQinPDKYm3lxgMjCqplao3B9QOZirKoPJQUVhEVODRVSMiYkRaMX+gonAYMzc1At5bSYme+7uvu877ruD/Q9vu2C0kmaeryqvlWC0kov0oFV1tvisiV5TdRAHZGnIeFrW4NfNDwBJ5JOvKq9jGxYcHV9zcxXXhCTy3R2MVjKIg7qQpSF3iw8AXsrvnSmdZgNgPC3J0pAsDWkKOa5IVYjRSoxWsl4ORapCpCrk6/1S+r1A+r1A1suhGK2kC3B6Ynh4zAHYPE0cwef5IQBHozeSyHddsnE/PwfgbHS741K3zfcm8M9L2ynbQGurc7j/vMYvPZxnoVHQSuoAAAAASUVORK5CYII=" };
+  const ballIcon = n => BALL_DATAURI[n] || `assets/ui/pokeball/${n}.png`;
   const VIT_ICON = { hp: "hp_up", atk: "protein", def: "iron", spatk: "calcium", spdef: "zinc", spd: "carbos" };
   /* Nome ufficiale dello strumento che potenzia un tipo: nell'originale non
      si chiamano "Boost Fuoco" ma Carbonella, Acqua magica, Miracolseme... */

@@ -9763,7 +9763,10 @@
   /* Campi della run da salvare. Fuori restano: `player`/`enemy` (si ricreano),
      `events`/`timer`/`afterEvents` (roba di narrazione) e `encReward`, che e'
      una FUNZIONE e non sopravvive a JSON. */
-  const CAMPI_RUN = ["balls", "greatballs", "ultraballs", "rogueballs", "theftballs",
+  /* ⚠️ `masterballs` mancava da questo elenco: era l'unica delle sei a non
+     essere salvata, quindi la Master Ball — il premio piu' raro del gioco,
+     uno su duemila scelte — spariva riaprendo l'app. */
+  const CAMPI_RUN = ["balls", "greatballs", "ultraballs", "rogueballs", "theftballs", "masterballs",
     "pendingTheft", "money", "stones", "charms", "tempBoost", "tempBoostN", "shopMarkup", "lati", "cuccagna",
     "cicloOffset", "encSeen", "encTiersSeen", "leagueIdx", "evilIdx", "finalBossIdx",
     "rivalFemale", "rivalRoster", "hasMegaRing", "hasDynamaxBand", "active", "biome", "starterSpecies"];
