@@ -529,7 +529,7 @@
     const d = Math.max(1, Math.floor(f.maxHp / 16));
     f.hp = Math.max(0, f.hp - d); f._justHit = true;
     messages.push(`${f.name} è sferzato dalla ${w.it.toLowerCase()}!`);
-    if (f.hp <= 0) { f.fainted = true; messages.push(`${f.name} è esausto!`); }
+    if (f.hp <= 0) { f.fainted = true; spegniStato(f); messages.push(`${f.name} è esausto!`); }
   }
 
   /* ----------------------------------------------------------------------
@@ -1610,6 +1610,14 @@
     },
     roll: (n) => Array.from({ length: n || 10 }, () => rollReward([])),
     waveMoney: (w) => { const o = game.wave; game.wave = w; const m = waveMoney(1); game.wave = o; return m; },
+    /* I sei capipalestra sorteggiati per questa run, in ordine di comparsa. */
+    palestre: (rifai) => {
+      if (rifai) game.gymRoster = null;
+      const o = game.wave, fuori = [];
+      for (let i = 1; i <= 6; i++) { game.wave = i * GYM_EVERY; const g = capopalestraDiTurno(); fuori.push(`${g.name} (${T[g.type].it})`); }
+      game.wave = o;
+      return fuori;
+    },
     /* Quanto paga l'avversario in campo, e quanto pagherebbe ogni ruolo a
        questa ondata: serve a confrontare l'economia con quella originale. */
     soldi: () => {
@@ -2790,13 +2798,13 @@
       const quota = Math.max(1, Math.floor(f.maxHp * eff / 8));
       f.hp = Math.max(0, f.hp - quota); f._justHit = true;
       messages.push(`Le pietre levitanti feriscono ${f.name}!`);
-      if (f.hp <= 0) { f.fainted = true; messages.push(`${f.name} è esausto!`); return; }
+      if (f.hp <= 0) { f.fainted = true; spegniStato(f); messages.push(`${f.name} è esausto!`); return; }
     }
     if (aTerra && L.spikes) {
       const frazione = [0, 8, 6, 4][Math.min(3, L.spikes)];
       f.hp = Math.max(0, f.hp - Math.max(1, Math.floor(f.maxHp / frazione))); f._justHit = true;
       messages.push(`${f.name} è ferito dalle punte!`);
-      if (f.hp <= 0) { f.fainted = true; messages.push(`${f.name} è esausto!`); return; }
+      if (f.hp <= 0) { f.fainted = true; spegniStato(f); messages.push(`${f.name} è esausto!`); return; }
     }
     if (aTerra && L.toxicspikes) {
       /* Un Pokemon di tipo VELENO che tocca terra PORTA VIA le fielepunte:
@@ -4028,6 +4036,50 @@
     return scelta.map(t => `${chi}: «${t}»`);
   }
 
+  /* ======================================================================
+     🔴 SI VEDEVANO SOLO I CAPIPALESTRA DI KANTO (§71)
+
+     I capipalestra si prendevano IN ORDINE dalla lista:
+     `GYM_LEADERS[(wave / 30) - 1]`. Ma in una run se ne incontrano SEI (ondate
+     30, 60, 90, 120, 150, 180) e la lista e' ordinata per regione: erano
+     sempre e solo Brock, Misty, Lt. Surge, Erika, Koga, Sabrina. Sessantadue
+     capipalestra su sessantotto non li vedeva nessuno, mai.
+
+     Adesso i sei li sorteggia la RUN, una volta sola, e li tiene: cosi' non
+     cambiano ricaricando e non se ne ripete uno. ⚠️ Si sorteggiano a TIPI
+     DIVERSI: sei monotipo pescati alla cieca possono uscire tre volte Acqua,
+     e sei lotte contro la stessa squadra sono la stessa lotta sei volte.
+     (Nell'originale l'allenatore delle ondate x30 esce dal pool BOSS del
+     bioma, quindi cambia per run e per posto: lo spirito e' questo.)
+     ====================================================================== */
+  const GYM_PER_RUN = 8;      // sei ne servono, due di scorta per le run lunghe
+  function sorteggiaCapipalestra() {
+    const mescolati = GYM_LEADERS.map((g, i) => i);
+    for (let i = mescolati.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const t = mescolati[i]; mescolati[i] = mescolati[j]; mescolati[j] = t;
+    }
+    const presi = [], tipi = new Set(), nomi = new Set();
+    for (const i of mescolati) {
+      const g = GYM_LEADERS[i];
+      if (tipi.has(g.type) || nomi.has(g.name)) continue;
+      tipi.add(g.type); nomi.add(g.name); presi.push(i);
+      if (presi.length >= GYM_PER_RUN) break;
+    }
+    // se i tipi finiscono prima (non succede: sono 18) si riempie senza vincolo
+    for (const i of mescolati) {
+      if (presi.length >= GYM_PER_RUN) break;
+      if (!presi.includes(i)) presi.push(i);
+    }
+    return presi;
+  }
+  function capopalestraDiTurno() {
+    if (!game.gymRoster || !game.gymRoster.length) game.gymRoster = sorteggiaCapipalestra();
+    const tappa = Math.max(0, Math.floor(game.wave / GYM_EVERY) - 1);
+    const i = game.gymRoster[tappa % game.gymRoster.length];
+    return GYM_LEADERS[i] || GYM_LEADERS[0];
+  }
+
   function startTrainerBattle(mons, portraitSprite, name, challengeMsgs) {
     // i Pokemon degli allenatori pescano dal pool oggetti dedicato
     for (const m of mons) m.trainerMon = true;
@@ -4224,8 +4276,7 @@
       return;
     }
     if (isGym) {
-      // capipalestra in ordine, ciclando se si va molto avanti
-      const leader = GYM_LEADERS[(Math.floor(game.wave / GYM_EVERY) - 1) % GYM_LEADERS.length];
+      const leader = capopalestraDiTurno();
       const mons = buildGymLeader(leader, eLevel);
       game.gymLeader = leader;
       startTrainerBattle(mons, leader.sprite, leader.name,
@@ -6075,6 +6126,73 @@
      giocatore. Si notava solo su uno dei due avversari perche', quando il primo
      cade, il superstite viene PROMOSSO a `game.enemy` (vedi `enemyFaints`) e da
      quel momento l'animazione tornava al posto giusto. */
+  /* ======================================================================
+     🔴 ATTACCHI DIFFERITI — Divinazione e Desiderio Fatale (§69)
+
+     Nei dati queste due mosse hanno `attrs: []`: l'estrattore non traduce
+     `DelayedAttackAttr`, e senza quel mattoncino restavano due attacchi
+     SECCHI da 120 e 140 di potenza con precisione 100. Divinazione era
+     semplicemente la mossa Psico migliore del gioco, e Desiderio Fatale la
+     migliore Acciaio: tutto il loro prezzo — aspettare due turni — non
+     esisteva.
+
+     Nell'originale (`DelayedAttackAttr` + `DelayedAttackTag`) la mossa non fa
+     niente subito: mette in coda un attacco sullo SLOT del bersaglio con
+     `turnCount: 3`, e due turni dopo quell'attacco parte da solo. Colpisce
+     chi si trova li' in quel momento, anche se non e' piu' quello di prima, e
+     parte lo stesso se chi l'ha lanciata nel frattempo e' rientrato o caduto.
+
+     ⚠️ Sullo stesso slot non se ne accodano due: `getCondition` dell'originale
+     rifiuta la mossa se una e' gia' in volo li' sopra.
+     ====================================================================== */
+  const MOSSE_DIFFERITE = new Set(["FUTURE_SIGHT", "DOOM_DESIRE"]);
+  const occupanteSlot = (slot) => slot === "enemy" ? game.enemy
+    : slot === "enemy2" ? game.enemy2
+    : slot === "player2" ? game.player2 : game.player;
+
+  function accodaDifferita(actor, foe, move, messages) {
+    game.differite = game.differite || [];
+    const slot = sideOf(foe);
+    if (game.differite.some(d => d.slot === slot)) {
+      messages.push("Ma la mossa è fallita!");
+      return;
+    }
+    /* ⚠️ TRE, non due. Il contatore scende anche alla fine del turno in
+       cui la mossa e' partita (`scattaDifferite` gira in `endOfTurnResidual`,
+       come `activateAllTags` la'), quindi con 2 il colpo arrivava un turno
+       prima del dovuto. Con 3: parte al turno N, scende a 2 subito, a 1 alla
+       fine di N+1, e scatta alla fine di N+2. */
+    game.differite.push({ move: move.id, slot, chi: actor, turni: 3 });
+    messages.push(`${actor.name} prevede un attacco!`);
+  }
+
+  /* Scatta a fine turno, una volta sola (la chiama `endOfTurnResidual` dal
+     lato del giocatore, come gli altri contatori di squadra). */
+  function scattaDifferite(messages) {
+    if (!game.differite || !game.differite.length) return;
+    const restano = [];
+    for (const d of game.differite) {
+      if (--d.turni > 0) { restano.push(d); continue; }
+      const bersaglio = occupanteSlot(d.slot);
+      const mv = M[d.move];
+      // Se lo slot e' vuoto (in doppio capita) l'attacco si perde, come la'.
+      if (!bersaglio || bersaglio.fainted || !mv || !d.chi) continue;
+      messages.push(`${bersaglio.name} subisce l'attacco di ${mv.it}!`);
+      if (messages.fx) {
+        const chiave = animKeyForMove(mv.id);
+        prefetchAnim(chiave);
+        segnaFx(messages, messages.length - 1, mv.type, sideOf(bersaglio), chiave, sideOf(d.chi));
+      }
+      doDamage(d.chi, bersaglio, mv, messages);
+      if (messages.snap) messages.snap();
+      if (bersaglio.hp <= 0 && !bersaglio.fainted) {
+        bersaglio.fainted = true; spegniStato(bersaglio);
+        messages.push(`${bersaglio.name} è esausto!`);
+      }
+    }
+    game.differite = restano;
+  }
+
   function sideOf(f) {
     return f === game.enemy ? "enemy"
          : f === game.enemy2 ? "enemy2"
@@ -7192,7 +7310,7 @@
       segnaDannoSubito(foe, actor, move, dato);
       if (messages.snap) messages.snap();
       stessoMomento(messages, `${foe.name} perde ${dato} PS!`);
-      if (foe.hp <= 0) { foe.fainted = true; messages.push(`${foe.name} è esausto!`); }
+      if (foe.hp <= 0) { foe.fainted = true; spegniStato(foe); messages.push(`${foe.name} è esausto!`); }
       segnaFx(messages, messages.length - 1, move.type, sideOf(foe), move.id, sideOf(actor));
       return;
     }
@@ -7273,7 +7391,7 @@
       const scoppio = Math.max(1, Math.floor(actor.maxHp / 4));
       actor.hp = Math.max(0, actor.hp - scoppio); actor._justHit = true;
       messages.push(`La polvere su ${actor.name} prende fuoco ed esplode!`);
-      if (actor.hp <= 0) { actor.fainted = true; messages.push(`${actor.name} è esausto!`); }
+      if (actor.hp <= 0) { actor.fainted = true; spegniStato(actor); messages.push(`${actor.name} è esausto!`); }
       return;
     }
 
@@ -7399,6 +7517,9 @@
        mossa migliore del gioco.
        ⚠️ Il KO si segna PRIMA del colpo e si applica DOPO: nell'originale chi
        esplode cade comunque, ma il danno lo fa lo stesso. */
+    /* 4-zero. ATTACCHI DIFFERITI: non fanno niente adesso, si accodano.
+       Va PRIMA del danno, o Divinazione colpirebbe subito E fra due turni. */
+    if (MOSSE_DIFFERITE.has(move.id)) { accodaDifferita(actor, foe, move, messages); return; }
     const sacrificio = ESPLOSIVE.has(move.id);
     // 4. danno (se e' una mossa d'attacco)
     let landed = true;
@@ -7477,7 +7598,7 @@
                      game._secondariGiaDati ? "senza-secondari" : "tutto");
     }
     if (sacrificio && !actor.fainted) {
-      actor.hp = 0; actor.fainted = true; actor._justHit = true;
+      actor.hp = 0; actor.fainted = true; spegniStato(actor); actor._justHit = true;
       if (messages.snap) messages.snap();
       messages.push(`${actor.name} si sacrifica nell'esplosione!`);
     }
@@ -7747,7 +7868,7 @@
           const d = confusionDamage(actor);
           actor.hp = Math.max(0, actor.hp - d); actor._justHit = true;
           messages.push("Si è ferito da solo nella confusione!");
-          if (actor.hp <= 0) { actor.fainted = true; messages.push(`${actor.name} è esausto!`); }
+          if (actor.hp <= 0) { actor.fainted = true; spegniStato(actor); messages.push(`${actor.name} è esausto!`); }
           return false;
         }
       }
@@ -7784,10 +7905,10 @@
       segnaDannoSubito(foe, actor, move, dato);
       if (messages.snap) messages.snap();
       stessoMomento(messages, `${foe.name} perde ${dato} PS!`);
-      if (foe.hp <= 0) foe.fainted = true;
+      if (foe.hp <= 0) { foe.fainted = true; spegniStato(foe); }
       // Azzardo: chi la usa ci rimette tutto
       if (move.id === "FINAL_GAMBIT") {
-        actor.hp = 0; actor.fainted = true; actor._justHit = true;
+        actor.hp = 0; actor.fainted = true; spegniStato(actor); actor._justHit = true;
         stessoMomento(messages, `${actor.name} ci ha messo tutto!`);
       }
       return true;
@@ -7924,7 +8045,7 @@
       if (typeMultiplier(move.type, foe.types) === 0) { messages.push(`Non ha effetto su ${foe.name}...`); return false; }
       if (foe.boss) { messages.push(`Gli scudi del boss annullano il colpo!`); return true; }
       if (ha(foe, "STURDY")) { messages.push(`${nomeAb(foe, "STURDY")}: il colpo da KO non funziona su ${foe.name}!`); return false; }
-      foe.hp = 0; foe._justHit = true; foe.fainted = true;
+      foe.hp = 0; foe._justHit = true; foe.fainted = true; spegniStato(foe);
       messages.push("KO in un colpo solo!"); messages.push(`${foe.name} è esausto!`);
       return true;
     }
@@ -8034,7 +8155,7 @@
           foe.hp = 1; messages.push(`${nomeAb(foe, "STURDY")}: ${foe.name} resiste con 1 PS!`);
         } else if (foe.held && foe.held.focusband && Math.random() < 0.1 * foe.held.focusband) {
           foe.hp = 1; messages.push(`${foe.name} ha resistito grazie alla Bandana!`);
-        } else { foe.fainted = true; break; }
+        } else { foe.fainted = true; spegniStato(foe); break; }
       }
       /* 🔴 GLI EFFETTI DEL SINGOLO COLPO, SUBITO DOPO IL SINGOLO COLPO.
          Il dado per gli effetti aggiuntivi si tirava gia' una volta per colpo
@@ -8059,7 +8180,7 @@
         const dato = bossClamp(foe, extra, messages);
         foe.hp = Math.max(0, foe.hp - dato); total += dato;
         stessoMomento(messages, "L'aiuto dell'alleato rende il colpo più forte!");
-        if (foe.hp <= 0) { foe.fainted = true; messages.push(`${foe.name} è esausto!`); }
+        if (foe.hp <= 0) { foe.fainted = true; spegniStato(foe); messages.push(`${foe.name} è esausto!`); }
       }
     }
     // Pugno dorato: il danno inflitto frutta soldi
@@ -8117,7 +8238,7 @@
     if (recoil && total > 0 && !actor.fainted && !findAb(actor, "noRecoil") && dannoIndirettoOk(actor)) {
       actor.hp = Math.max(0, actor.hp - Math.max(1, Math.floor(total * recoil.ratio))); actor._justHit = true;
       stessoMomento(messages, `${actor.name} è danneggiato dal contraccolpo!`);
-      if (actor.hp <= 0) { actor.fainted = true; messages.push(`${actor.name} è esausto!`); }
+      if (actor.hp <= 0) { actor.fainted = true; spegniStato(actor); messages.push(`${actor.name} è esausto!`); }
     }
 
     /* ABILITA' CHE REAGISCONO AL COLPO SUBITO. */
@@ -8148,7 +8269,7 @@
       if (cd && !actor.fainted) {
         actor.hp = Math.max(0, actor.hp - Math.max(1, Math.floor(actor.maxHp / cd.fraction))); actor._justHit = true;
         messages.push(`${actor.name} è ferito da ${foe.ability.it}!`);
-        if (actor.hp <= 0) { actor.fainted = true; messages.push(`${actor.name} è esausto!`); }
+        if (actor.hp <= 0) { actor.fainted = true; spegniStato(actor); messages.push(`${actor.name} è esausto!`); }
       }
     }
 
@@ -8164,7 +8285,7 @@
       messages.push(`${foe.name} è esausto!`);
       /* ULTIMOTORTO: chi cade si porta dietro chi l'ha steso. */
       if (foe.volatile.destiny && !actor.fainted) {
-        actor.hp = 0; actor.fainted = true;
+        actor.hp = 0; actor.fainted = true; spegniStato(actor);
         messages.push(`${foe.name} trascina con sé ${actor.name}!`);
       }
       /* RANCORE: la mossa che l'ha steso resta senza un PP. */
@@ -8590,11 +8711,43 @@
      semi, maledizione, sale, meteo, stato, contraccolpo — non lo tocca. */
   const dannoIndirettoOk = f => !ha(f, "MAGIC_GUARD");
 
+  /* ======================================================================
+     🔴 GLI STATI SI PERDONO CADENDO, NON RIALZANDOSI (§70)
+
+     Un Pokemon andava KO scottato e tornava dal Revitalizzante ancora
+     scottato: la targhetta SCT restava li' e ricominciava a mangiargli i PS
+     dal turno dopo. Non e' cosi' in nessun gioco della serie, e non e' cosi'
+     nell'originale: `FaintPhase` chiama `resetSummonData()` e poi
+     `doSetStatus(StatusEffect.FAINT)`, cioe' il KO SOSTITUISCE lo stato. Il
+     Revitalizzante toglie il FAINT e quello che torna e' pulito.
+
+     ⚠️ Il momento giusto e' il KO, non la rianimazione: e' quello che dice
+     anche il proprietario («anzi, li devono perdere quando vanno ko»). Cosi'
+     vale per ogni strada — Revitalizzante, Cenere magica, cura delle decine —
+     senza doverle correggere una per una.
+     ====================================================================== */
+  function spegniStato(f) {
+    if (!f) return;
+    f.status = null; f.sleepTurns = 0; f.toxicN = 0;
+    if (f.stages) for (const k in f.stages) f.stages[k] = 0;
+    /* Anche i volatili: confusione, prese, semi, protezione. Sono roba della
+       lotta e chi cade la lotta l'ha finita (`resetSummonData` la'). */
+    if (f.volatile) {
+      f.volatile.confusion = 0; f.volatile.flinch = false;
+      f.volatile.trap = null; f.volatile.seed = false; f.volatile.seedBy = null;
+      f.volatile.perish = 0; f.volatile.infatuated = false; f.volatile.encore = null;
+      f.volatile.taunt = 0; f.volatile.torment = false; f.volatile.drowsy = 0;
+      f.volatile.nightmare = false; f.volatile.saltcure = false; f.volatile.curse = false;
+      f.volatile.protect = null; f.volatile.charging = null; f.volatile.recharge = false;
+      f.volatile.sub = 0;
+    }
+  }
+
   function endOfTurnResidual(f, messages) {
     /* ⚠️ Gli effetti di SQUADRA si scalano una volta sola per turno, e questa
        funzione gira su ogni combattente: ci si aggancia al giocatore, che c'e'
        in tutte le strade del turno (singolo, doppio, cambio, lancio di ball). */
-    if (f === game.player) scalaLati(messages);
+    if (f === game.player) { scalaLati(messages); scattaDifferite(messages); }
     /* 🔴 I contatori a TURNI stavano nella coda di `risolviTurno`, che pero'
        non e' l'unica strada: cambiare Pokemon o lanciare una ball consuma il
        turno passando altrove, e li' non scendevano affatto. Inibitore poteva
@@ -8683,7 +8836,7 @@
       f.hp = Math.max(0, f.hp - Math.max(1, dmg)); f._justHit = true; messages.push(txt);
       // il danno residuo mostra l'animazione dello stato, come nell'originale
       if (messages.anim) messages.anim(STATUS_ANIM[f.status], sideOf(f));
-      if (f.hp <= 0) { f.fainted = true; messages.push(`${f.name} è esausto!`); }
+      if (f.hp <= 0) { f.fainted = true; spegniStato(f); messages.push(`${f.name} è esausto!`); }
     }
     // Piccolo buco nero: a ogni fine turno ruba un oggetto all'avversario
     if (f.held && f.held.blackhole) {
@@ -8696,7 +8849,7 @@
       const d = Math.max(1, Math.floor(f.maxHp / 8));
       f.hp = Math.max(0, f.hp - d); f._justHit = true;
       messages.push(`${f.name} soffre per ${TRAP_IT[t.tag] || "la presa"}!`);
-      if (f.hp <= 0) { f.fainted = true; messages.push(`${f.name} è esausto!`); }
+      if (f.hp <= 0) { f.fainted = true; spegniStato(f); messages.push(`${f.name} è esausto!`); }
       if (--t.turni <= 0) { f.volatile.trap = null; messages.push(`${f.name} si libera!`); }
     }
     // SEMEBOMBA: 1/8 dei PS max rubati e passati a chi l'ha piantato
@@ -8706,13 +8859,13 @@
       const src = seedSource(f);
       if (src && !src.fainted && src.hp < src.maxHp) src.hp = Math.min(src.maxHp, src.hp + d);
       messages.push(`${f.name} viene prosciugato dal seme!`);
-      if (f.hp <= 0) { f.fainted = true; messages.push(`${f.name} è esausto!`); }
+      if (f.hp <= 0) { f.fainted = true; spegniStato(f); messages.push(`${f.name} è esausto!`); }
     }
     // ULTIMOCANTO: alla fine del conto va KO comunque
     if (f.volatile.perish > 0 && !f.fainted) {
       f.volatile.perish--;
       if (f.volatile.perish <= 0) {
-        f.hp = 0; f.fainted = true;
+        f.hp = 0; f.fainted = true; spegniStato(f);
         messages.push(`Il conto dell'Ultimocanto di ${f.name} arriva a zero!`);
         messages.push(`${f.name} è esausto!`);
       } else messages.push(`Conto dell'Ultimocanto di ${f.name}: ${f.volatile.perish}`);
@@ -8730,7 +8883,7 @@
       if (f.fainted) return;
       f.hp = Math.max(0, f.hp - Math.max(1, Math.floor(f.maxHp / frazione))); f._justHit = true;
       messages.push(testo);
-      if (f.hp <= 0) { f.fainted = true; messages.push(`${f.name} è esausto!`); }
+      if (f.hp <= 0) { f.fainted = true; spegniStato(f); messages.push(`${f.name} è esausto!`); }
     };
     if (f.volatile.nightmare) {
       if (f.status === "SLEEP") rosicchia(4, `${f.name} è tormentato dagli incubi!`);
@@ -9942,7 +10095,7 @@
       const stolen = !!enemy.trainer;
       accogliPokemon(mon, log, stolen ? `${ico("clepto")} Rubato!` : "Preso!");
       registerCaught(enemy.speciesId, enemy.shiny, enemy.ivs, log, enemy.variant, enemy.abilIndex, enemy.nature, enemy.shinyVar, enemy.gender, enemy.boss);
-      enemy.fainted = true;                        // esce dal campo
+      enemy.fainted = true; spegniStato(enemy);                        // esce dal campo
       game.capturedThisWave = true;                // niente seconda offerta a fine lotta
       if (stolen) {
         // togli il Pokémon rubato dalla squadra dell'allenatore
@@ -10298,7 +10451,8 @@
   const CAMPI_RUN = ["balls", "greatballs", "ultraballs", "rogueballs", "theftballs", "masterballs", "legendballs", "lastballs",
     "pendingTheft", "money", "stones", "charms", "tempBoost", "tempBoostN", "shopMarkup", "lati", "cuccagna",
     "cicloOffset", "encSeen", "encTiersSeen", "leagueIdx", "evilIdx", "finalBossIdx",
-    "rivalFemale", "rivalRoster", "hasMegaRing", "hasDynamaxBand", "active", "biome", "zoneViste", "starterSpecies"];
+    "rivalFemale", "rivalRoster", "gymRoster", "hasMegaRing", "hasDynamaxBand",
+    "active", "biome", "zoneViste", "starterSpecies"];
 
   /* Un Pokemon e' gia' quasi tutto JSON. Le due eccezioni: `spr` (i dati
      dell'immagine, si ricaricano) e le abilita', che sono RIFERIMENTI dentro
@@ -10368,6 +10522,14 @@
       capturedThisWave: !!game.capturedThisWave,
       tentativiFuga: game.tentativiFuga || 0,
       cambiAi: game.cambiAi || 0,
+      /* Attacchi differiti in volo. La SORGENTE si salva come posizione, con
+         lo stesso schema del `roster`: -1 in campo, -2 il secondo, 0.. la
+         panchina per il lato avversario; l'indice in squadra per il tuo. */
+      differite: (game.differite || []).map(d => ({
+        move: d.move, slot: d.slot, turni: d.turni,
+        daNemico: isEnemySide(d.chi),
+        chi: isEnemySide(d.chi) ? dove(d.chi) : game.party.indexOf(d.chi),
+      })),
       // effetti di campo a tempo: durano la lotta, quindi vanno con lei
       fangata: game.fangata || 0, doccia: game.doccia || 0, gravita: game.gravita || 0,
       distorto: game.distorto || 0, mirabil: game.mirabil || 0,
@@ -10425,6 +10587,7 @@
     clearTimeout(game.timer);
     game.enemy = null; game.enemy2 = null; game.player2 = null; game.double = false;
     game.enemyQueue = []; game.events = []; game.eventIndex = 0; game.afterEvents = null;
+    game.differite = [];       // un attacco in volo non sopravvive all'ondata
     game.pendingLearns = []; game.encReward = null; game.expPending = 0;
     game.weather = null; game.terrain = null;
     setActive(Math.min(game.active | 0, game.party.length - 1));
@@ -10462,6 +10625,10 @@
     game.weather = L.weather || null; game.terrain = L.terrain || null;
     game.capturedThisWave = !!L.capturedThisWave;
     game.tentativiFuga = L.tentativiFuga || 0; game.cambiAi = L.cambiAi || 0;
+    game.differite = (L.differite || []).map(d => {
+      const chi = d.daNemico ? daPosizione(d.chi) : game.party[d.chi];
+      return chi ? { move: d.move, slot: d.slot, turni: d.turni, chi } : null;
+    }).filter(Boolean);
     for (const k of ["fangata", "doccia", "gravita", "distorto", "mirabil", "magica", "plasma"]) {
       game[k] = L[k] || 0;
     }
@@ -11364,7 +11531,7 @@
               const vivi = aliveParty();
               if (!vivi.length) return "Il forziere era vuoto.";
               const v = strongest();
-              v.hp = 0; v.fainted = true;
+              v.hp = 0; v.fainted = true; spegniStato(v);
               return `Era una trappola! ${v.name} viene messo KO all'istante!`;
             }
             const tier = roll < 55 ? "COMMON" : roll < 85 ? "ULTRA" : roll < 95 ? "ROGUE" : "MASTER";
@@ -13558,7 +13725,7 @@
       actor.hp = Math.max(0, actor.hp - costo); actor._justHit = true;
       foe.volatile.curse = true;
       messages.push(`${actor.name} sacrifica metà dei suoi PS per lanciare una maledizione su ${foe.name}!`);
-      if (actor.hp <= 0) { actor.fainted = true; messages.push(`${actor.name} è esausto!`); }
+      if (actor.hp <= 0) { actor.fainted = true; spegniStato(actor); messages.push(`${actor.name} è esausto!`); }
     } else {
       applyStatStage(actor, ["ATK", "DEF"], 1, messages, true);
       applyStatStage(actor, ["SPD"], -1, messages, true);
@@ -13681,7 +13848,7 @@
      posto pulito. ⚠️ Da noi il "chi entra dopo" lo decide il giocatore, quindi
      si segna una promessa sul lato e la si riscuote all'ingresso. */
   const sacrificioCurativo = (a, msg, testo) => {
-    a.hp = 0; a.fainted = true; a._justHit = true;
+    a.hp = 0; a.fainted = true; spegniStato(a); a._justHit = true;
     lato(a).curaProssimo = true;
     msg.push(testo);
     msg.push(`${a.name} è esausto!`);

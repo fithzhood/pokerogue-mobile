@@ -5590,3 +5590,50 @@ Prova: `__items.palestre(true)` risorteggia e stampa i sei.
 Quattro tirate → Wattson/Lenora/Korrina/Jasmine/Katy/Grusha ·
 Ramos/Katy/Byron/Kabu/Grusha/Raihan · Gordie/Elesa/Wulfric/Lenora/Ramos/Wake ·
 Gardenia/Jasmine/Marlon/Korrina/Lt. Surge/Morty. Senza argomento resta stabile.
+
+
+## 72. Anche gli allenatori combattono in due (rev 179)
+
+> «Ci sono allenatori che fanno lotta in doppio?»
+
+No: le lotte in doppio erano solo contro i selvatici. Nell'originale invece
+**44 classi** hanno un partner (`setHasDouble`: «Beginners» per il Bullo,
+«Crush Kin» per il Cinturanera, «Ace Duo» per il Fantallenatore…) e la
+probabilità è **la stessa dei selvatici** — `getDoubleBattleChance` è una
+funzione sola, 1 su 8, e le Esche la alzano allo stesso modo.
+
+Da noi ce l'hanno **otto classi su quattordici**, le stesse che ce l'hanno là:
+Bullo, Scienziato, Cinturanera, Fantallenatore, Nuotatore, Sensitivo, Ranger,
+Recluta Rocket.
+
+⚠️ Serve che l'allenatore abbia almeno **due** Pokémon e che tu ne abbia due in
+piedi: se no non è una lotta in doppio, è una lotta normale con una schermata
+sbagliata.
+
+### 72.1 Il secondo posto avversario ora è un posto vero
+
+`deployEnemy` sa scrivere solo in `game.enemy`. Finché il doppio era roba da
+selvatici bastava: il secondo slot lo si riempiva a mano, una volta sola, a
+inizio ondata. Con gli allenatori quel posto **si svuota e si riempie a lotta in
+corso**, quindi vuole la stessa cura — strumenti tenuti, sprite, abilità
+d'ingresso e soprattutto `entraInCampo`, che fa mordere le trappole e avvia i
+contatori. Da lì `deployEnemy2`.
+
+### 72.2 Due trappole trovate scrivendolo
+
+⚠️ **Il vassoio delle ball contava il falso.** I caduti si contavano solo nel
+ramo del posto *primario*. In doppio però gli slot si rimescolano prima (il
+secondo promosso a primo), quindi un caduto nel secondo posto — o un primo
+caduto e subito rimpiazzato dalla promozione — non veniva contato affatto. Ora
+si contano appena caduti, una volta per Pokémon (`_contato`).
+
+⚠️ **Il posto vuoto va riempito.** La coda serviva solo il posto primario,
+perché in doppio ci si andava solo contro i selvatici — che una coda non ce
+l'hanno. Contro un allenatore, ridursi a uno contro due appena cade il suo
+secondo vorrebbe dire che la lotta in doppio dura un turno.
+
+Provato in gioco su una squadra da 4 e una da 2: due in campo all'inizio, i
+posti che si riempiono dalla coda, vassoio 4/4 e 2/2 a fine lotta, dialogo di
+sconfitta e premio corretti (₽90 = `waveMoney(0,5)` del Bullo all'ondata 2).
+
+Prova: `__items.allenatore(quanti, true)` forza il doppio.

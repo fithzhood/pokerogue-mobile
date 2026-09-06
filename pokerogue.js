@@ -2008,11 +2008,15 @@
        azzerati, PS invariati) e le animazioni di ritiro/uscita: a click
        vorrebbe dire giocare quattro ondate sperando che l'autopilota non si
        impianti — ed e' esattamente quello che succede. */
-    allenatore: (quanti) => {
+    /* `allenatore(quanti, doppio)`: il secondo argomento forza la lotta in
+       DUE, che altrimenti capita una volta su otto e solo con otto classi. */
+    allenatore: (quanti, doppio) => {
       if (!game.player) return "nessuna run in corso";
       clearTimeout(game.timer); game.events = []; game.eventIndex = 0;
       const lvl = enemyLevelFor(game.wave);
-      const cls = TRAINER_CLASSES[Math.floor(Math.random() * TRAINER_CLASSES.length)];
+      const cls = doppio
+        ? TRAINER_CLASSES.filter(c => c.doppio)[0]
+        : TRAINER_CLASSES[Math.floor(Math.random() * TRAINER_CLASSES.length)];
       const mons = [];
       for (let i = 0; i < (quanti || 2); i++) {
         const f = makeFighter(evolvedFormFor(pickThemed(cls.types, lvl), lvl), lvl,
@@ -2023,7 +2027,7 @@
       const prima = { stato: game.player.status,
                       stadi: Object.entries(game.player.stages).filter(([, v]) => v).map(([k, v]) => k + v).join(" ") || "nessuno",
                       ps: game.player.hp + "/" + game.player.maxHp };
-      startTrainerBattle(mons, cls.sprites[0], cls.name, [`${cls.name} ti sfida!`]);
+      startTrainerBattle(mons, cls.sprites[0], cls.name, [`${cls.name} ti sfida!`], !!doppio);
       return { prima, dopoIlRichiamo: { stato: game.player.status,
                  stadi: Object.entries(game.player.stages).filter(([, v]) => v).map(([k, v]) => k + v).join(" ") || "nessuno",
                  ps: game.player.hp + "/" + game.player.maxHp } };
@@ -3141,22 +3145,26 @@
      tema, invece che a caso: il Pescatore ha Acqua, il Fantasista Spettro, ecc. */
   /* `soldi` = il `moneyMultiplier` che la classe ha nell'originale
      (`trainer-config.ts`): il Bullo paga meta' di tutti, il Fantallenatore
-     piu' del doppio. Chi la' non ce l'ha dichiarato vale 1. */
+     piu' del doppio. Chi la' non ce l'ha dichiarato vale 1.
+     `doppio` = ha un partner con cui fare la lotta in due (`setHasDouble`
+     dell'originale: «Beginners» per il Bullo, «Crush Kin» per il Cinturanera,
+     «Ace Duo» per il Fantallenatore...). Chi non ce l'ha combatte sempre da
+     solo, la' come qui. */
   const TRAINER_CLASSES = [
-    { name: "il Bullo", sprites: ["youngster_m", "youngster_f"], types: ["NORMAL", "BUG"], soldi: 0.5 },
+    { name: "il Bullo", sprites: ["youngster_m", "youngster_f"], types: ["NORMAL", "BUG"], soldi: 0.5, doppio: true },
     { name: "il Pescatore", sprites: ["fisherman"], types: ["WATER"], soldi: 1.25 },
     { name: "il Montanaro", sprites: ["hiker"], types: ["ROCK", "GROUND"], soldi: 1 },
-    { name: "lo Scienziato", sprites: ["scientist_m", "scientist_f"], types: ["ELECTRIC", "STEEL", "POISON"], soldi: 1.7 },
+    { name: "lo Scienziato", sprites: ["scientist_m", "scientist_f"], types: ["ELECTRIC", "STEEL", "POISON"], soldi: 1.7, doppio: true },
     { name: "la Bellezza", sprites: ["beauty"], types: ["FAIRY", "NORMAL"], soldi: 1.55 },
-    { name: "il Cinturanera", sprites: ["black_belt_m"], types: ["FIGHTING"], soldi: 1 },
+    { name: "il Cinturanera", sprites: ["black_belt_m"], types: ["FIGHTING"], soldi: 1, doppio: true },
     { name: "il Campeggiatore", sprites: ["camper_m", "camper_f"], types: ["GRASS", "BUG"], soldi: 1.1 },
-    { name: "il Fantallenatore", sprites: ["ace_trainer_m", "ace_trainer_f"], types: null, soldi: 2.25 },   // qualsiasi
-    { name: "il Nuotatore", sprites: ["swimmer_m", "swimmer_f"], types: ["WATER", "ICE"], soldi: 1.3 },
-    { name: "il Sensitivo", sprites: ["psychic_m", "psychic_f"], types: ["PSYCHIC"], soldi: 1.4 },
+    { name: "il Fantallenatore", sprites: ["ace_trainer_m", "ace_trainer_f"], types: null, soldi: 2.25, doppio: true },   // qualsiasi
+    { name: "il Nuotatore", sprites: ["swimmer_m", "swimmer_f"], types: ["WATER", "ICE"], soldi: 1.3, doppio: true },
+    { name: "il Sensitivo", sprites: ["psychic_m", "psychic_f"], types: ["PSYCHIC"], soldi: 1.4, doppio: true },
     { name: "la Streghetta", sprites: ["hex_maniac"], types: ["GHOST", "DARK"], soldi: 1.5 },
     { name: "il Mangiafuoco", sprites: ["firebreather"], types: ["FIRE"], soldi: 1.4 },
-    { name: "il Ranger", sprites: ["ranger_m", "ranger_f"], types: ["GRASS", "FLYING"], soldi: 1.4 },
-    { name: "la Recluta Team Rocket", sprites: ["rocket_grunt_m", "rocket_grunt_f"], types: ["POISON", "DARK"], soldi: 1 },
+    { name: "il Ranger", sprites: ["ranger_m", "ranger_f"], types: ["GRASS", "FLYING"], soldi: 1.4, doppio: true },
+    { name: "la Recluta Team Rocket", sprites: ["rocket_grunt_m", "rocket_grunt_f"], types: ["POISON", "DARK"], soldi: 1, doppio: true },
   ];
 
   /* ---- Capipalestra: TUTTE le regioni, sprite reali, squadra MONOTIPO ----
@@ -3452,6 +3460,37 @@
     if (game.party.filter(p => !p.fainted).length < 2) return false;
     const div = Math.max(1, 8 - (game.charms.lure || 0) * 2);   // le Esche la alzano
     return Math.floor(Math.random() * div) === 0;
+  }
+
+  /* Gemella di `deployEnemy` per il SECONDO posto avversario. Serviva: la
+     prima sa scrivere solo in `game.enemy`, e finche' il doppio era roba da
+     selvatici il secondo slot lo si riempiva a mano al volo, una volta sola,
+     all'inizio dell'ondata. Con gli allenatori in doppio invece quel posto si
+     svuota e si riempie a lotta in corso, quindi vuole la stessa cura:
+     strumenti tenuti, sprite, abilita' d'ingresso e — soprattutto —
+     `entraInCampo`, che fa mordere le trappole e avvia i contatori. */
+  /* 🔴 GLI ALLENATORI NON COMBATTEVANO MAI IN DUE (§72)
+     Le lotte in doppio erano solo contro i selvatici. Nell'originale invece
+     quarantaquattro classi hanno un partner (`setHasDouble`) e la probabilita'
+     e' la STESSA dei selvatici — `getDoubleBattleChance` e' una funzione sola,
+     1 su 8 — con le Esche che la alzano allo stesso modo. Da noi otto classi
+     su quattordici ce l'hanno, quelle che ce l'hanno la'.
+     ⚠️ Serve che l'allenatore abbia almeno DUE Pokemon e che tu ne abbia
+     due in piedi: se no non c'e' una lotta in doppio, c'e' una lotta normale
+     con una schermata sbagliata. */
+  function rollDoubleAllenatore(cls, mons) {
+    if (!cls || !cls.doppio) return false;
+    if (!mons || mons.length < 2) return false;
+    return rollDouble();
+  }
+
+  function deployEnemy2(f, messages) {
+    game.enemy2 = f;
+    if (!f._heldGiven) { f._heldGiven = true; giveEnemyHeldItems(f, !!f.trainerMon); }
+    f.spr = null;
+    loadFighterSprite(f, "front").then(sp => { f.spr = sp; redrawScene(); });
+    applyOnSummon(game.player, f, messages);
+    applyOnSummon(f, game.player, messages);
   }
 
   function deployEnemy(f, messages) {
@@ -4082,7 +4121,7 @@
     return GYM_LEADERS[i] || GYM_LEADERS[0];
   }
 
-  function startTrainerBattle(mons, portraitSprite, name, challengeMsgs) {
+  function startTrainerBattle(mons, portraitSprite, name, challengeMsgs, doppio) {
     // i Pokemon degli allenatori pescano dal pool oggetti dedicato
     for (const m of mons) m.trainerMon = true;
     game.trainerName = name;
@@ -4093,7 +4132,11 @@
     game.trainerSprite = portraitSprite;
     game.trainerTotal = mons.length;
     game.trainerDefeated = 0;
-    game.enemyQueue = mons.slice(1);
+    /* In DOPPIO ne scendono due insieme e la coda parte dal terzo. Il secondo
+       compagno tuo si sceglie qui, prima del richiamo: dopo, `game.player`
+       potrebbe essere gia' cambiato. */
+    const inDoppio = !!doppio && mons.length >= 2 && game.party.filter(p => !p.fainted).length >= 2;
+    game.enemyQueue = mons.slice(inDoppio ? 2 : 1);
     game.enemy = null;                 // niente mon durante la sfida
     /* 🔴 RICHIAMO PRIMA DELLA SFIDA (scelta del proprietario): davanti a un
        allenatore la squadra rientra nelle ball, azzera gli stadi e si toglie la
@@ -4120,10 +4163,22 @@
         hideTrainerPortrait();
         const m = [];
         deployEnemy(mons[0], m);       // `m` raccoglie gli effetti d'ingresso
+        const testa = [];
+        if (inDoppio) {
+          game.double = true;
+          const secondo = game.party.find(p => !p.fainted && p !== game.player);
+          if (secondo) { entraInCampo(secondo, m); game.player2 = secondo; }
+          deployEnemy2(mons[1], m);
+          entraInCampo(mons[1], m);
+          if (game.player2) loadFighterSprite(game.player2, "back").then(sp => { game.player2.spr = sp; redrawScene(); });
+          testa.push(conBall(`${name} manda in campo ${mons[0].name} e ${mons[1].name}: è una LOTTA IN DOPPIO!`, "uscita", "enemy"));
+          testa.push(conBall(`Vai, ${attivo.name}${game.player2 ? ` e ${game.player2.name}` : ""}!`, "uscita", "player"));
+        } else {
+          testa.push(conBall(`${name} manda in campo ${mons[0].name}!`, "uscita", "enemy"));
+          testa.push(conBall(`Vai, ${attivo.name}!`, "uscita", "player"));
+        }
         renderTrainerBalls();
         renderScene();
-        const testa = [conBall(`${name} manda in campo ${mons[0].name}!`, "uscita", "enemy"),
-                       conBall(`Vai, ${attivo.name}!`, "uscita", "player")];
         queueMessages(testa.concat(m), () => { game.phase = "CHOICE"; showMainMenu(); });
       });
     });
@@ -4306,8 +4361,10 @@
         f.trainer = cls.name;
         mons.push(f);
       }
+      const duo = rollDoubleAllenatore(cls, mons);
       startTrainerBattle(mons, cls.sprites[Math.floor(Math.random() * cls.sprites.length)], cls.name,
-        [`Ondata ${game.wave}: ${cls.name} ti sfida!`]);
+        [duo ? `Ondata ${game.wave}: ${cls.name} ti sfida in due!` : `Ondata ${game.wave}: ${cls.name} ti sfida!`],
+        duo);
       return;
     }
 
@@ -7173,6 +7230,19 @@
     }
     // --- LOTTA IN DOPPIO -------------------------------------------------
     if (game.double) {
+      /* 🔴 IL VASSOIO DELLE BALL SI CONTA PRIMA DI RIMESCOLARE.
+         I caduti si contavano solo nel ramo del posto PRIMARIO, piu' in
+         basso. In doppio pero' gli slot si rimescolano qui sopra (il secondo
+         promosso a primo), quindi un caduto nel secondo posto — o un primo
+         caduto e subito rimpiazzato dalla promozione — non veniva contato
+         affatto: il vassoio dell'allenatore diceva il falso. Si contano
+         adesso, una volta per Pokemon (`_contato`). */
+      for (const e of [game.enemy, game.enemy2]) {
+        if (e && e.fainted && !e._contato) {
+          e._contato = true;
+          if (game.trainerTotal) { game.trainerDefeated++; renderTrainerBalls(); }
+        }
+      }
       // il secondo avversario caduto sparisce dal campo
       if (game.enemy2 && game.enemy2.fainted) game.enemy2 = null;
       // il secondo alleato caduto viene rimpiazzato, se c'e' una riserva
@@ -7194,13 +7264,40 @@
         game.player = game.player2; game.player2 = null;
         renderScene();
       }
+      /* 🔴 IL POSTO VUOTO SI RIEMPIE, se l'allenatore ha ancora squadra.
+         Prima la coda serviva solo il posto primario, perche' in doppio ci si
+         andava solo contro i selvatici — che una coda non ce l'hanno. Contro
+         un allenatore, invece, ridursi a uno contro due appena cade il suo
+         secondo vorrebbe dire che la lotta in doppio dura un turno. */
+      if (!game.enemy2 && game.enemyQueue.length && game.enemy && !game.enemy.fainted
+          && game.player2 && !game.player2.fainted) {
+        const log2 = makeLog();
+        const alleato = game.enemyQueue.shift();
+        log2.push(conBall(`${game.trainerName || "L'avversario"} manda in campo ${alleato.name}!`, "uscita", "enemy"));
+        deployEnemy2(alleato, log2);
+        entraInCampo(alleato, log2);
+        renderTrainerBalls();
+        renderScene();
+        game.chooser = 0; game.queued = null;
+        playEvents(log2.events, () => {
+          if (game.player.fainted) {
+            if (firstAliveIndex() < 0) return gameOver("KO");
+            return promptForceSwitch();
+          }
+          game.phase = "CHOICE"; showMainMenu();
+        });
+        return;
+      }
       // finita la lotta in doppio quando resta un solo avversario o nessuno
       if (!game.enemy2 && !game.player2) game.double = false;
       game.chooser = 0; game.queued = null;   // il prossimo turno riparte dal primo
       renderScene();
     }
     if (game.enemy.fainted) {
-      if (game.trainerTotal) { game.trainerDefeated++; renderTrainerBalls(); }
+      if (!game.enemy._contato) {
+        game.enemy._contato = true;
+        if (game.trainerTotal) { game.trainerDefeated++; renderTrainerBalls(); }
+      }
       // allenatore: se ha altri Pokemon, manda il prossimo
       if (game.enemyQueue.length) {
         const next = game.enemyQueue.shift();
