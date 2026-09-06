@@ -5048,3 +5048,44 @@ Foresta.
 rimasta con una sola uscita e `node --check` non se n'è accorto (era JS
 valido). Trovato solo aprendo la schermata di scelta in gioco. Niente arte
 ASCII con barre rovesciate nei commenti.
+
+## 58. Icone ritagliate e macchina del gacha completa (rev 171)
+
+### 58.1 Gli sprite erano più piccoli delle emoji che sostituivano
+
+Gli sprite degli oggetti sono disegni piccoli dentro un riquadro da 32×32:
+
+| sprite | riquadro | disegno vero |
+|---|---|---|
+| mystery_egg | 32×32 | **14×16** (22% dell'area) |
+| coupon | 32×32 | 21×17 |
+| rare_candy, berry_pouch, dynamax_band | 32×32 | 21×21 |
+| tb (Clepto) | 32×32 | 18×18 |
+
+Messi in linea al posto di un'emoji si vedevano molto più piccoli delle emoji
+rimaste accanto (⭐ 🏆), e la riga sembrava sbilanciata. Ora sono **ritagliati
+sul disegno vero e riquadrati** (lato = il maggiore fra larghezza e altezza,
+così non si deformano): a parità di riquadro CSS il disegno lo riempie.
+
+⚠️ Ritagliare i file su disco non sarebbe bastato: gli asset non viaggiano con
+l'aggiornamento a caldo. Devono essere **data URI** (`ICO_SPRITE`, 4,3 KB in
+tutto).
+
+### 58.2 🔴 ALLA MACCHINA DEL GACHA MANCAVANO DUE STRATI
+
+Nell'originale la macchina non è un'immagine sola: è una pila di **sette
+strati** (`egg-gacha-ui-handler.ts`) — uova dietro il vetro, pannello scuro,
+corpo della macchina, vetro, **manopola**, portello, e il **contenitore info**.
+
+Il nostro composito si era fermato al vetro. Mancavano:
+
+- la **manopola**, il pezzo che dice che quella macchina si aziona. Rifatto il
+  composito impilando gli strati veri, manopola compresa.
+- il **Pokémon in evidenza** dentro la cupola, che sulla macchina leggendaria
+  l'originale disegna come settimo strato. Essendo la nostra un'immagine sola
+  non poteva averlo, e la cupola restava vuota: si leggeva come un pezzo
+  mancante, perché lo era. Ora l'icona va in HTML sopra lo sfondo
+  (`.gacha-vetrina`), così cambia ogni giorno insieme alla specie in evidenza.
+
+Verificato: la macchina leggendaria mostra Ho-Oh nella cupola e la manopola sul
+fianco.

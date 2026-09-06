@@ -992,6 +992,15 @@ html, body {
      quando compare (e la scritta del risultato non ci finisce sopra) */
   margin-bottom: 28px;
 }
+/* Il Pokemon in evidenza, dentro la cupola di vetro della macchina
+   leggendaria. Le percentuali seguono il disegno: la cupola sta nel terzo
+   superiore, leggermente a destra del centro. */
+.gacha-vetrina {
+  position: absolute; left: 50%; top: 27%; transform: translate(-50%, -50%);
+  display: flex; align-items: center; justify-content: center;
+  filter: drop-shadow(0 2px 3px rgba(0,0,0,.5));
+  pointer-events: none;
+}
 .gacha-macchina.scuote { animation: gachaScuote .55s ease; }
 @keyframes gachaScuote {
   0%,100% { transform: translateX(0) rotate(0); }
@@ -1461,7 +1470,9 @@ button.pd-card:not(:disabled):active { background: rgba(255,255,255,.14); }
 /* Icona presa dagli sprite del gioco, in linea nel testo al posto di
    un'emoji. Si allinea alla riga come farebbe un carattere. */
 .ico-sp {
-  width: 1.3em; height: 1.3em; vertical-align: -0.32em;
+  /* 1,15em con il disegno che riempie il riquadro (vedi ICO_SPRITE, ritagliate)
+     sta in riga con le emoji rimaste, che di alto ne occupano circa altrettanto. */
+  width: 1.15em; height: 1.15em; vertical-align: -0.22em;
   image-rendering: pixelated; flex: 0 0 auto;
 }
 /* la macchina del gacha è più alta che larga: box su misura, o si schiaccia */

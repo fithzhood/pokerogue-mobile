@@ -132,20 +132,33 @@
 
      Le undici aggiunte sono scelte per SENSO, non a caso: il laboratorio e la
      centrale stanno in citta', il cimitero porta al tempio, l'isola alla
-     giungla, la grotta gelata alla grotta. E la Metropoli riporta alla Città,
-     che e' quello che le da' finalmente un'entrata. */
+     giungla, la grotta gelata alla grotta.
+
+     ⚠️ NESSUNA COPPIA ANDATA-E-RITORNO. Due biomi collegati nei due sensi
+     fanno un anello da due: senza la Mappa il gioco sorteggia, e c'e' una
+     probabilita' su quattro di rimbalzare avanti e indietro fra gli stessi
+     due posti per venti ondate. Un anello da TRE si rompe molto piu' in
+     fretta, perche' a ogni giro ci sono piu' vie d'uscita.
+     Il caso da risolvere era Citta': l'entrata gliela poteva dare solo la
+     Metropoli, ma Citta' → Metropoli esisteva gia'. La soluzione e' un
+     TRIANGOLO — Citta' → Metropoli → Sobborghi → Citta' — che da' a tutti
+     e tre quel che serve senza chiudere nessun anello da due.
+     Verificato sul grafo intero: zero coppie reciproche, ciclo diretto piu'
+     corto = 3. */
   const LEGAMI_EXTRA = {
-    GRASS:       ["MEADOW"],        // il prato fiorisce
-    GRAVEYARD:   ["TEMPLE"],        // il cimitero e il tempio
-    ICE_CAVE:    ["CAVE"],          // sotto il ghiaccio, la roccia
-    ISLAND:      ["JUNGLE"],        // l'entroterra dell'isola
-    JUNGLE:      ["SWAMP"],         // la giungla degrada in palude
-    LABORATORY:  ["METROPOLIS"],    // il laboratorio sta in citta'
-    METROPOLIS:  ["TOWN"],          // e la citta' grande riporta a quella piccola
-    POWER_PLANT: ["METROPOLIS"],    // la centrale alimenta la metropoli
-    SPACE:       ["WASTELAND"],     // si ricade sulla landa
-    TOWN:        ["METROPOLIS"],    // dalla citta' si va anche in metropoli
-    WASTELAND:   ["GRAVEYARD"],     // dalla landa al cimitero
+    GRASS:       ["MEADOW"],              // il prato fiorisce
+    GRAVEYARD:   ["TEMPLE"],              // il cimitero e il tempio
+    ICE_CAVE:    ["CAVE"],                // sotto il ghiaccio, la roccia
+    ISLAND:      ["JUNGLE"],              // l'entroterra dell'isola
+    JUNGLE:      ["SWAMP"],               // la giungla degrada in palude
+    LABORATORY:  ["METROPOLIS"],          // il laboratorio sta in citta'
+    POWER_PLANT: ["METROPOLIS"],          // la centrale alimenta la metropoli
+    SPACE:       ["WASTELAND"],           // si ricade sulla landa
+    WASTELAND:   ["GRAVEYARD"],           // dalla landa al cimitero
+    // il TRIANGOLO URBANO: Citta' -> Metropoli -> Sobborghi -> Citta'
+    TOWN:        ["METROPOLIS"],
+    METROPOLIS:  ["CONSTRUCTION_SITE"],
+    SLUM:        ["TOWN"],
   };
   function apriLaMappa() {
     for (const k in LEGAMI_EXTRA) {
