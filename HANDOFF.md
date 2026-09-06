@@ -5849,3 +5849,80 @@ basterebbe curiosare per cambiare le preferenze.
 ⚠️ Ogni pezzo si riprende solo se è **ancora valido**. Mosse da uovo e abilità si
 sbloccano nel tempo, e una scelta salvata può puntare a roba che in questo
 salvataggio non c'è: si controlla voce per voce e si ricade sul valore d'ufficio.
+
+
+## 80. La targhetta del Pokérus, una sola volta (rev 183)
+
+> «Il pokerus dev'essere visibile anche quando si aggiunge un nuovo pokemon alla
+> squadra e se ne manda via uno. Non vorrei mandare via l'unico col pokerus»
+
+L'avevo messa in `cardCompatta` (§64), che serve le schermate di cambio e di
+squadra. Ma le caselle dei Pokémon si disegnano **a mano** anche altrove, e in
+uno di quei posti si decide *chi esce dalla squadra*: è la scelta in cui saperlo
+conta di più.
+
+Ora la targhetta la fa `badgePkrs(p)` e la usano tutte: `cardCompatta`, le
+caselle di «Squadra al completo», la scheda di **chi arriva** (il Pokérus può
+averlo lui) e la scelta del bersaglio di un oggetto.
+
+
+## 81. «Colpisci e poi esci» non esisteva (rev 183)
+
+> «Controlla le mosse come virata»
+
+**Virata**, **Retromarcia** e **Invertivolt** hanno `attrs: []` nei dati —
+l'estrattore non traduce `ForceSwitchOutAttr` — quindi erano tre attacchi normali
+da 60/70/70 e il cambio, che è *tutto* il loro senso, non avveniva. Stessa storia
+per **Codadrago** e **Ribaltiro**, che devono buttare fuori il bersaglio.
+
+Boato, Turbine, Teletrasporto e Staffetta il cambio ce l'avevano già
+(`chiediCambio`): mancavano solo quelle che prima fanno danno.
+
+⚠️ Il cambio si chiede **dopo** il colpo e **solo se il colpo è andato a segno**:
+una Virata a vuoto non fa uscire nessuno. Sta in `resolveMove` e non in
+`MOSSE_SPECIALI`, perché quello gira comunque — anche a mossa mancata — e da lì
+`landed` non si vede.
+
+Verificato: «Sprigatito usa Virata!» → «Sprigatito torna indietro!» → si apre la
+scelta del ricambio.
+
+
+## 82. La cura di squadra curava uno solo (rev 183)
+
+> «Goccia vitale fa recuperare solo i Ps dell'attivo e non del compagno durante
+> la lotta in doppio»
+
+Vero. Il mattoncino `heal` guardava sempre e solo `actor`, mentre **Goccia
+Vitale** e **Giunglacura** hanno `target: "USER_AND_ALLIES"` — il dato per fare
+la cosa giusta c'era già, non lo leggeva nessuno.
+
+⚠️ Giunglacura toglie anche i **problemi di stato**, a sé e al compagno: è metà
+della mossa, e senza restava una Goccia Vitale col nome diverso.
+
+Verificato in doppio: attivo 22→37 su 55, compagno 33→70 su 83, due righe di
+«ha recuperato energie».
+
+
+## 83. L'asso della Rivale non è per forza Rayquaza (rev 183)
+
+> «Il rivale non deve per forza avere megarayquaza basta che abbia un leggendario
+> e una mega/giga. Questo perché rayquaza ora è uno dei possibili boss finali.»
+
+Correzione giusta, e sfuggita a me: nell'originale il sesto posto è fissato a
+Rayquaza (§74), ma da noi Rayquaza è anche uno dei **tredici possibili boss
+finali**. Fissarlo voleva dire, una volta su tredici, vederlo due volte nella
+stessa partita.
+
+Serve quel che serve: un **leggendario con una forma potenziata**. Sono dodici —
+Mewtwo, Latias, Latios, Rayquaza, Heatran, Darkrai, Zygarde, Diancie, Floette
+Eterna, Magearna, Zeraora, Melmetal — se ne sorteggia uno per run e si **esclude
+quello che chiude la partita**. Al sesto incontro arriva già trasformato (mega,
+o gigamax per chi ha solo quella).
+
+⚠️ L'asso si marca con `asso: true` nelle radici e `_assoRivale` sul
+combattente, non per nome di specie: è così che «scende per ultimo» e «arriva
+trasformato» continuano a funzionare qualunque cosa esca dal sorteggio.
+
+Verificato su sei run con boss finali diversi: Mega Latias · Gigamax Melmetal ·
+Mega Darkrai · Mega Diancie · Mega Darkrai · Mega Zeraora — e col boss finale
+Rayquaza è uscito Mega Diancie, non Rayquaza.

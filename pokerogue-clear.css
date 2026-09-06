@@ -1736,9 +1736,20 @@ button.pd-card:not(:disabled):active { background: rgba(255,255,255,.14); }
 }
 
 /* barra dei filtri: generazione, tipo, stato, ordinamento e ricerca per nome */
+/* Tre file per tre mestieri: cerca, restringi, spunta. Una riga sola a capo
+   automatico faceva ballare i tasti a ogni filtro acceso — quello che
+   cercavi non era mai dove l'avevi lasciato. */
 .filter-bar {
-  display: flex; flex-wrap: wrap; gap: 5px; margin: .6vh 0 0;
+  display: flex; flex-direction: column; gap: 5px; margin: .6vh 0 0;
 }
+.filter-bar .filter-q { width: 100%; }
+/* I menu a tendina in griglia: si dispongono da soli in due o tre colonne
+   secondo la larghezza, e restano incolonnati invece di scivolare. */
+.filter-sels {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 5px;
+}
+.filter-sels .filter-sel { width: 100%; min-width: 0; }
+.filter-chips { display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; }
 /* I due filtri a interruttore stanno nella stessa barra dei menù a tendina,
    ma non devono allargarsi come loro: sono larghi quanto la scritta. */
 .filter-chip, .filtro-chip { flex: 0 0 auto; padding: 5px 9px; font-size: clamp(10px, 2.8vw, 13px); }
