@@ -4888,3 +4888,14 @@ Ora `maiPreso = !meta.unlocked[specie] && !giaStarter(radice)`.
 Prova (schermata furto, che usa lo stesso `infoCattura`): Ivysaur → «Già nel
 dex»; Seel, la cui radice non è sbloccata → «Mai catturato · sblocca Seel come
 starter».
+
+### 55.4 ⚠️ La Master Ball non veniva salvata
+
+`CAMPI_RUN` elencava cinque tipi di ball su sei: `masterballs` mancava. Era
+l'unica a non essere salvata, quindi il premio più raro del gioco — una scelta
+su duemila — spariva riaprendo l'app.
+
+Per memoria, come si ottiene: **solo** dalla scelta premio di fine ondata,
+fascia MASTER (peso 0,5 su 100,5 → 0,6% delle scelte con fortuna 0), e dentro
+quella fascia pesa 6 su 70. Fa circa **1 scelta su 1946**; con fortuna 14 sale a
+1 su 904. Non si compra all'emporio e non arriva da nessun'altra strada.
