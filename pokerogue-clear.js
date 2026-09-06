@@ -6472,14 +6472,24 @@
       if (p.fainted || p.level >= tetto || p.level >= LIVELLO_MAX) continue;
       let m = inCampo.includes(p) ? 1 / quota : EXP_QUOTA_PANCHINA / quota;
       if (p.pokerus) m *= 1.5;
-      /* 🔴 RECUPERO RAPIDO. Chi e' molto sotto il tetto dell'ondata prende
-         molta piu' esperienza, fino a cinque volte tanto. Serve a chi entra
-         tardi — un nato dall'uovo arriva al livello 1 — e a chi è rimasto in
-         panchina troppo a lungo: senza, sarebbero inutilizzabili per sempre.
-         Il tetto resta invalicabile, quindi non si scavalca nessuno: si
-         RAGGIUNGE il gruppo, non lo si supera. */
-      const sotto = Math.max(0, tetto - p.level);
-      if (sotto > 5) m *= Math.min(5, 1 + sotto / 8);
+      /* 🔴 QUI C'ERA UN RECUPERO RAPIDO, e non doveva esserci.
+         Era `m *= min(5, 1 + sotto/8)`: chi stava molto sotto il tetto
+         dell'ondata prendeva fino a CINQUE VOLTE l'esperienza di chi
+         combatteva davvero. Il guaio non era la quantita' — era che arrivava
+         tutta insieme: un Pokemon di livello 1 che stendeva il primo
+         avversario finiva dritto al TETTO dell'ondata in un colpo solo
+         (livello 24 all'ondata 30). Un salto cosi' non si legge come un aiuto,
+         si legge come un guasto.
+         L'avevo messo credendo che servisse a chi nasce dall'uovo, che da noi
+         entra al livello 1. Ma nell'originale entra al livello 1 pure li'
+         (`egg.ts`: `addPlayerPokemon(pokemonSpecies, 1, ...)`) e un recupero
+         non esiste affatto: `Pokemon.addExp` somma l'esperienza e basta, e
+         l'unico freno e' il tetto d'ondata. A far salire in fretta i piccoli
+         ci pensa la CURVA, che ai primi livelli costa pochissimo — dal 1 al 6
+         in una lotta sola — e poi rallenta da sola. Chi resta indietro si
+         tira su con le Caramelle rare, che e' la risposta dell'originale.
+         Restano la quota della panchina (20%, l'Esperienza Condivisa) e il
+         tetto, che sono le due cose vere. */
       const guadagno = Math.floor(tot * m * boost);
       if (guadagno <= 0) continue;
       // le partite salvate prima dell'esperienza vera non hanno questi campi
@@ -14297,7 +14307,7 @@
   /* ---------------------------------------------------------------------- */
   /*  AVVIO — carica i dati reali, poi comincia                             */
   /* ---------------------------------------------------------------------- */
-  const DATA_V = 24;   // versione dei dati: alzala a ogni rigenerazione
+  const DATA_V = 25;   // versione dei dati: alzala a ogni rigenerazione
   /* I dati arrivano dallo strato aggiornato se c'e' (vedi pokerogue-boot.js,
      §28), altrimenti dai file locali. `window.PR` esiste solo quando la pagina
      e' stata avviata dal guscio: aprendo i file a mano si ricade sul fetch. */

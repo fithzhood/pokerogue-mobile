@@ -1538,9 +1538,14 @@
          strada che voleva provare. */
       const a = rollIVs(), b = rollIVs(), ivs = {};
       for (const k in a) ivs[k] = Math.max(a[k], b[k]);
+      /* ⚠️ Anche la MOSSA DA UOVO, o la sonda non provava la strada nuova:
+         si sblocca davvero, cosi' il nato la sa come in partita. */
+      const emProva = unlockEggMove(sp, tier || "COMMON", true);
+      if (emProva) saveMeta();          // se no lo sblocco muore al ricaricamento
       game.pendingHatches.push({ sp, shiny: false, shinyVar: 0, tipo: "MOVE", tier: tier || "COMMON",
                                  extra: [`Prova di schiusa: ${S[sp].it}.`],
-                                 nato: { ivs, nature: rollNature(), abilIndex: null } });
+                                 nato: { ivs, nature: rollNature(), abilIndex: null,
+                                         mossaUovo: emProva ? emProva.id : (EGGM[sp] || [])[0] || null } });
       hideMeta();
       processHatches(() => { game.phase = "CHOICE"; showMainMenu(); });
       return "schiusa avviata: " + S[sp].it;
@@ -2125,7 +2130,36 @@
   }
 
   // Sceglie la specie del nemico dal pool del bioma corrente.
+  /* 🔴 QUANDO UN LEGGENDARIO PUO' USCIRE DA SELVATICO.
+     Un Latios all'ondata 20 e' troppo presto, e non era sfortuna: la regola
+     non c'era proprio. I pool dei biomi contengono i leggendari nei ripiani
+     alti (ULTRA_RARE, BOSS_SUPER_RARE) e da noi quei ripiani erano pescabili
+     fin dalla prima ondata.
+     Nell'originale c'e' un filtro apposta — `Arena.checkLegendBST` — che
+     ripesca finche' non esce qualcosa di ammesso:
+       · leggendario/semi-leggendario/misterioso con totale base >= 660:
+         non prima dell'ondata 80;
+       · tutti gli altri leggendari: non prima della 55.
+     Latios ha 600 di totale, quindi la sua soglia e' la 55. */
+  function troppoPrestoPerLeggendario(k) {
+    const sp = S[k];
+    if (!sp) return false;
+    if (!(sp.leggendario || sp.semiLeggendario || sp.misterioso)) return false;
+    const bst = Object.values(sp.baseStats).reduce((a, b) => a + b, 0);
+    return game.wave < (bst >= 660 ? 80 : 55);
+  }
+
   function biomePick(boss) {
+    /* Fino a dieci ripescate, come l'originale (`attempt < 10`): se il bioma
+       ha davvero solo leggendari si tiene quello che esce. */
+    for (let t = 0; t < 10; t++) {
+      const k = biomePickGrezzo(boss);
+      if (!troppoPrestoPerLeggendario(k)) return k;
+    }
+    return biomePickGrezzo(boss);
+  }
+
+  function biomePickGrezzo(boss) {
     const b = BIOMES[game.biome];
     const gen1 = arr => (arr || []).filter(specieUsabile);
     if (!b) return randomSpecies(game.player.speciesId);
@@ -10422,6 +10456,8 @@
       <div class="meta-sub">vuoi portarlo con te in questa run?</div>
       <div class="cap-info">
         <div class="cap-riga nuovo">🥚 IV da uovo: il meglio di due tiri</div>
+        ${(nato.nato.mossaUovo && M[nato.nato.mossaUovo])
+          ? `<div class="cap-riga nuovo">⚔ Nasce sapendo <b>${M[nato.nato.mossaUovo].it}</b></div>` : ""}
         ${pieno ? `<div class="cap-riga">la squadra è al completo: sceglierai chi gli cede il posto</div>` : ""}
       </div>
       <div class="meta-actions two-col">
@@ -10432,15 +10468,35 @@
     metaEl().querySelector('[data-act="no"]').onclick = chiudi;
     metaEl().querySelector('[data-act="si"]').onclick = () => {
       /* ⚠️ LIVELLO 1, come nell'originale (`addPlayerPokemon(species, 1, ...)`).
-         Da solo sarebbe un peso morto a meta' run: a compensare c'e' il
-         recupero rapido in `assegnaEsperienza`, che da' molta piu' esperienza
-         a chi e' molto sotto il tetto dell'ondata. */
+         Sale in fretta da solo: ai primi livelli la curva costa pochissimo. */
       const mon = makeFighter(nato.sp, 1, {
         shiny: nato.shiny, shinyVar: nato.shinyVar,
         ivs: nato.nato.ivs, abilIndex: nato.nato.abilIndex,
       });
       if (nato.nato.nature) { mon.nature = nato.nato.nature; recomputeStats(mon); }
       const msgs = [];
+      /* 🔴 LA MOSSA DA UOVO CE L'HA GIA'.
+         Ogni schiusa sblocca una mossa da uovo della specie, e il messaggio lo
+         dice: «Bulbasaur ha imparato la mossa da uovo Rapidivoro!». Ma il
+         Pokemon che nasceva in quel momento NON la sapeva — lo sbloccio vale
+         per lo starter, cioe' per le partite future. Chi lo portava con se'
+         si trovava in mano un livello 1 con due mosse da nulla e la mossa
+         buona scritta solo in un messaggio.
+         ⚠️ Non e' cosi' nell'originale: li' una mossa da uovo sbloccata resta
+         solo RIAPPRENDIBILE (`getLearnableLevelMoves`, e per giunta solo per
+         chi parte in squadra). E' una scelta nostra, come il livello 1 offerto
+         in squadra: se il gioco annuncia che ha imparato quella mossa, deve
+         averla.
+         ⚠️ Con quattro mosse gia' occupate prende il posto dell'ULTIMA: a
+         livello 1 il repertorio e' di mosse deboli, ed e' quello che fanno i
+         giochi quando un uovo schiude con la mossa in piu'. */
+      const mu = nato.nato.mossaUovo;
+      if (mu && M[mu] && !mon.moves.some(m => m.id === mu)) {
+        const inst = { id: mu, pp: M[mu].pp, maxPp: M[mu].pp };
+        if (mon.moves.length < 4) mon.moves.push(inst);
+        else mon.moves[3] = inst;
+        msgs.push(`${mon.name} conosce già ${M[mu].it}, la sua mossa da uovo!`);
+      }
       accogliPokemon(mon, msgs, "");
       hideMeta();
       // a squadra piena `accogliPokemon` mette in coda la scelta del posto
@@ -10536,7 +10592,10 @@
         for (const k in a) ivsNato[k] = Math.max(a[k], b[k]);
         recordIVs(sp, ivsNato);
         game.pendingHatches.push({ sp, shiny, shinyVar, tipo, tier: egg.tier, extra,
-                                   nato: { ivs: ivsNato, nature: natNata0, abilIndex: conHA ? 2 : null } });
+                                   nato: { ivs: ivsNato, nature: natNata0, abilIndex: conHA ? 2 : null,
+                                           /* la mossa che QUESTA schiusa ha sbloccato: se lo porti
+                                              con te, nasce gia' sapendola (vedi `offriNato`) */
+                                           mossaUovo: em ? em.id : null } });
       }
     }
     saveMeta();
@@ -12234,10 +12293,25 @@
   }
   /* Mosse che il Pokemon POTREBBE conoscere dal suo learnset ma non ha:
      e' quello che fa ricordare il Fungo della memoria (MEMORY_MUSHROOM). */
+  /* Quello che il Fungo della memoria puo' far ricordare.
+     🔴 Erano solo le mosse imparate per livello. Mancavano le MOSSE DA UOVO,
+     che sono l'unica cosa che le uova danno davvero e si sbloccano una
+     schiusa alla volta: sbloccarne una e non poterla piu' mettere su nessuno
+     — se non su chi nasce in quel momento — vuol dire buttarla.
+     Nell'originale ci sono: `getLearnableLevelMoves` aggiunge in coda
+     `getUnlockedEggMoves()`, cioe' gli slot accesi nella maschera dello
+     starter. (Li' vale solo per chi parte in squadra e fuori dalle sfide
+     speciali; da noi vale sempre, come chiesto.)
+     ⚠️ La maschera sta sulla RADICE della linea evolutiva, non sulla specie
+     in campo: le mosse da uovo di Bulbasaur valgono anche per Venusaur. */
   function mosseDimenticate(p) {
-    return (LEARN[p.speciesId] || [])
-      .filter(([lv, mv]) => lv <= p.level && M[mv] && !p.moves.some(m => m.id === mv))
+    const gia = id => p.moves.some(m => m.id === id);
+    const perLivello = (LEARN[p.speciesId] || [])
+      .filter(([lv, mv]) => lv <= p.level && M[mv] && !gia(mv))
       .map(([, mv]) => mv);
+    const daUovo = unlockedEggMoves(rootOf(p.speciesId))
+      .filter(id => !gia(id) && !perLivello.includes(id));
+    return perLivello.concat(daUovo);
   }
   // Etere/Elisir: `moves` = quante mosse (1 = quella piu' scarica), `amount` = -1 pieno
   /* `howMany === 1` = una mossa sola: se `indice` c'e', e' quella SCELTA da chi
@@ -12518,7 +12592,10 @@
       target: "mon", dyn: "specieboost", avail: () => boostSpecieDisponibili().length > 0,
       valid: p => boostSpecieDisponibili().some(k => SPECIE_BOOST[k].specie.includes(p.speciesId)),
       apply: (p, pk) => addHeld(p, pk.boost) },
-    { tier: "GREAT", weight: 3, id: "mushroom", label: "Fungo della memoria", desc: "fa ricordare una mossa dimenticata", icon: "big_mushroom",
+    /* ⚠️ L'icona era `big_mushroom`, che negli asset NON C'E': la richiesta
+       tornava 404 e restava un riquadro vuoto. Il fungo che abbiamo si chiama
+       `max_mushrooms`. */
+    { tier: "GREAT", weight: 3, id: "mushroom", label: "Fungo della memoria", desc: "fa ricordare una mossa dimenticata", icon: "max_mushrooms",
       target: "mon", valid: p => mosseDimenticate(p).length > 0, avail: someone(p => mosseDimenticate(p).length > 0),
       /* 🔴 Sceglie CHI la ricorda, non il gioco. Nell'originale
          (`RememberMoveModifierType`) la mossa e' un argomento che arriva dal
@@ -12528,6 +12605,13 @@
          sempre. */
       ricorda: true,
       apply: (p, pk, id) => insegnaTm(id || rndOf(mosseDimenticate(p)), p) },
+    /* Fascia ROGUE: e' la cosa piu' vicina a una MT jolly che ci sia, e nei
+       giochi non esiste affatto. Deve restare un colpo di fortuna. */
+    { tier: "ROGUE", weight: 4, id: "strangemushroom", label: "Strano fungo",
+      desc: "insegna una mossa che non potrebbe imparare (10 proposte)", icon: "strano_fungo",
+      target: "mon", valid: alive, avail: () => true,
+      strana: true,
+      apply: (p, pk, id) => { if (id) insegnaTm(id, p); } },
 
     /* ===================== ULTRA ====================== */
     /* Toglie SOLO i cali, i bonus restano. Serve quando esci da una lotta
@@ -13557,6 +13641,9 @@
      buco vuoto sul telefono fino alla prossima ricostruzione. Sono 8 icone
      32x32 da 285 byte l'una (3 KB in tutto in base64). */
   const ITEM_DATAURI = {
+    /* Strano fungo: e' il fungo normale con la tinta girata al turchese —
+       lo stesso oggetto, ma «sbagliato», che e' esattamente quel che fa. */
+    strano_fungo: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAADTUlEQVR42u2XTUgUYRjHf9tu6VqwCBG7eHBWk8hDYOtp3UseEnSXRPPQJQ3cCMQwCPIodCkQIiOQpkN1CSphY9eFPNRlWzokgn146GPdwzJLBcuCYlHrdtB3nNmZ8WMquvjcZt73nf//eZ73/zzPwK79Z3PYPShJUln7vLi46PinBCoBmyd8AGScDSx1NuH038MOIcd2QY9NhwE4d2QAgFN5LwBPvXndmYvOBICO0GZkHJuBf06lqK+7C8BEKayuyclh0zPRzlsGItncIA2hkCUJhxX4WOY+s0qKmO+nCq4F1oJZrcnJYd5EOrjKCcb8/aYkXFYRqAQ387QS1Coys0rKMs17rLwX9vzLM37tWd0y5AJcS87VGCCbG+Tmaj+lzIDhIpumQJKksvt2G0udTWRzgwDU193dVhq0ZN5EOgBoef+NmYU8fncVK0MvDWmwvAPu2200SbXMLKzd8pNHvfQ09+Ep7d/0Igrgr1Nv1XMfFgum4FuqIJKOki0o1Nf6kNNzuvWH3aO65zOxa/r0BFvUs/GgvDMVVNaBSDq6Jqn1DwIGQtFgi2FPPCjbrwNWRASAFqjy3XaAbfUCQUTUCK0FfCHG/P077gsOO81GW6i04HYakssK+MbHJ7r3lw6fLlcSCfhCf7cdS5JUFsBCZq7GAHPNB+lW9qqeikIlJFl0LgPYioJLC17KDHAq56W7uCGpmGeUcLyPWKSDGC/4Ot6qgnuc1WubShskzNK32b3QpeBA8gM1KyNM9g7jWW+74WQfieOPqZka0cnNzCLpKPGgXM6Pt+J3V3Gl8zyzSopsQYGuRNmMiMOsAgJkVn4YdC6n54gGWwj4QroIFEvfKTqXmVVSyOk5JnuHeRQfVVPY09zH2VwjNa9G8F5+rSPhqgyTNEQZ4OR02KB3QYIgtB/qsIzE9eQd3h1/DMCDuk9cmLrFhfWyPL9TGYoqKACFp9mCok5HIv8iAlrzu6tokmoBmO9KGFJgOQ+IjfGgXBYkPM5qKAn5pQzgwtr35TYApADzXQnLi+jajlQCvhBFlqFk8k4Dni0o+N1VuKSAus/Ma1u9QDukmE052YLCzEIe7+XXO5qObY3lYkKutK28/Ws/JmaF5k9+Tnbtv9pvKfSw9TmS3vwAAAAASUVORK5CYII=",
     x_attack: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgBAMAAACBVGfHAAAAIVBMVEUAAAAgICCDMTGkSkrFYnPmg3uclJTunKzm1dX/5t7///8icg1iAAAAAXRSTlMAQObYZgAAAKpJREFUeF5joC9gFBRAFRBLS0QRYcxIW5mIoqA1alWaALICl1VLwxACgiJlXqtcwxLh8q7lRrOWl5jDBYRUwqdLugMFkBRUFoaYBjfCBEzDp4uXiJhGCMAEFFUrC8OdgArgKsrVS0SdK+C2iobPBCoIMWSAC1TOLFV1DhFAEpgeahpigiRQXhpsFKKCEBAJDTU2dFFE8pmxsbERUAcCCBsbCwqiBp8gA30BAGrtJrnF5vaHAAAAAElFTkSuQmCC",
     x_defense: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgBAMAAACBVGfHAAAAIVBMVEUAAAAgICA5OYtKSqRzYsV7g+aUlJysnO7V1ebe5v////+/l/rsAAAAAXRSTlMAQObYZgAAAKpJREFUeF5joC9gFBRAFRBLS0QRYcxIW5mIoqA1alWaALICl1VLwxACgiJlXqtcwxLh8q7lRrOWl5jDBYRUwqdLugMFkBRUFoaYBjfCBEzDp4uXiJhGCMAEFFUrC8OdgArgKsrVS0SdK+C2iobPBCoIMWSAC1TOLFV1DhFAEpgeahpigiRQXhpsFKKCEBAJDTU2dFFE8pmxsbERUAcCCBsbCwqiBp8gA30BAGrtJrnF5vaHAAAAAElFTkSuQmCC",
     x_sp_atk: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgBAMAAACBVGfHAAAAIVBMVEUAAAAgICBqaiCcnEqkpFrNzWqcnJTm5qzm5tX//97////u9APtAAAAAXRSTlMAQObYZgAAAKpJREFUeF5joC9gFBRAFRBLS0QRYcxIW5mIoqA1alWaALICl1VLwxACgiJlXqtcwxLh8q7lRrOWl5jDBYRUwqdLugMFkBRUFoaYBjfCBEzDp4uXiJhGCMAEFFUrC8OdgArgKsrVS0SdK+C2iobPBCoIMWSAC1TOLFV1DhFAEpgeahpigiRQXhpsFKKCEBAJDTU2dFFE8pmxsbERUAcCCBsbCwqiBp8gA30BAGrtJrnF5vaHAAAAAElFTkSuQmCC",
@@ -13987,25 +14074,94 @@
      che dice cosa fa la mossa. */
   /* Elenco delle mosse che quel Pokemon ha imparato per livello ma non ha
      piu': e' quello che il Fungo della memoria puo' restituire. */
+  /* Elenco di mosse fra cui SCEGLIERE, con la scheda apribile.
+     🔴 Il tasto ⓘ non e' un lusso: qui si sceglie fra dieci mosse che quel
+     Pokemon non ha mai avuto, e il solo nome non basta a decidere — la scheda
+     con potenza, precisione, PP ed effetto c'era gia' (`snippetMossa`), ma
+     viveva soltanto dentro il pannello squadra. */
+  let mossaApertaScelta = null;
+  function elencoMosseScelta(icona, titolo, sottotitolo, ids, onDone, back) {
+    if (!ids.length) { back(); return; }
+    const disegna = () => {
+      const righe = ids.map(id => {
+        const mv = M[id];
+        const on = mossaApertaScelta === id;
+        return `<div class="mv-riga">
+          <button class="btn move-btn" data-mv="${id}" style="background:${T[mv.type].color}">
+            <span class="move-name">${mv.it}</span>
+            <span class="move-meta">
+              <span class="ticon t-${mv.type}"></span><span class="cicon c-${mv.category}"></span>
+              <span class="move-pp">${mv.power > 0 ? "P" + mv.power + " \u00b7 " : ""}${mv.pp}/${mv.pp}</span>
+            </span>
+          </button>
+          <button class="mv-info${on ? " aperta" : ""}" data-i-mv="${id}" aria-label="Informazioni">\u24d8</button>
+        </div>${on ? snippetMossa(id) : ""}`;
+      }).join("");
+      showMetaScreen(`
+        <div class="meta-title tit-oggetto" style="font-size:clamp(19px,5.6vw,30px)"><img class="tit-icona" src="${itemIcon(icona)}" alt="">${titolo}</div>
+        <div class="meta-sub">${sottotitolo}</div>
+        <div class="ms-mosse-scelta">${righe}</div>
+        <div class="meta-actions"><button class="meta-btn ghost" data-act="back">\u21a9 Indietro</button></div>`);
+      metaEl().querySelectorAll("[data-mv]").forEach(b => b.onclick = () => {
+        mossaApertaScelta = null; onDone(b.dataset.mv);
+      });
+      metaEl().querySelectorAll("[data-i-mv]").forEach(b => b.onclick = () => {
+        mossaApertaScelta = mossaApertaScelta === b.dataset.iMv ? null : b.dataset.iMv;
+        disegna();
+      });
+      metaEl().querySelector('[data-act="back"]').onclick = () => { mossaApertaScelta = null; back(); };
+    };
+    disegna();
+  }
+
   function scegliMossaDimenticata(pick, mon, onDone, back) {
-    const perse = mosseDimenticate(mon);
-    if (!perse.length) { back(); return; }
-    const righe = perse.map(id => {
+    elencoMosseScelta("max_mushrooms", "Fungo della memoria",
+      `quale mossa deve ricordare ${mon.name}?`,
+      mosseDimenticate(mon), onDone, back);
+  }
+
+  /* 🔴 STRANO FUNGO — una mossa che quel Pokemon non potrebbe imparare.
+     Dieci proposte, pescate fra tutto cio' che NON gli spetta: niente
+     learnset per livello, niente mosse da uovo, niente MT che gia' potrebbe
+     usare. E' l'unico modo di dare a un Pokemon qualcosa di fuori scuola.
+     ⚠️ Si scartano le mosse a potenza VARIABILE senza dato (`power: -1`) e
+     quelle di stato senza effetto scritto: su una specie a caso farebbero
+     poco o niente e riempirebbero l'elenco di scelte morte. */
+  function mosseFuoriScuola(mon) {
+    const suo = new Set([
+      ...(LEARN[mon.speciesId] || []).map(x => x[1]),
+      ...(EGGM[rootOf(mon.speciesId)] || []),
+      ...(TMS.perSpecie[mon.speciesId] || []),
+      ...mon.moves.map(m => m.id),
+    ]);
+    const cand = Object.keys(M).filter(id => {
+      if (suo.has(id)) return false;
+      /* ⚠️ Fuori le 52 mosse DYNAMAX/GIGAMAX: nei dati hanno potenza 10 come
+         segnaposto (la vera la calcola la mossa di partenza) e senza la
+         trasformazione non fanno niente. In un elenco di dieci proposte
+         occupavano tre posti su dieci con roba morta. */
+      if (/^(MAX_|G_MAX_)/.test(id)) return false;
       const mv = M[id];
-      return `<button class="btn move-btn" data-mv="${id}" style="background:${T[mv.type].color}">
-        <span class="move-name">${mv.it}</span>
-        <span class="move-meta">
-          <span class="ticon t-${mv.type}"></span><span class="cicon c-${mv.category}"></span>
-          <span class="move-pp">${mv.power > 0 ? "P" + mv.power + " \u00b7 " : ""}${mv.pp}/${mv.pp}</span>
-        </span></button>`;
-    }).join("");
-    showMetaScreen(`
-      <div class="meta-title" style="font-size:clamp(19px,5.6vw,30px)">🍄 Fungo della memoria</div>
-      <div class="meta-sub">quale mossa deve ricordare ${mon.name}?</div>
-      <div class="ms-mosse-scelta">${righe}</div>
-      <div class="meta-actions"><button class="meta-btn ghost" data-act="back">\u21a9 Indietro</button></div>`);
-    metaEl().querySelectorAll("[data-mv]").forEach(b => b.onclick = () => onDone(b.dataset.mv));
-    metaEl().querySelector('[data-act="back"]').onclick = back;
+      if (!mv || !T[mv.type]) return false;
+      if (mv.category !== "STATUS" && !(mv.power > 0)) return false;
+      if (mv.category === "STATUS" && !mv.effect) return false;
+      return true;
+    });
+    // dieci a caso, senza ripetizioni
+    const out = [];
+    for (let i = 0; i < 10 && cand.length; i++) {
+      out.push(cand.splice(Math.floor(Math.random() * cand.length), 1)[0]);
+    }
+    return out;
+  }
+
+  function scegliMossaStrana(pick, mon, onDone, back) {
+    /* Le dieci si estraggono UNA VOLTA e restano quelle: se si ripescassero a
+       ogni ridisegno, aprire una scheda cambierebbe l'offerta sotto le dita. */
+    if (!pick._strane) pick._strane = mosseFuoriScuola(mon);
+    elencoMosseScelta("strano_fungo", "Strano fungo",
+      `${mon.name} non dovrebbe saperla… ma potrebbe impararla`,
+      pick._strane, onDone, back);
   }
 
   function chooseMove(pick, mon, onDone, back) {
@@ -14100,6 +14256,8 @@
         if (item.mossa) chooseMove(pick, p, (i) => conRacconto(p, () => item.apply(p, pick, i)), back);
         // il Fungo chiede QUALE mossa far ricordare
         else if (item.ricorda) scegliMossaDimenticata(pick, p, (id) => conRacconto(p, () => item.apply(p, pick, id)), back);
+        // lo Strano fungo propone dieci mosse fuori scuola
+        else if (item.strana) scegliMossaStrana(pick, p, (id) => conRacconto(p, () => item.apply(p, pick, id)), back);
         else conRacconto(p, () => item.apply(p, pick));
       }, back);
     } else {

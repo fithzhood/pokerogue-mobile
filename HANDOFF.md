@@ -4711,3 +4711,87 @@ quella base (incarnate, altered, normal, disguised, red-striped).
   corona, non la forma di riposo.
 
 Rigenerato: cambia **solo** `icons.json` (64.671 → 66.701 byte). `DATA_V` 24 → 25.
+
+## 53. Le mosse da uovo servono a qualcosa (rev 162)
+
+### 53.1 Il nato conosce già la sua mossa da uovo
+
+Ogni schiusa sblocca una mossa da uovo della specie, e il messaggio lo dice:
+«Bulbasaur ha imparato la mossa da uovo Geoforza!». Ma il Pokémon che nasceva
+in quel momento **non la sapeva** — lo sblocco vale per lo *starter*, cioè per
+le partite future. Chi lo portava con sé si trovava un livello 1 con due mosse
+da nulla e la mossa buona scritta solo in un messaggio.
+
+Ora la mossa appena sbloccata viaggia col nato (`nato.mossaUovo`) e gliela si
+insegna in `offriNato`; la carta dell'offerta lo dice («⚔ Nasce sapendo X»).
+
+⚠️ Non è così nell'originale: lì una mossa da uovo sbloccata resta solo
+**riapprendibile** (`getLearnableLevelMoves`, e per giunta solo per chi parte in
+squadra). È una scelta nostra, come il livello 1 offerto in squadra: se il gioco
+annuncia che l'ha imparata, deve averla.
+
+⚠️ Con quattro mosse già occupate prende il posto dell'ultima — a livello 1 il
+repertorio è di mosse deboli.
+
+### 53.2 Il Fungo della memoria le propone
+
+`mosseDimenticate` guardava solo il learnset per livello. Le mosse da uovo — che
+sono l'unica cosa che le uova danno davvero, una schiusa alla volta — non
+comparivano da nessuna parte: sbloccarne una e non poterla mettere su nessuno,
+se non su chi nasce in quel momento, vuol dire buttarla.
+
+Nell'originale ci sono: `getLearnableLevelMoves` accoda `getUnlockedEggMoves()`.
+Ora anche da noi, senza le restrizioni dell'originale (lì valgono solo per chi
+parte in squadra e fuori dalle sfide speciali).
+
+⚠️ La maschera sta sulla **radice** della linea evolutiva: le mosse da uovo di
+Bulbasaur valgono anche per Venusaur.
+
+Prova: Bulbasaur lv1 con Sporcolancio sbloccato → il Fungo lo propone e lo
+insegna (`TACKLE, GROWL, GUNK_SHOT 5/5`).
+
+### 53.3 Strano fungo, e il tasto ⓘ sulle mosse
+
+Oggetto nuovo di fascia ROGUE: insegna una mossa che quel Pokémon **non
+potrebbe imparare**, scelta fra dieci proposte. Nei giochi non esiste, ed è la
+cosa più vicina a una MT jolly: deve restare un colpo di fortuna.
+
+`mosseFuoriScuola` pesca fra tutto ciò che NON gli spetta — niente learnset per
+livello, niente mosse da uovo, niente MT che già potrebbe usare, niente mosse
+che ha già.
+
+⚠️ Fuori anche le **52 mosse Dynamax/Gigamax**: nei dati hanno potenza 10 come
+segnaposto (la vera la calcola la mossa di partenza) e senza la trasformazione
+non fanno nulla. Alla prima prova occupavano tre posti su dieci con roba morta.
+
+⚠️ Le dieci si estraggono **una volta sola** e restano quelle: ripescandole a
+ogni ridisegno, aprire una scheda cambierebbe l'offerta sotto le dita.
+
+I due funghi condividono ora `elencoMosseScelta`, con il tondino ⓘ che apre la
+scheda della mossa (`snippetMossa`, che esisteva già ma viveva solo dentro il
+pannello squadra). Su dieci mosse mai viste il solo nome non basta a decidere.
+
+⚠️ L'icona del Fungo della memoria era `big_mushroom`, che **negli asset non
+c'è**: la richiesta tornava 404 e restava un riquadro vuoto. Il fungo che
+abbiamo si chiama `max_mushrooms`. Lo Strano fungo è lo stesso sprite con la
+tinta girata al turchese (data URI, come il Riequilibrante).
+
+I titoli delle due schermate portano lo **sprite dell'oggetto**, non un'emoji.
+
+### 53.4 🔴 I LEGGENDARI SELVATICI ARRIVAVANO TROPPO PRESTO
+
+Un Latios all'ondata 20. Non era sfortuna: la regola non c'era proprio. I pool
+dei biomi tengono i leggendari nei ripiani alti (ULTRA_RARE, BOSS_SUPER_RARE) e
+da noi quei ripiani erano pescabili fin dalla prima ondata.
+
+Nell'originale c'è un filtro apposta, `Arena.checkLegendBST`, che ripesca (fino
+a dieci volte) finché non esce qualcosa di ammesso:
+
+| specie | non prima dell'ondata |
+|---|---|
+| leggendario/semi/misterioso con totale base ≥ 660 | 80 |
+| tutti gli altri leggendari | 55 |
+
+Latios ha 600 di totale, quindi la sua soglia è la 55.
+
+⚠️ È un filtro sui **selvatici**. Per gli allenatori vale la quota della §51.5.
