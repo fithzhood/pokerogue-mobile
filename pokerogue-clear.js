@@ -351,6 +351,33 @@
     }
     return out;
   }
+  /* 🔴 IL POKERUS NON SI ATTACCAVA A NESSUNO.
+     Ce l'aveva chi partiva con una delle tre specie del giorno, e restava suo
+     per sempre: un bonus fisso su un Pokemon solo. Nell'originale invece il
+     virus CAMMINA (`trySpreadPokerus`, chiamato a fine di ogni ondata): ogni
+     infetto puo' passarlo ai due VICINI DI POSTO in squadra, una volta su
+     dieci per vicino. Chi si e' appena contagiato in questo giro non lo
+     ripassa subito, o una squadra da sei si infetterebbe tutta in un'ondata.
+     ⚠️ I vicini sono quelli di POSIZIONE, non chi ha combattuto:
+     l'ordine della squadra e' parte della meccanica, e spostare un Pokemon
+     accanto a un infetto e' una mossa vera. */
+  function contagiaPokerus(messages) {
+    const nuovi = [];
+    game.party.forEach((p, i) => {
+      if (!p || !p.pokerus || nuovi.includes(i)) return;
+      for (const d of [-1, 1]) {
+        const v = game.party[i + d];
+        if (!v || v.pokerus) continue;
+        if (Math.random() < 0.1) {
+          v.pokerus = true;
+          nuovi.push(i + d);
+          if (messages) messages.push(`Il Pok\u00e9rus di ${p.name} contagia ${v.name}!`);
+        }
+      }
+    });
+    return nuovi.length;
+  }
+
   /* FIOCCO ("ribbon"). Nell'originale (`incrementRibbonCount`, chiamato da
      `awardFirstClassicCompletion`) si prende **completando la modalita'
      Classica**, cioe' battendo l'ondata 200 — e lo prende OGNI Pokemon che
@@ -1583,6 +1610,18 @@
     },
     roll: (n) => Array.from({ length: n || 10 }, () => rollReward([])),
     waveMoney: (w) => { const o = game.wave; game.wave = w; const m = waveMoney(1); game.wave = o; return m; },
+    /* Quanto paga l'avversario in campo, e quanto pagherebbe ogni ruolo a
+       questa ondata: serve a confrontare l'economia con quella originale. */
+    soldi: () => {
+      const molt = moltiplicatoreSoldi();
+      const tabella = {};
+      for (const c of TRAINER_CLASSES) tabella[c.name] = waveMoney(c.soldi || 1);
+      tabella["<capopalestra>"] = waveMoney(2.5);
+      tabella["<superquattro>"] = waveMoney(3.25);
+      tabella["<campione>"] = waveMoney(10);
+      return { ondata: game.wave, avversario: game.enemy && game.enemy.trainer, molt,
+               premio: molt > 0 ? waveMoney(molt) : 0, tabella };
+    },
     berries: (f) => { const msg = []; checkBerries(f || game.player, msg); return msg; },
     // incontri misteriosi: elenco, requisiti soddisfatti, e apertura forzata
     get encounters() { return MYSTERY_ENCOUNTERS; },
@@ -2378,6 +2417,205 @@
       : [];
   }
 
+  /* ======================================================================
+     LA MAPPA DEI LUOGHI (§61)
+
+     🔴 Con la Mappa in tasca si sceglieva dove andare fra tre nomi su tre
+     rettangoli colorati. Ma la Mappa e' proprio l'oggetto che dovrebbe farti
+     VEDERE dove sei e cosa ti aspetta: tre nomi non dicono se quella strada
+     porta in un vicolo cieco o si apre in quattro, e non dicono da dove sei
+     arrivato. Adesso la scelta e' un pezzo di mappa — dove sono, dove posso
+     andare, e cosa c'e' UN PASSO OLTRE ognuna delle tre — e da li' si apre
+     la mappa intera, con tutti i 35 luoghi e le strade che li legano.
+
+     ⚠️ I fili non sono disegnati a coordinate fisse: si tracciano DOPO
+     l'impaginazione, leggendo la posizione vera delle caselle
+     (`getBoundingClientRect`). E' l'unico modo perche' reggano con i nomi
+     lunghi, con la scala dei caratteri al 130% e su schermi diversi — una
+     griglia a numeri fissi si spacca al primo «Prateria Fiorita».
+     ====================================================================== */
+  const ZONA_ORIGINE = "TOWN";
+
+  // Distanza di ogni luogo da Citta' sul grafo VERO (quello dopo `apriLaMappa`).
+  // E' il "livello": serve a impaginare la mappa in righe che vogliano dire
+  // qualcosa invece che in ordine alfabetico.
+  function livelliZone() {
+    const dist = {};
+    if (!BIOMES[ZONA_ORIGINE]) return dist;
+    dist[ZONA_ORIGINE] = 0;
+    const coda = [ZONA_ORIGINE];
+    while (coda.length) {
+      const x = coda.shift();
+      for (const y of (BIOMES[x] && BIOMES[x].links) || []) {
+        if (BIOMES[y] && dist[y] == null) { dist[y] = dist[x] + 1; coda.push(y); }
+      }
+    }
+    return dist;
+  }
+  // Chi porta QUI: l'altra meta' del grafo, quella che non si legge dai `links`.
+  function entrateZona(k) {
+    return Object.keys(BIOMES).filter(a => ((BIOMES[a] || {}).links || []).includes(k));
+  }
+  const nomeZona = k => (BIOMES[k] && BIOMES[k].it) || k;
+
+  /* Una casella della mappa. `cls` aggiunge stati (ora / scelta / oltre /
+     spenta), `tap` la rende toccabile. Il colore e' quello del bioma: cielo
+     sopra, terra sotto, come lo sfondo che si vedra' arrivandoci. */
+  function nodoZona(k, id, cls, tap) {
+    const b = BIOMES[k] || { sky: "#555", ground: "#333" };
+    const tag = tap ? "button" : "div";
+    const visto = (game.zoneViste || []).includes(k) ? ' <i class="zn-visto" title="ci sei gia\' passato"></i>' : "";
+    const qui = k === game.biome ? '<span class="zn-qui">sei qui</span>' : "";
+    return `<${tag} class="zn ${cls || ""}" id="${id}" data-z="${k}"
+        style="background:linear-gradient(${b.sky}, ${b.ground});"${tap ? ` data-tap="${k}"` : ""}>
+      <span class="zn-nome">${nomeZona(k)}${visto}</span>${qui}</${tag}>`;
+  }
+
+  /* Traccia i fili DOPO l'impaginazione. `archi` e' un elenco di
+     { a, b, forte }: a e b sono gli id delle due caselle. La curva va da
+     centro a centro e passa SOTTO le caselle (che hanno il fondo pieno), cosi'
+     non serve calcolare dove finisce il bordo: la freccia si mette al 68% del
+     percorso, dove il filo si vede. */
+  function tracciaFili(box, archi) {
+    if (!box) return;
+    const vecchio = box.querySelector(".zn-fili");
+    if (vecchio) vecchio.remove();
+    const rb = box.getBoundingClientRect();
+    const w = box.scrollWidth, h = box.scrollHeight;
+    const centro = (id) => {
+      const el = box.querySelector("#" + id);
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { x: r.left - rb.left + box.scrollLeft + r.width / 2,
+               y: r.top - rb.top + box.scrollTop + r.height / 2 };
+    };
+    const pezzi = [];
+    for (const arco of archi) {
+      const a = centro(arco.a), b = centro(arco.b);
+      if (!a || !b) continue;
+      /* La curva si incurva PERPENDICOLARMENTE alla congiungente, di un ottavo
+         della sua lunghezza: due luoghi legati nei due sensi avrebbero due fili
+         sovrapposti, cosi' invece si separano. */
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const arco8 = Math.min(38, len / 8);
+      const cx = (a.x + b.x) / 2 - (dy / len) * arco8;
+      const cy = (a.y + b.y) / 2 + (dx / len) * arco8;
+      const cl = arco.forte ? "zf forte" : "zf";
+      pezzi.push(`<path class="${cl}" d="M${a.x.toFixed(1)},${a.y.toFixed(1)} Q${cx.toFixed(1)},${cy.toFixed(1)} ${b.x.toFixed(1)},${b.y.toFixed(1)}"/>`);
+      if (!arco.forte) continue;
+      // punta della freccia al 68% della curva, orientata sulla tangente
+      const t = 0.68, u = 1 - t;
+      const px = u * u * a.x + 2 * u * t * cx + t * t * b.x;
+      const py = u * u * a.y + 2 * u * t * cy + t * t * b.y;
+      const tx = 2 * u * (cx - a.x) + 2 * t * (b.x - cx);
+      const ty = 2 * u * (cy - a.y) + 2 * t * (b.y - cy);
+      const ang = Math.atan2(ty, tx) * 180 / Math.PI;
+      pezzi.push(`<path class="zp" d="M0,0 L-9,-4.5 L-9,4.5 Z" transform="translate(${px.toFixed(1)},${py.toFixed(1)}) rotate(${ang.toFixed(1)})"/>`);
+    }
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "zn-fili");
+    svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+    svg.setAttribute("width", w); svg.setAttribute("height", h);
+    svg.innerHTML = pezzi.join("");
+    box.insertBefore(svg, box.firstChild);
+  }
+
+  /* LA MAPPA INTERA. Tutti i luoghi, in righe per distanza da Citta'; tutte
+     le strade, chiare; e quelle del luogo scelto, accese con la freccia del
+     verso. Si tocca un luogo per illuminare le SUE strade. */
+  let zoneFuoco = null;
+  function showGrafoZone(indietro) {
+    const liv = livelliZone();
+    const chiavi = Object.keys(BIOMES).filter(k => k !== "END");
+    const maxLiv = Math.max(0, ...chiavi.map(k => (liv[k] == null ? -1 : liv[k])));
+    const fuoco = (zoneFuoco && BIOMES[zoneFuoco]) ? zoneFuoco : (game.biome || ZONA_ORIGINE);
+    zoneFuoco = fuoco;
+    const righe = [];
+    for (let L = 0; L <= maxLiv; L++) {
+      const dentro = chiavi.filter(k => liv[k] === L).sort((a, b) => nomeZona(a).localeCompare(nomeZona(b)));
+      if (!dentro.length) continue;
+      const cls = k => (k === fuoco ? "fuoco"
+        : ((BIOMES[fuoco].links || []).includes(k)) ? "verso"
+        : entrateZona(fuoco).includes(k) ? "da" : "spenta");
+      righe.push(`<div class="zn-riga-tit">${L === 0 ? "l'inizio" : `a ${L} pass${L === 1 ? "o" : "i"} da ${nomeZona(ZONA_ORIGINE)}`}</div>
+        <div class="zn-riga">${dentro.map(k => nodoZona(k, "g-" + k, cls(k), true)).join("")}</div>`);
+    }
+    if (BIOMES.END) {
+      righe.push(`<div class="zn-riga-tit">fuori dal grafo</div>
+        <div class="zn-riga">${nodoZona("END", "g-END", fuoco === "END" ? "fuoco" : "spenta", true)}</div>`);
+    }
+    const usc = (BIOMES[fuoco].links || []).filter(k => BIOMES[k]);
+    const ent = entrateZona(fuoco);
+    showMetaScreen(`
+      <div class="meta-title" style="font-size:clamp(19px,5.6vw,30px)">Mappa dei luoghi</div>
+      <div class="meta-sub">tocca un luogo per accendere le sue strade</div>
+      <div class="zn-mappa" id="zn-mappa">${righe.join("")}</div>
+      <div class="zn-legenda">
+        <div class="zn-leg-tit" style="background:linear-gradient(${BIOMES[fuoco].sky}, ${BIOMES[fuoco].ground});">${nomeZona(fuoco)}</div>
+        <div class="zn-leg-riga"><b>si va a</b> ${usc.length ? usc.map(nomeZona).join(" · ") : "— (di qui non si esce)"}</div>
+        <div class="zn-leg-riga"><b>si arriva da</b> ${ent.length ? ent.map(nomeZona).join(" · ") : "— (solo all'inizio)"}</div>
+      </div>
+      <div class="meta-actions"><button class="meta-btn ghost" data-a="back">↩ Indietro</button></div>`);
+    const box = metaEl().querySelector("#zn-mappa");
+    const archi = [];
+    for (const a of chiavi.concat(BIOMES.END ? ["END"] : [])) {
+      for (const b of (BIOMES[a] || {}).links || []) {
+        if (!BIOMES[b]) continue;
+        archi.push({ a: "g-" + a, b: "g-" + b, forte: a === fuoco || b === fuoco });
+      }
+    }
+    requestAnimationFrame(() => tracciaFili(box, archi));
+    box.querySelectorAll("[data-tap]").forEach(b => b.onclick = () => {
+      zoneFuoco = b.dataset.tap; showGrafoZone(indietro);
+    });
+    metaEl().querySelector('[data-a="back"]').onclick = indietro;
+  }
+
+  /* LA SCELTA, disegnata come un pezzo di mappa: dove sono, le vie che si
+     aprono, e cosa c'e' un passo oltre ognuna. Le caselle grandi si toccano,
+     quelle piccole no: servono a scegliere, non sono ancora raggiungibili. */
+  function schermataSceltaZona(links) {
+    game.phase = "BIOME";
+    zoneFuoco = game.biome;
+    const colonne = links.map((k, i) => {
+      const oltre = ((BIOMES[k] || {}).links || []).filter(x => BIOMES[x]).slice(0, 3);
+      return `<div class="zn-col">
+        ${nodoZona(k, "s-" + i, "scelta", true)}
+        <div class="zn-oltre">${oltre.map((x, j) => nodoZona(x, `o-${i}-${j}`, "oltre", false)).join("")}</div>
+      </div>`;
+    }).join("");
+    showMetaScreen(`
+      <div class="meta-title" style="font-size:clamp(19px,5.6vw,30px)">Dove prosegue il viaggio?</div>
+      <div class="meta-sub">sotto ogni via, dove porta il passo dopo</div>
+      <div class="zn-scelta" id="zn-scelta">
+        <div class="zn-riga">${nodoZona(game.biome, "s-ora", "ora", false)}</div>
+        <div class="zn-cols">${colonne}</div>
+      </div>
+      <div class="meta-actions"><button class="meta-btn ghost" data-a="grafo">Mappa completa</button></div>`);
+    const box = metaEl().querySelector("#zn-scelta");
+    const archi = [];
+    links.forEach((k, i) => {
+      archi.push({ a: "s-ora", b: "s-" + i, forte: true });
+      ((BIOMES[k] || {}).links || []).filter(x => BIOMES[x]).slice(0, 3)
+        .forEach((x, j) => archi.push({ a: "s-" + i, b: `o-${i}-${j}`, forte: false }));
+    });
+    requestAnimationFrame(() => tracciaFili(box, archi));
+    box.querySelectorAll("[data-tap]").forEach(b => b.onclick = () => {
+      hideMeta();
+      vaiNellaZona(b.dataset.tap);
+    });
+    metaEl().querySelector('[data-a="grafo"]').onclick = () => showGrafoZone(() => schermataSceltaZona(links));
+  }
+
+  function vaiNellaZona(k) {
+    game.biome = k;
+    game.zoneViste = game.zoneViste || [];
+    if (!game.zoneViste.includes(k)) game.zoneViste.push(k);
+    applyBiomeBackground();
+    queueMessages([`Ti addentri: ${BIOMES[game.biome].it}!`], nextWave);
+  }
+
   function showBiomeChoice() {
     const cura = curaSquadraDecina();
     if (cura.length) { queueMessages(cura, scegliBioma); return; }
@@ -2400,24 +2638,16 @@
     let links = ((b && b.links) || []).filter(k => BIOMES[k]);
     if (!links.length) links = ["PLAINS"];
     if (!game.charms.map) {
-      game.biome = links[Math.floor(Math.random() * links.length)];
+      const dove = links[Math.floor(Math.random() * links.length)];
+      game.zoneViste = game.zoneViste || [];
+      if (!game.zoneViste.includes(dove)) game.zoneViste.push(dove);
+      game.biome = dove;
       applyBiomeBackground();
       queueMessages([`Il viaggio prosegue: ${BIOMES[game.biome].it}!`], nextWave);
       return;
     }
     if (links.length > 3) { const cp = links.slice(); links = []; while (links.length < 3) links.push(cp.splice(Math.floor(Math.random() * cp.length), 1)[0]); }
-    const btns = links.map(k => {
-      const bb = BIOMES[k];
-      return `<button class="btn starter-btn" data-k="${k}" style="background:linear-gradient(${bb.sky}, ${bb.ground});color:#0c1018;text-shadow:none;">
-        <span class="starter-name">${bb.it}</span></button>`;
-    }).join("");
-    game.phase = "BIOME";
-    cmd().innerHTML = `<div class="prompt-line">Dove prosegue il viaggio?</div><div class="starter-grid">${btns}</div>`;
-    cmd().querySelectorAll(".starter-btn").forEach(btn => btn.onclick = () => {
-      game.biome = btn.dataset.k;
-      applyBiomeBackground();
-      queueMessages([`Ti addentri: ${BIOMES[game.biome].it}!`], nextWave);
-    });
+    schermataSceltaZona(links);
   }
 
   /* ======================================================================
@@ -2899,21 +3129,24 @@
   /* ---- Classi allenatore: nome, sprite e TIPI preferiti (squadre a tema) ---
      Con la dex completa ogni classe può pescare Pokémon coerenti dal proprio
      tema, invece che a caso: il Pescatore ha Acqua, il Fantasista Spettro, ecc. */
+  /* `soldi` = il `moneyMultiplier` che la classe ha nell'originale
+     (`trainer-config.ts`): il Bullo paga meta' di tutti, il Fantallenatore
+     piu' del doppio. Chi la' non ce l'ha dichiarato vale 1. */
   const TRAINER_CLASSES = [
-    { name: "il Bullo", sprites: ["youngster_m", "youngster_f"], types: ["NORMAL", "BUG"] },
-    { name: "il Pescatore", sprites: ["fisherman"], types: ["WATER"] },
-    { name: "il Montanaro", sprites: ["hiker"], types: ["ROCK", "GROUND"] },
-    { name: "lo Scienziato", sprites: ["scientist_m", "scientist_f"], types: ["ELECTRIC", "STEEL", "POISON"] },
-    { name: "la Bellezza", sprites: ["beauty"], types: ["FAIRY", "NORMAL"] },
-    { name: "il Cinturanera", sprites: ["black_belt_m"], types: ["FIGHTING"] },
-    { name: "il Campeggiatore", sprites: ["camper_m", "camper_f"], types: ["GRASS", "BUG"] },
-    { name: "il Fantallenatore", sprites: ["ace_trainer_m", "ace_trainer_f"], types: null },   // qualsiasi
-    { name: "il Nuotatore", sprites: ["swimmer_m", "swimmer_f"], types: ["WATER", "ICE"] },
-    { name: "il Sensitivo", sprites: ["psychic_m", "psychic_f"], types: ["PSYCHIC"] },
-    { name: "la Streghetta", sprites: ["hex_maniac"], types: ["GHOST", "DARK"] },
-    { name: "il Mangiafuoco", sprites: ["firebreather"], types: ["FIRE"] },
-    { name: "il Ranger", sprites: ["ranger_m", "ranger_f"], types: ["GRASS", "FLYING"] },
-    { name: "la Recluta Team Rocket", sprites: ["rocket_grunt_m", "rocket_grunt_f"], types: ["POISON", "DARK"] },
+    { name: "il Bullo", sprites: ["youngster_m", "youngster_f"], types: ["NORMAL", "BUG"], soldi: 0.5 },
+    { name: "il Pescatore", sprites: ["fisherman"], types: ["WATER"], soldi: 1.25 },
+    { name: "il Montanaro", sprites: ["hiker"], types: ["ROCK", "GROUND"], soldi: 1 },
+    { name: "lo Scienziato", sprites: ["scientist_m", "scientist_f"], types: ["ELECTRIC", "STEEL", "POISON"], soldi: 1.7 },
+    { name: "la Bellezza", sprites: ["beauty"], types: ["FAIRY", "NORMAL"], soldi: 1.55 },
+    { name: "il Cinturanera", sprites: ["black_belt_m"], types: ["FIGHTING"], soldi: 1 },
+    { name: "il Campeggiatore", sprites: ["camper_m", "camper_f"], types: ["GRASS", "BUG"], soldi: 1.1 },
+    { name: "il Fantallenatore", sprites: ["ace_trainer_m", "ace_trainer_f"], types: null, soldi: 2.25 },   // qualsiasi
+    { name: "il Nuotatore", sprites: ["swimmer_m", "swimmer_f"], types: ["WATER", "ICE"], soldi: 1.3 },
+    { name: "il Sensitivo", sprites: ["psychic_m", "psychic_f"], types: ["PSYCHIC"], soldi: 1.4 },
+    { name: "la Streghetta", sprites: ["hex_maniac"], types: ["GHOST", "DARK"], soldi: 1.5 },
+    { name: "il Mangiafuoco", sprites: ["firebreather"], types: ["FIRE"], soldi: 1.4 },
+    { name: "il Ranger", sprites: ["ranger_m", "ranger_f"], types: ["GRASS", "FLYING"], soldi: 1.4 },
+    { name: "la Recluta Team Rocket", sprites: ["rocket_grunt_m", "rocket_grunt_f"], types: ["POISON", "DARK"], soldi: 1 },
   ];
 
   /* ---- Capipalestra: TUTTE le regioni, sprite reali, squadra MONOTIPO ----
@@ -3863,11 +4096,20 @@
     game.trainerTotal = 0; renderTrainerBalls();   // nascondi il vassoio
     game.trainerRoster = []; game.trainerIsRival = false; game.evilRank = null;
     game.capturedThisWave = false;
-    // assicura un Pokemon attivo vivo (se l'attivo e' caduto vincendo l'ondata)
+    /* 🔴 IL PROSSIMO LO SCEGLI TU.
+       Se l'attivo cadeva vincendo l'ondata (colpo finale scambiato, veleno che
+       lo porta via dopo il KO nemico), l'ondata dopo si apriva con
+       `firstAliveIndex()`: il PRIMO vivo della lista, senza chiedere niente.
+       Ti ritrovavi in campo qualcuno che non avevi scelto, contro un avversario
+       che ancora non conoscevi. Durante la lotta la scelta c'era gia'
+       (`promptForceSwitch`); mancava qui, che e' il caso piu' frequente.
+       ⚠️ `nextWave` si richiama da capo dopo la scelta: e' l'unico modo di
+       infilare una schermata in mezzo a una funzione che non e' asincrona. */
     if (game.player.fainted) {
-      const idx = firstAliveIndex();
-      if (idx < 0) return gameOver("KO");
-      setActive(idx);
+      const vivi = game.party.filter(p => !p.fainted);
+      if (!vivi.length) return gameOver("KO");
+      if (vivi.length > 1) { scegliChiApre(); return; }
+      setActive(game.party.indexOf(vivi[0]));
     }
     // ENDGAME (ha priorità su tutto): Superquattro, Campione, boss finale.
     // La Lega è quella della REGIONE estratta per questa run (game.league).
@@ -4498,8 +4740,26 @@
         ${bar("PS", "hp")}${bar("Att", "atk", fisica)}${bar("Dif", "def")}
         ${bar("A.Sp", "spatk", speciale)}${bar("D.Sp", "spdef")}${bar("Vel", "spd")}
       </div>
-      <div class="learn-nuova">
-        Vuole imparare <b>${nv.it}</b>
+      <!-- 🔴 LA MOSSA NUOVA ERA SCRITTA, LE ALTRE ERANO PULSANTI.
+           Qui si confronta: «questa al posto di quale?». Ma la nuova compariva
+           come una frase su fondo grigio e le quattro vecchie come pulsanti
+           colorati col tipo, la categoria e la potenza — due linguaggi diversi
+           per la stessa cosa, e il confronto lo dovevi fare a memoria.
+           Adesso ha la stessa forma delle altre: stesso riquadro, stesso
+           colore di tipo, stessi dati. ⚠️ Non e' cliccabile (non si sceglie
+           lei, si sceglie chi esce): nessun data-i, e il cursore resta
+           normale.
+           ATTENZIONE: dentro un template literal niente apici inversi, nemmeno
+           in un commento HTML: chiudono la stringa. -->
+      <div class="meta-sub learn-etichetta">Vuole imparare</div>
+      <div class="learn-riga">
+        <div class="btn move-btn learn-nuova-btn" style="background:${T[nv.type].color};">
+          <span class="move-name">${nv.it}</span>
+          <span class="move-meta">
+            <span class="ticon t-${nv.type}"></span><span class="cicon c-${nv.category}"></span>
+            ${nv.power > 0 ? `<span class="move-pot">P${nv.power}</span>` : ""}<span class="move-pp">${nv.pp}/${nv.pp}</span>
+          </span>
+        </div>
         <button class="chip-i ${learnAperto("nuova", moveId) ? "on" : ""}" data-i-new="1" title="cosa fa">ⓘ</button>
       </div>
       ${learnAperto("ab", (learnInfo || {}).id) ? snippetAbilita((learnInfo || {}).id) : ""}
@@ -4599,15 +4859,21 @@
       game.encReward = null;
       if (t) messages.push(t);
     }
-    // soldi: piu' per boss e capipalestra. Il Monetamuleto da' +20% per pezzo.
-    const base = (wasGym || wasEvilBoss ? 500 : wasBoss ? 260 : 90) + game.wave * 12;
-    const money = Math.floor(base * (1 + 0.2 * (game.charms.amulet || 0)) * (game.cuccagna ? 2 : 1));
-    game.money += money;
-    stessoMomento(messages, `Ricevi ₽${money}!`);
+    /* Soldi solo dagli allenatori, sulla curva dei prezzi (vedi
+       `moltiplicatoreSoldi`). Monetamuleto +20% a pezzo e Cuccagna ×2 come
+       nell'originale (`MoneyMultiplierModifier` e il tag Happy Hour). */
+    const molt = moltiplicatoreSoldi();
+    if (molt > 0) {
+      const money = Math.floor(waveMoney(molt) * (1 + 0.2 * (game.charms.amulet || 0)) * (game.cuccagna ? 2 : 1));
+      game.money += money;
+      stessoMomento(messages, `Ricevi ₽${money}!`);
+    }
     // i potenziamenti a tempo (Poteslot/Supercolpo) durano 5 ondate
     for (const k in game.tempBoost) if (--game.tempBoost[k] <= 0) { delete game.tempBoost[k]; if (game.tempBoostN) delete game.tempBoostN[k]; }
     // contatore del tesoro di Gimmighoul: cresce a ogni ondata vinta
     for (const p of game.party) if (p.speciesId === "GIMMIGHOUL") p.treasure = (p.treasure || 0) + 1;
+    // il virus fa un passo: come `trySpreadPokerus`, a fine ondata
+    contagiaPokerus(messages);
     /* 🔴 RACCOLTA (Pickup). Anche questa aveva `attrs: []` e non faceva
        nulla, pur essendo su 35 specie. Nell'originale
        (`PostBattleLootAbAttr`) a lotta VINTA raccoglie UNO degli oggetti che
@@ -6847,6 +7113,20 @@
     game.phase = "FORCESWITCH";
     renderParty("force");
   }
+  /* Scelta di chi APRE l'ondata, quando l'attivo e' caduto vincendo quella
+     prima. Non e' un cambio in battaglia: non ci sono trappole da far mordere
+     ne' abilita' d'ingresso da lanciare, la lotta non e' ancora cominciata. */
+  function scegliChiApre() {
+    game.phase = "FORCESWITCH";
+    renderParty("apre");
+  }
+  function apriConIndice(index) {
+    const target = game.party[index];
+    if (!target || target.fainted) return;
+    setActive(index);
+    hideMeta();
+    nextWave();
+  }
   function forceSwitchTo(index) {
     if (game.phase !== "FORCESWITCH") return;
     const target = game.party[index];
@@ -7107,6 +7387,7 @@
     }
     actor.volatile.fallita = false;   // e' partita: Pestone torna a potenza normale
     game._colpiMessi = 1;            // finche' `doDamage` non dice altro, e' un colpo
+    game._secondariGiaDati = false;  // idem per gli effetti a percentuale
     /* I VINCOLI (furia, rotolamento, baraonda) si contano da qui: la mossa e'
        partita e ha superato la precisione. Prima del danno, perche' la potenza
        di Rotolamento dipende da quanti colpi ha gia' messo a segno. */
@@ -7191,7 +7472,10 @@
 
     // 5. effetti (mattoncini). Se la mossa da danno non e' andata a segno, niente effetti.
     // chi ha incassato e' il fantoccio: gli effetti secondari non passano
-    if (landed && !colpisceSub) applyMoveAttrs(actor, foe, move, messages, game._colpiMessi);
+    if (landed && !colpisceSub) {
+      applyMoveAttrs(actor, foe, move, messages, game._colpiMessi,
+                     game._secondariGiaDati ? "senza-secondari" : "tutto");
+    }
     if (sacrificio && !actor.fainted) {
       actor.hp = 0; actor.fainted = true; actor._justHit = true;
       if (messages.snap) messages.snap();
@@ -7706,15 +7990,19 @@
         continue;
       }
       total += dealt; lastEff = res.effectiveness; if (res.crit) anyCrit = true; done++;
-      foe.hp = Math.max(0, foe.hp - dealt); foe._justHit = true;
       /* 🔴 UN EVENTO PER COLPO, quando i colpi sono piu' d'uno.
          Ogni colpo puo' essere critico per conto suo e ogni colpo puo'
          rompere uno scudo del boss: riassumerli in un totale voleva dire
          non far vedere ne' l'uno ne' l'altro. Adesso la barra cala un pezzo
          alla volta e il messaggio dello scudo (che `bossClamp` ha appena
          messo in coda) sta nel punto giusto della sequenza.
-         ⚠️ L'evento si crea DOPO aver tolto i PS: cosi' la sua
-         istantanea ha gia' il valore nuovo, e la barra scende su di lui. */
+         ⚠️ L'evento si crea PRIMA di togliere i PS, e subito dopo si
+         riallinea con `snap()`. E' l'unico ordine che fa calare la barra
+         ALLA FINE dell'animazione: `nextEvent` tiene il fotogramma `pre`
+         finche' l'animazione gira, e `pre` e' l'istantanea presa quando
+         l'evento e' nato. Creandolo dopo il danno, `pre` conteneva gia' i PS
+         scesi e la barra crollava PRIMA del colpo: si vedeva il risultato e
+         poi il pugno. */
       if (hits > 1) {
         /* Un colpo puo fare ZERO danni e rompere lo scudo lo stesso: succede
            quando i PS sono gia sul confine del segmento. Dirlo con un
@@ -7723,7 +8011,6 @@
         messages.push(dealt === 0 && scudoMsg.length
           ? `Colpo ${done} di ${hits}: lo scudo assorbe tutto!`
           : `Colpo ${done} di ${hits}: ${dealt} PS!`);
-        if (res.crit) stessoMomento(messages, "Colpo critico!");
         // e ogni colpo si vede: l'animazione della mossa, di nuovo
         if (messages.fx) {
           const chiave = animKeyForMove(move.id);
@@ -7731,6 +8018,11 @@
           segnaFx(messages, messages.length - 1, move.type, sideOf(foe), chiave, sideOf(actor));
         }
         messages._colpiSeparati = true;
+      }
+      foe.hp = Math.max(0, foe.hp - dealt); foe._justHit = true;
+      if (hits > 1) {
+        if (messages.snap) messages.snap();          // la barra cala all'impatto
+        if (res.crit) stessoMomento(messages, "Colpo critico!");
       }
       for (const t of scudoMsg) messages.push(t);
       if (foe.hp <= 0) {
@@ -7744,6 +8036,19 @@
           foe.hp = 1; messages.push(`${foe.name} ha resistito grazie alla Bandana!`);
         } else { foe.fainted = true; break; }
       }
+      /* 🔴 GLI EFFETTI DEL SINGOLO COLPO, SUBITO DOPO IL SINGOLO COLPO.
+         Il dado per gli effetti aggiuntivi si tirava gia' una volta per colpo
+         (§52), ma il RISULTATO arrivava tutto insieme alla fine: cinque
+         animazioni di Semitraglia e poi, in fondo, «e' paralizzato». Non si
+         capiva quale colpo avesse fatto cosa, e con la Multilente sembrava
+         che il colpo in piu' non contasse niente.
+         Adesso l'effetto sta nell'evento subito dopo quello del suo colpo: si
+         vede l'animazione, cala la barra, e li' si legge cos'e' successo.
+         ⚠️ Solo gli effetti A PERCENTUALE (stato, confusione,
+         tentennamento, sbalzi con `effectChance`): i cali GARANTITI che una
+         mossa si autoinfligge (Vampata −2 A.Sp) restano uno per mossa, o la
+         Multilente li raddoppierebbe. */
+      if (hits > 1 && !foe.fainted) applyMoveAttrs(actor, foe, move, messages, 1, "solo-secondari");
     }
     /* Altruismo: l'alleato che ha ricevuto la mano picchia il 50% in piu', per
        questo turno solo. Si spegne appena serve, o resterebbe acceso. */
@@ -7793,6 +8098,9 @@
     /* Quanti colpi sono andati a segno: lo legge `applyMoveAttrs` per tirare
        le percentuali una volta PER COLPO (vedi il riquadro li'). */
     game._colpiMessi = done;
+    /* Se i colpi erano piu' d'uno gli effetti a percentuale li ha gia' dati
+       ognuno per conto suo: la chiamata finale non deve ridarli. */
+    game._secondariGiaDati = hits > 1;
 
     const drain = attrs.find(a => a.kind === "drain");
     if (drain && total > 0 && actor.hp < actor.maxHp) {
@@ -7874,7 +8182,13 @@
   // Applica gli effetti-mattoncino (stato, statistiche, flinch, confusione, cura).
   // Su mossa STATUS: sempre. Su mossa d'attacco: solo con la chance secondaria
   // (tranne gli auto-effetti self, che sono garantiti).
-  function applyMoveAttrs(actor, foe, move, messages, colpi) {
+  /* Gli effetti che nei giochi si tirano A OGNI COLPO. `statStage` entra
+     nell'elenco solo quando la mossa dichiara una percentuale: senza, e' un
+     calo garantito e vale una volta sola. */
+  const EFFETTI_A_PERCENTUALE = new Set(["status", "confuse", "flinch"]);
+  /* `modo`: "tutto" (di serie), "solo-secondari" (chiamata a ogni colpo),
+     "senza-secondari" (chiamata finale, quando i colpi li hanno gia' dati). */
+  function applyMoveAttrs(actor, foe, move, messages, colpi, modo) {
     const isStatus = move.category === "STATUS";
     /* FORZABRUTTA: in cambio del +30% di potenza, gli effetti aggiuntivi non
        partono affatto. E' il patto dell'abilita', non un effetto collaterale. */
@@ -7916,6 +8230,11 @@
     };
     const secondary = () => isStatus || quanteVolte() > 0;
     for (const a of move.attrs || []) {
+      if (modo === "solo-secondari" || modo === "senza-secondari") {
+        const aPercentuale = !isStatus
+          && (EFFETTI_A_PERCENTUALE.has(a.kind) || (a.kind === "statStage" && ch > 0));
+        if ((modo === "solo-secondari") !== aPercentuale) continue;
+      }
       switch (a.kind) {
         case "status":    if (secondary()) { applyStatus(foe, a.status, messages); sincronizza(foe, actor, a.status, messages); } break;
         case "confuse":   if (secondary()) applyConfuse(foe, messages); break;
@@ -8732,14 +9051,19 @@
       ? `<span class="status-badge st-${status}">${STATUS_IT[status]}</span>` : "";
     el.innerHTML = `
       <div class="row1">
-        <span class="name">${iconaDex(fighter)}${fighter.name}<span class="gen g-${fighter.gender}">${genderSymbol(fighter)}</span>${badge}</span>
+        <span class="name">${iconaDex(fighter)}${fighter.name}<span class="gen g-${fighter.gender}">${genderSymbol(fighter)}</span></span>
         <span class="lvl"><span class="lvpfx">Lv.</span>${fighter.level}</span>
       </div>
       <div class="hp-bar-track">
         <div class="hp-bar-fill" style="width:${ratio * 100}%; background:${color};"></div>
         ${(fighter.segBounds || []).map(b => `<div class="seg-mark" style="left:${b / maxHp * 100}%"></div>`).join("")}
       </div>
-      <div class="hp-text">${Math.max(0, hp)} / ${maxHp}</div>
+      <!-- 🔴 LO STATO STAVA DENTRO IL NOME, che ha l'ellissi: con un nome
+           lungo («Tauros di Paldea», «Geyser…») la targhetta SCOTTATURA o
+           PARALISI veniva tagliata via, e lo stato piu' importante da vedere
+           spariva proprio quando il nome era lungo. Adesso sta sulla riga dei
+           PS, a SINISTRA: quella riga ha solo due numeri e spazio libero. -->
+      <div class="hp-text"><span class="hp-stato">${badge}</span><span>${Math.max(0, hp)} / ${maxHp}</span></div>
       ${barraExp(fighter)}
       <div class="ability-line"><span class="tipi-mini">${fighter.types.map(t => `<span class="ticon t-${t}"></span>`).join("")}</span>${fighter.ability ? fighter.ability.it : ""}</div>
       ${badgeStadi(fighter, ov && ov.stages)}
@@ -9228,6 +9552,11 @@
     const col = ratio > 0.5 ? "var(--hp-green)" : ratio > 0.2 ? "var(--hp-yellow)" : "var(--hp-red)";
     const inCampo = p === game.player || (game.double && p === game.player2);
     const st = p.status ? `<span class="status-badge st-${p.status}">${STATUS_IT[p.status]}</span>` : "";
+    /* Il Pokerus si vede: e' +50% di esperienza e si attacca ai vicini, quindi
+       decide sia chi mandare in campo sia in che ORDINE tenere la squadra.
+       Prima non compariva da nessuna parte e valeva solo per chi se lo
+       ricordava dalla schermata di partenza. */
+    const pkrs = p.pokerus ? `<span class="status-badge st-PKRS" title="Pok\u00e9rus: +50% esperienza, contagia i vicini di posto">PKRS</span>` : "";
     const types = p.types.map(t => `<span class="ticon t-${t}"></span>`).join("");
     const tag = tagExtra != null ? tagExtra
       : inCampo ? '<span class="party-active">in campo</span>'
@@ -9239,7 +9568,7 @@
     const nome = p.name.replace("✨", "").replace(/\s*\(.*\)\s*$/, "");
     return `<button class="pd-card compatta ${p.fainted ? "ko" : ""} ${inCampo ? "attiva" : ""} ${stato === "spento" ? "nonschierabile" : ""}" data-i="${i}" title="${p.name} · ${p.ability ? p.ability.it : ""}">
         <div class="pc-r1">${miniIcon(p.dex, 1.25)}<span class="pc-nome">${p.shiny ? cromStella(p.shinyVar) : ""}${nome}<span class="gen g-${p.gender}">${genderSymbol(p)}</span></span><span class="pc-lv">${p.level}</span></div>
-        <div class="pc-r2">${types}${st}</div>
+        <div class="pc-r2">${types}${st}${pkrs}</div>
         <div class="party-hp-track"><div class="party-hp-fill" style="width:${ratio * 100}%;background:${col};"></div></div>
         <div class="pc-r3"><span class="pc-ps">${Math.max(0, p.hp)}/${p.maxHp}</span><span class="pc-pips">${pips}</span>${tag}</div>
       </button>`;
@@ -9259,14 +9588,15 @@
     const boxLine = game.box.length ? `<div class="meta-sub">Box: ${game.box.length} Pokémon in deposito</div>` : "";
     /* Nel cambio FORZATO non si torna indietro: qualcuno deve scendere in campo.
        In «check» (dal negozio) si torna al negozio, e c'è lo spostamento oggetti. */
-    const backRow = (mode === "force" || mode === "staffetta") ? ""
+    const backRow = (mode === "force" || mode === "staffetta" || mode === "apre") ? ""
       : mode === "check"
         ? `<div class="meta-actions ${puoSpostare() ? "two-col" : ""}">
              ${puoSpostare() ? `<button class="meta-btn gacha" data-act="sposta">${ico("zaino")} Sposta oggetti</button>` : ""}
              <button class="meta-btn ghost" data-act="back">↩ Indietro</button></div>`
         : `<div class="meta-actions"><button class="meta-btn ghost" data-act="back">↩ Indietro</button></div>`;
-    const title = (mode === "force" || mode === "staffetta") ? "Chi mandi in campo?" : mode === "check" ? "La tua Squadra" : "Cambia Pokémon";
+    const title = (mode === "force" || mode === "staffetta" || mode === "apre") ? "Chi mandi in campo?" : mode === "check" ? "La tua Squadra" : "Cambia Pokémon";
     const sub = mode === "staffetta" ? "chi entra si tiene gli sbalzi di statistica"
+      : mode === "apre" ? "chi apre la prossima ondata"
       : mode === "force" ? "il tuo Pokémon è esausto"
       : mode === "check" ? "tocca un Pokémon per vedere la sua scheda"
       : "tocca chi deve scendere in campo";
@@ -9419,7 +9749,8 @@
        qualcuno. Il tasto non c'è proprio, invece di esserci spento. */
     if (puoScendere && go) go.onclick = () => {
       hideMeta();
-      if (mode === "force") forceSwitchTo(i);
+      if (mode === "apre") apriConIndice(i);
+      else if (mode === "force") forceSwitchTo(i);
       else if (mode === "staffetta") staffettaVerso(i);
       else playerSwitch(i);
     };
@@ -9967,7 +10298,7 @@
   const CAMPI_RUN = ["balls", "greatballs", "ultraballs", "rogueballs", "theftballs", "masterballs", "legendballs", "lastballs",
     "pendingTheft", "money", "stones", "charms", "tempBoost", "tempBoostN", "shopMarkup", "lati", "cuccagna",
     "cicloOffset", "encSeen", "encTiersSeen", "leagueIdx", "evilIdx", "finalBossIdx",
-    "rivalFemale", "rivalRoster", "hasMegaRing", "hasDynamaxBand", "active", "biome", "starterSpecies"];
+    "rivalFemale", "rivalRoster", "hasMegaRing", "hasDynamaxBand", "active", "biome", "zoneViste", "starterSpecies"];
 
   /* Un Pokemon e' gia' quasi tutto JSON. Le due eccezioni: `spr` (i dati
      dell'immagine, si ricaricano) e le abilita', che sono RIFERIMENTI dentro
@@ -10376,12 +10707,16 @@
           <span class="me-opt-s">${meta.vouchers ? `${meta.vouchers} voucher da spendere` : "nessun voucher: li danno i boss"}</span></button>
         <button class="me-opt" data-a="uova"><span class="me-opt-l">${ico("uovo")} Le mie Uova</span>
           <span class="me-opt-s">${eggs ? `${eggs} in incubazione` : "nessun uovo in incubazione"}</span></button>
+        ${game.charms.map ? `<button class="me-opt" data-a="mappa"><span class="me-opt-l"><img class="ico-sp" src="${itemIcon("map")}" alt=""> Mappa dei luoghi</span>
+          <span class="me-opt-s">dove sei, dove si puo' andare, e da dove ci si arriva</span></button>` : ""}
         <button class="me-opt" data-a="esci"><span class="me-opt-l">💾 Salva ed esci</span>
           <span class="me-opt-s">la run resta nello slot ${game.slot} · si riprende dall'ondata ${game.wave}</span></button>
         <button class="me-opt" data-a="back"><span class="me-opt-l">↩ Torna alla lotta</span></button>
       </div>`);
     metaEl().querySelector('[data-a="gacha"]').onclick = () => showGacha(null, showRunMenu);
     metaEl().querySelector('[data-a="uova"]').onclick = () => showEggs(showRunMenu);
+    const bm = metaEl().querySelector('[data-a="mappa"]');
+    if (bm) bm.onclick = () => showGrafoZone(showRunMenu);
     metaEl().querySelector('[data-a="esci"]').onclick = () => {
       /* ⚠️ Il salvataggio automatico scrive PRIMA di incrementare l'ondata
          (§26), quindi lo slot contiene "ondate completate": uscendo di qui si
@@ -12782,6 +13117,34 @@
   }
   // Soldi di un'ondata, come getWaveMoneyAmount dell'originale: serve sia per i
   // prezzi del negozio sia per il valore delle pepite.
+  /* 🔴 I SOLDI ARRIVAVANO DA OGNI ONDATA, ANCHE DAI SELVATICI.
+     Vinta un'ondata qualsiasi incassavi `(90|260|500) + ondata×12`: una retta,
+     mentre i prezzi dell'emporio seguono `waveMoney`, che sale come una
+     potenza. Risultato: fino all'ondata 50 incassavi circa 21.000₽ mentre
+     nell'originale ne incassi 4.500, e l'emporio smetteva di essere una
+     scelta — compravi tutto e rimescolavi i premi a ogni giro.
+     Nell'originale (`TrainerVictoryPhase` → `MoneyRewardPhase`) i soldi li
+     danno SOLO GLI ALLENATORI, e la cifra e' `waveMoney(moltiplicatore)`:
+     la stessa curva dei prezzi. Un selvatico non paga niente.
+     ⚠️ Restano tutte le altre entrate dell'originale: Pepite e Dobloantico
+     fra i premi, Raccolta, Introiti/Pugno dorato, il tesoro di Gimmighoul e
+     gli incontri misteriosi. */
+  const MOLT_SOLDI_RIVALE = [1, 1.25, 1.5, 1.75, 2.5, 3];   // RIVAL_1..6 dell'originale
+  function moltiplicatoreSoldi() {
+    const e = game.enemy;
+    if (!e || !e.trainer) return 0;                 // selvatici e boss finale: niente
+    if (game.wave === CHAMPION_WAVE) return 10;     // il Campione paga come dieci allenatori
+    if (e.elite) return 3.25;
+    if (e.gym) return 2.5;
+    if (e.rival) {
+      const i = RIVAL_WAVES.indexOf(game.wave);
+      return MOLT_SOLDI_RIVALE[i < 0 ? MOLT_SOLDI_RIVALE.length - 1 : i];
+    }
+    if (e.evil) return game.evilRank === "boss" ? 2.5 : game.evilRank === "admin" ? 1.5 : 1;
+    const cls = TRAINER_CLASSES.find(c => c.name === e.trainer);
+    return (cls && cls.soldi) || 1;
+  }
+
   function waveMoney(mult) {
     const w = game.wave || 1, set = Math.ceil(w / 10) - 1;
     const v = Math.pow((set + 1 + (0.75 + (((w - 1) % 10) + 1) / 10)) * 100, 1 + 0.005 * set) * (mult || 1);
@@ -14216,7 +14579,11 @@
       const item = REWARD_POOL.find(x => x.id === g.id);
       // rincaro dell'incontro "Da Monnezza a Meraviglia"
       const mult = g.mult * (game.shopMarkup || 1);
-      return { item, price: Math.max(10, Math.floor(base * mult / 10) * 10) };
+      /* Prezzo esatto come l'originale (`new ModifierTypeOption(..., cost)`,
+         che fa `Math.round`). Arrotondavamo alle decine PER DIFETTO: con i
+         soldi facili non si notava, adesso che sono contati si', e comunque
+         non c'e' motivo di regalare fino a 9₽ a riga. */
+      return { item, price: Math.max(1, Math.round(base * mult)) };
     });
   }
 

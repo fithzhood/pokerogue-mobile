@@ -5403,3 +5403,109 @@ coprono i capi. Quindi lo spazio fra le righe è **funzionale**: con le righe
 troppo vicine il filo spariva del tutto sotto le due caselle, e infatti la via
 di mezzo — quella perfettamente in verticale — non aveva la freccia. Da lì
 `.zn-scelta { gap: 28px }` e `.zn-col { gap: 22px }`.
+
+
+## 66. Negli incontri scegli tu chi (rev 177)
+
+> «C'è un incontro che permette di cambiare abilità a un pokemon e altri
+> simili, il problema è che il pkmn viene scelto a caso. Vorrei invece poterlo
+> scegliere io.»
+
+Una dozzina di opzioni facevano `rndOf(aliveParty())` o
+`Math.floor(Math.random() * game.party.length)`. Sono scelte importanti — in tre
+casi **perdi un Pokémon** — e le prendeva il sorteggio: con sei in squadra la
+probabilità di beccare quello giusto era una su sei.
+
+Due attrezzi nuovi:
+
+- `scegliMonIncontro(titolo, sotto, cand, poi)` — la squadra in caselle
+  (`cardCompatta`, le stesse del cambio in lotta), tocchi e scegli;
+- `encScegli(titolo, sotto, cand, poi)` — da usare dentro una `run()` di
+  incontro. Torna `null` quando ha aperto la scelta (il motore lo legge come
+  «me ne occupo io») e il testo dell'esito quando non c'era niente da
+  scegliere. **Con un solo candidato non chiede niente**: una schermata con un
+  pulsante è rumore.
+
+Convertiti: Commerciante di Vitamine (×2), Passione Ardente (×2), Sessione di
+Allenamento (×3), Pagliacciate (×3), la GTS (×2), Offerta Oscura, Un'offerta
+che non puoi rifiutare.
+
+⚠️ **Nel clown la scelta si fa PRIMA della lotta.** Il premio di un incontro che
+finisce in battaglia si riscuote dentro `game.encReward`, che gira *mentre si
+compone il racconto della vittoria*: aprire lì una schermata la farebbe sparire
+sotto ai messaggi del turno. Quindi: scegli chi, parte la lotta, e se vinci
+l'effetto cade su quello che avevi scelto.
+
+### 66.1 Un cambio in run entra nel dex
+
+> «Ogni cambiamento di natura o abilità dovuto a un incontro o a un oggetto
+> deve essere memorizzato per il menù di creazione squadra.»
+
+Natura e abilità si sbloccano per la specie quando le **vedi** su un esemplare
+(§33) — è così che poi le puoi scegliere schierando quella specie. Ma il
+controllo stava solo nella cattura: se l'abilità te la cambiava un incontro,
+quel Pokémon la aveva davvero e il dex non ne sapeva niente.
+
+`registraCambio(p)` chiude il buco: trova l'indice dell'abilità nella lista
+della specie, aggiorna `p.abilIndex` (o al salvataggio dopo l'indice non
+corrisponderebbe più) e registra abilità **e** natura sul capostipite, come fa
+la cattura. Torna le righe da mostrare; `conSblocchi(p, testo)` le attacca in
+coda all'esito.
+
+Verificato: l'allenamento «Pesante» su un Dudunsparce →
+«🔓✨ Abilità NASCOSTA sbloccata per Dunsparce: Paura!» e la maschera
+`meta.abils.MANKEY` a 4 (`ABIL_H`) dopo la Capsula su un Annihilape.
+
+
+## 67. Capsula Abilità (rev 177)
+
+> «Se non c'è creiamo un oggetto consumabile molto raro che fa cambiare
+> l'abilità di un pokemon, potendo scegliere persino la hidden. Deve permettere
+> di scegliere prima di usarlo.»
+
+Nei giochi la **Capsula Abilità** scambia fra le due normali e il **Cerotto
+Abilità** dà la nascosta; nell'originale non c'è né l'una né l'altro —
+l'abilità con cui esce un Pokémon te la tieni. Qui le due cose stanno in un
+oggetto solo, e la nascosta è compresa: è il motivo per cui vale la fascia
+**MASTER** (peso 10, come il Piccolo buco nero).
+
+Si sceglie **prima** di consumarla, in due passi: il Pokémon (`chooseTarget`,
+la strada già esistente per `target: "mon"`) e poi l'abilità
+(`scegliAbilita`, ramo nuovo di `grantItem` accanto a quelli del Fungo della
+memoria e dello Strano fungo). Quella che ha adesso è marcata «già sua» e
+disattivata: spendere l'oggetto per non cambiare niente sarebbe solo un modo di
+buttarlo. La nascosta porta il suo bollino viola.
+
+⚠️ `valid` e `avail` chiedono `abilitaPossibili(p).length > 1`: su una specie
+con una sola abilità la capsula non comparirebbe nemmeno fra i bersagli.
+
+⚠️ Sprite: `lock_capsule`, l'unica capsula fra gli asset e **non usata da nessun
+altro oggetto** — quindi niente data URI, viaggia già nell'APK (c'è dal primo
+commit del repo).
+
+⚠️ Le mosse prendono il colore dal **tipo**, con uno stile in linea: riusando
+`.move-btn` senza un colore proprio il pulsante restava bianco col testo bianco
+sopra. Da lì `.ab-scelta`.
+
+
+## 68. Le nature in un sottomenu (rev 177)
+
+> «Le nature disponibili nel menù di selezione di un pokemon durante la fase di
+> creazione della squadra devono essere un sottomenu a parte per non ingolfare
+> la schermata.»
+
+Anche mostrando solo quelle sbloccate erano una fila che, arrivati a dieci o
+quindici, riempiva mezza schermata e spingeva le mosse fuori campo. E il chip
+«🔒 +N da scoprire» apriva l'elenco **completo lì dentro**, cioè peggiorava
+proprio la cosa che doveva risolvere.
+
+Ora nella scheda c'è **una riga** — la natura scelta col suo effetto, più
+«N/25 sbloccate · tocca per cambiarla» — e il resto sta in `showSceltaNatura()`,
+raggruppate per la statistica che **alzano** (`NAT_GRUPPI`): è l'unico ordine
+che serve a chi sta scegliendo («mi serve più Velocità»), e mette le cinque
+neutre da parte invece che sparse in mezzo. Il lucchetto resta: sapere cosa c'è
+da conquistare è il punto.
+
+Misurato a 384 px con la scala caratteri al 130%: tutte e 25 ci stanno senza
+scorrere, e nella scheda tornano visibili insieme mosse, nota delle mosse da
+uovo e barre delle statistiche.
