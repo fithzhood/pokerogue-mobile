@@ -5988,3 +5988,34 @@ Verificato: Mareanie del Pescatore con Spora + Azione, bersaglio già avvelenato
 **Azione 10 volte su 10**. Controllo con bersaglio sano → Spora finché non
 attacca, poi Azione. E i messaggi: «Eroeferreo è già avvelenato!», «Eroeferreo è
 già confuso!».
+
+
+## 86. Gli oggetti si danno anche a chi è esausto (rev 185)
+
+> «Gli oggetti e alcune pozioni/caramelle si devono poter dare anche ai pkmn ko»
+
+**Ventidue** voci su ventiquattro avevano `valid: alive`, cioè «non si dà a chi è
+esausto». Ma nei giochi si dà benissimo: un Pokémon a terra può ricevere uno
+strumento da tenere, una Caramella rara, una vitamina, un PP-su, una Menta, un
+fungo, una MT. L'unica cosa che davvero non si può fare è **curargli i PS o lo
+stato** — per quello serve prima rianimarlo.
+
+Da noi voleva dire che dopo un KO lo strumento appena vinto lo dovevi dare per
+forza a qualcun altro, o buttarlo.
+
+Ora `valid: chiunque` per tutto ciò che coi PS non c'entra. Le cure tengono il
+loro filtro e non si toccano: `canHeal` (vivo e non a PS pieni), `hasStatus`,
+`isDown` per i Revitalizzanti. `alive` resta solo come rete di sicurezza in
+`chooseTarget`, per un oggetto futuro che si dimenticasse di dichiarare a chi si
+dà.
+
+⚠️ **Trappola trovata provandolo.** `recomputeStats` somma ai PS l'aumento del
+massimo: dando una Caramella rara a un Pokémon a terra il livello saliva, il
+massimo cresceva di qualche punto e lui si ritrovava con `fainted: true` **e tre
+PS** — vivo e morto insieme, con la barra che diceva una cosa e il motore
+un'altra. Nei giochi chi è a terra sale di livello e resta a terra: `if
+(f.fainted) f.hp = 0;` in fondo al ricalcolo.
+
+Verificato: Avanzi su uno esausto → li tiene, resta KO a 0 PS. Caramella rara →
+27 → 28, resta KO a 0 PS. Pozione sullo stesso → **bloccata**, gli altri tre
+selezionabili.

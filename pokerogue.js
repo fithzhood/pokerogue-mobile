@@ -777,6 +777,12 @@
     f.maxHp = f.stats.hp;
     if (oldMax > 0) f.hp = Math.min(f.maxHp, f.hp + Math.max(0, f.maxHp - oldMax));
     else f.hp = f.maxHp;
+    /* ⚠️ CHI E' ESAUSTO RESTA A ZERO. Il ricalcolo somma ai PS l'aumento
+       del massimo: dando una Caramella rara a un Pokemon a terra il livello
+       saliva, il massimo cresceva di qualche punto e lui si ritrovava con
+       `fainted: true` e tre PS — vivo e morto insieme. Nei giochi chi e' a
+       terra sale di livello e resta a terra. */
+    if (f.fainted) f.hp = 0;
   }
 
   // Una mossa STATUS e' "utile" se ha un effetto che il motore sa gestire.
@@ -13698,6 +13704,19 @@
   }
 
   // Predicati per i bersagli validi
+  /* 🔴 QUASI TUTTO CHIEDEVA UN BERSAGLIO IN PIEDI (§86).
+     Ventuno oggetti su ventiquattro avevano `valid: chiunque`, cioe' «non si da'
+     a chi e' esausto». Ma nei giochi si da' benissimo: un Pokemon a terra puo'
+     ricevere uno strumento da tenere, una Caramella rara, una vitamina, un
+     PP-su, una Menta, un fungo. L'unica cosa che davvero non si puo' fare e'
+     CURARGLI I PS o lo stato: per quello serve prima rianimarlo.
+     Da noi voleva dire che dopo un KO lo strumento appena vinto lo dovevi dare
+     per forza a qualcun altro, o buttarlo.
+     ⚠️ Le cure hanno gia' il loro filtro e non si toccano: `canHeal` (PS non
+     pieni e vivo), `hasStatus`, `isDown` per i Revitalizzanti. `alive` resta
+     solo come rete di sicurezza in `chooseTarget`, per un oggetto futuro che
+     si dimenticasse di dichiarare a chi si da'. */
+  const chiunque  = () => true;
   const canHeal   = p => !p.fainted && p.hp < p.maxHp;
   const isDown    = p => p.fainted;
   const hasStatus = p => !p.fainted && !!p.status;
@@ -13987,9 +14006,9 @@
     { tier: "COMMON", weight: 3, id: "maxether", label: "Etere max", desc: "PP pieni a una mossa che scegli tu", icon: "max_ether",
       target: "mon", mossa: true, valid: needsPp, avail: someone(needsPp), apply: (p, pk, i) => restorePp(p, 1, -1, i) },
     { tier: "COMMON", weight: 2, id: "candy", label: "Caramella rara", desc: "+1 livello", icon: "rare_candy",
-      target: "mon", valid: alive, apply: p => addLevels(p, 1) },
+      target: "mon", valid: chiunque, apply: p => addLevels(p, 1) },
     { tier: "COMMON", weight: 2, id: "berry", label: "Bacca", desc: "held: si attiva da sola in lotta", icon: "sitrus_berry",
-      target: "mon", valid: alive, dyn: "berry", apply: (p, pk) => addBerry(p, pk.berry) },
+      target: "mon", valid: chiunque, dyn: "berry", apply: (p, pk) => addBerry(p, pk.berry) },
     { tier: "COMMON", weight: 4, id: "xitem", label: "Strumento X", desc: "+20% a una statistica per 5 ondate", icon: "x_attack",
       target: "run", dyn: "xstat", apply: (p, pk) => {
         game.tempBoostN = game.tempBoostN || {};
@@ -14029,7 +14048,7 @@
     { tier: "GREAT", weight: 2, id: "ppup", label: "PP-su", desc: "alza i PP massimi di una mossa che scegli tu", icon: "pp_up",
       target: "mon", mossa: true, ppUp: true, valid: canPpUp, avail: someone(canPpUp), apply: (p, pk, i) => applyPpUp(p, 1, i) },
     { tier: "GREAT", weight: 3, id: "vit", label: "Vitamina", desc: "+10% a una statistica base", icon: "protein",
-      target: "mon", valid: alive, dyn: "stat", apply: (p, pk) => { p.vits[pk.stat] = (p.vits[pk.stat] || 0) + 1; recomputeStats(p); } },
+      target: "mon", valid: chiunque, dyn: "stat", apply: (p, pk) => { p.vits[pk.stat] = (p.vits[pk.stat] || 0) + 1; recomputeStats(p); } },
     /* Le pepite dicono QUANTO valgono: dipende dall'ondata, quindi la
        descrizione e' una funzione (come `getDescription` dell'originale, che
        scrive "una contenuta quantita' di soldi (₽1.234)"). */
@@ -14077,8 +14096,8 @@
     { tier: "MASTER", weight: 10, id: "abilitycapsule", label: "Capsula Abilità",
       desc: "cambia l'abilit\u00e0 di un Pok\u00e9mon, anche in quella nascosta", icon: "lock_capsule",
       target: "mon", abilita: true,
-      valid: p => !p.fainted && abilitaPossibili(p).length > 1,
-      avail: someone(p => !p.fainted && abilitaPossibili(p).length > 1),
+      valid: p => abilitaPossibili(p).length > 1,
+      avail: someone(p => abilitaPossibili(p).length > 1),
       apply: (p, pk, a) => {
         if (!a || !ABIL[a]) return;
         p.ability = ABIL[a];
@@ -14089,7 +14108,7 @@
        giochi non esiste affatto. Deve restare un colpo di fortuna. */
     { tier: "ROGUE", weight: 4, id: "strangemushroom", label: "Strano fungo",
       desc: "insegna una mossa che non potrebbe imparare (10 proposte)", icon: "strano_fungo",
-      target: "mon", valid: alive, avail: () => true,
+      target: "mon", valid: chiunque, avail: () => true,
       strana: true,
       apply: (p, pk, id) => { if (id) insegnaTm(id, p); } },
 
@@ -14107,7 +14126,7 @@
     { tier: "ULTRA", weight: 6, id: "ultraballs", label: "Ultra Ball ×5", desc: "cattura ×2", icon: "ub", ball: true,
       target: "run", apply: () => { game.ultraballs += 5; } },
     { tier: "ULTRA", weight: 9, id: "typeboost", label: "Strumento di tipo", desc: "held: +20% alle mosse di un tipo", icon: "charcoal",
-      target: "mon", valid: alive, dyn: "type",
+      target: "mon", valid: chiunque, dyn: "type",
       apply: (p, pk) => { p.held.typeboost = p.held.typeboost || {}; p.held.typeboost[pk.type] = (p.held.typeboost[pk.type] || 0) + 1; } },
     { tier: "ULTRA", weight: 12, id: "bignugget", label: "Granpepita", desc: () => `soldi in quantità moderata (₽${waveMoney(2.5)})`, icon: "big_nugget",
       target: "run", apply: () => { game.money += waveMoney(2.5); } },
@@ -14116,17 +14135,17 @@
     { tier: "ULTRA", weight: 4, id: "rarercandy", label: "Caramella rarissima", desc: "+1 livello a TUTTA la squadra", icon: "rarer_candy",
       target: "party", apply: () => { for (const q of game.party) addLevels(q, 1); } },
     { tier: "ULTRA", weight: 4, id: "reviverseed", label: "Revitalseme", desc: "held: rianima una volta al 50%", icon: "reviver_seed",
-      target: "mon", valid: alive, apply: p => addHeld(p, "reviverseed") },
+      target: "mon", valid: chiunque, apply: p => addHeld(p, "reviverseed") },
     { tier: "ULTRA", weight: 3, id: "quickclaw", label: "Rapidartigli", desc: "held: 10% di attaccare per primo", icon: "quick_claw",
-      target: "mon", valid: alive, apply: p => addHeld(p, "quickclaw") },
+      target: "mon", valid: chiunque, apply: p => addHeld(p, "quickclaw") },
     { tier: "ULTRA", weight: 7, id: "widelens", label: "Grandelente", desc: "held: +5% precisione", icon: "wide_lens",
-      target: "mon", valid: alive, apply: p => addHeld(p, "widelens") },
+      target: "mon", valid: chiunque, apply: p => addHeld(p, "widelens") },
     { tier: "ULTRA", weight: 4, id: "eviolite", label: "Evolcondensa", desc: "held: +50% difese se non evoluto", icon: "eviolite",
-      target: "mon", valid: p => alive(p) && (S[p.speciesId].evolutions || []).length > 0, apply: p => addHeld(p, "eviolite") },
+      target: "mon", valid: p => (S[p.speciesId].evolutions || []).length > 0, apply: p => addHeld(p, "eviolite") },
     { tier: "ULTRA", weight: 3, id: "toxicorb", label: "Tossicsfera", desc: "held: ti avvelena a fine turno", icon: "toxic_orb",
-      target: "mon", valid: alive, apply: p => addHeld(p, "toxicorb") },
+      target: "mon", valid: chiunque, apply: p => addHeld(p, "toxicorb") },
     { tier: "ULTRA", weight: 3, id: "flameorb", label: "Fiammosfera", desc: "held: ti scotta a fine turno", icon: "flame_orb",
-      target: "mon", valid: alive, apply: p => addHeld(p, "flameorb") },
+      target: "mon", valid: chiunque, apply: p => addHeld(p, "flameorb") },
     { tier: "ULTRA", weight: 5, id: "candyjar", label: "Barattolo di caramelle", desc: "+1 livello per ogni caramella", icon: "candy_jar",
       target: "run", apply: () => { game.charms.candyJar = (game.charms.candyJar || 0) + 1; } },
     { tier: "ULTRA", weight: 8, id: "expcharm", label: "Esperienzamuleto", desc: "+25% esperienza", icon: "exp_charm",
@@ -14143,7 +14162,7 @@
       target: "run", dyn: "tm", tmTier: "ULTRA", avail: () => !!randomTm("ULTRA"),
       apply: (p, pk) => insegnaTm(pk.tm) },
     { tier: "ULTRA", weight: 4, id: "mint", label: "Menta", desc: "cambia la natura di un Pokémon", icon: "mint",
-      target: "mon", valid: alive, dyn: "nature",
+      target: "mon", valid: chiunque, dyn: "nature",
       /* 🔴 Cambiava la natura e basta. Nell'originale la Menta chiama
          `unlockSpeciesNature`, cioe' quella natura entra nel DEX e da li' in
          poi la puoi scegliere quando schieri quella specie come starter — e'
@@ -14170,23 +14189,23 @@
     { tier: "ULTRA", weight: 5, id: "lastballs", label: "Last Ball ×3", desc: "sul tiro di fine ondata conta i PS veri", icon: "xb", ball: true,
       target: "run", apply: () => { game.lastballs = (game.lastballs || 0) + 3; } },
     { tier: "ROGUE", weight: 3, id: "leftovers", label: "Avanzi", desc: "held: rigenera 1/16 a fine turno", icon: "leftovers",
-      target: "mon", valid: alive, apply: p => addHeld(p, "leftovers") },
+      target: "mon", valid: chiunque, apply: p => addHeld(p, "leftovers") },
     { tier: "ROGUE", weight: 3, id: "shellbell", label: "Conchinella", desc: "held: recuperi 1/8 del danno", icon: "shell_bell",
-      target: "mon", valid: alive, apply: p => addHeld(p, "shellbell") },
+      target: "mon", valid: chiunque, apply: p => addHeld(p, "shellbell") },
     { tier: "ROGUE", weight: 5, id: "focusband", label: "Bandana", desc: "held: 10% di resistere con 1 PS", icon: "focus_band",
-      target: "mon", valid: alive, apply: p => addHeld(p, "focusband") },
+      target: "mon", valid: chiunque, apply: p => addHeld(p, "focusband") },
     { tier: "ROGUE", weight: 3, id: "kingsrock", label: "Roccia di re", desc: "held: 10% di far tentennare", icon: "kings_rock",
-      target: "mon", valid: alive, apply: p => addHeld(p, "kingsrock") },
+      target: "mon", valid: chiunque, apply: p => addHeld(p, "kingsrock") },
     { tier: "ROGUE", weight: 4, id: "scopelens", label: "Mirino", desc: "held: +1 stadio di brutto colpo", icon: "scope_lens",
-      target: "mon", valid: alive, apply: p => addHeld(p, "scopelens") },
+      target: "mon", valid: chiunque, apply: p => addHeld(p, "scopelens") },
     { tier: "ROGUE", weight: 7, id: "souldew", label: "Cuorugiada", desc: "held: rinforza l'effetto della natura", icon: "soul_dew",
-      target: "mon", valid: p => alive(p) && NATURES[p.nature] && NATURES[p.nature].su,
+      target: "mon", valid: p => NATURES[p.nature] && NATURES[p.nature].su,
       apply: p => addHeld(p, "souldew") },
     { tier: "ULTRA", weight: 3, id: "mysticalrock", label: "Rocciamistica", desc: "held: il meteo dura più a lungo", icon: "mystical_rock",
-      target: "mon", valid: alive, apply: p => addHeld(p, "mysticalrock") },
+      target: "mon", valid: chiunque, apply: p => addHeld(p, "mysticalrock") },
     { tier: "ULTRA", weight: 3, id: "leek", label: "Porro", desc: "held: brutto colpo quasi garantito", icon: "leek",
-      target: "mon", valid: p => alive(p) && ["FARFETCHD", "SIRFETCHD"].includes(p.speciesId),
-      avail: () => aliveParty().some(p => ["FARFETCHD", "SIRFETCHD"].includes(p.speciesId)),
+      target: "mon", valid: p => ["FARFETCHD", "SIRFETCHD"].includes(p.speciesId),
+      avail: () => game.party.some(p => ["FARFETCHD", "SIRFETCHD"].includes(p.speciesId)),
       apply: p => addHeld(p, "leek") },
     { tier: "ROGUE", weight: 4, id: "berrypouch", label: "Porta bacche", desc: "30% di non consumare le bacche", icon: "berry_pouch",
       target: "run", apply: () => { game.charms.berryPouch = (game.charms.berryPouch || 0) + 1; } },
@@ -14213,13 +14232,13 @@
     { tier: "MASTER", weight: 18, id: "healingcharm", label: "Curamuleto", desc: "+10% a tutte le cure", icon: "healing_charm",
       target: "run", apply: () => { game.charms.healing = (game.charms.healing || 0) + 1; } },
     { tier: "MASTER", weight: 18, id: "multilens", label: "Multilente", desc: "held: un colpo in più a danno ridotto", icon: "multi_lens",
-      target: "mon", valid: alive, apply: p => addHeld(p, "multilens") },
+      target: "mon", valid: chiunque, apply: p => addHeld(p, "multilens") },
     { tier: "ROGUE", weight: 5, id: "gripclaw", label: "Presartigli", desc: "held: 10% al contatto di rubargli un oggetto (se ne ha)", icon: "grip_claw",
-      target: "mon", valid: alive, apply: p => addHeld(p, "gripclaw") },
+      target: "mon", valid: chiunque, apply: p => addHeld(p, "gripclaw") },
     { tier: "ULTRA", weight: 6, id: "sciarpanera", label: "Sciarpa nera", desc: "held: +50% alla probabilità degli effetti aggiuntivi", icon: "sciarpa_nera",
-      target: "mon", valid: alive, apply: p => addHeld(p, "sciarpanera") },
+      target: "mon", valid: chiunque, apply: p => addHeld(p, "sciarpanera") },
     { tier: "MASTER", weight: 10, id: "blackhole", label: "Piccolo buco nero", desc: "held: ruba un oggetto ogni turno", icon: "mini_black_hole",
-      target: "mon", valid: alive, apply: p => addHeld(p, "blackhole") },
+      target: "mon", valid: chiunque, apply: p => addHeld(p, "blackhole") },
     { tier: "MASTER", weight: 4, id: "voucherpremium", label: "Buono Uovo Premium", desc: "+10 tiri al gacha", icon: "coupon",
       target: "run", apply: () => { meta.vouchers += 10; saveMeta(); } },
 
