@@ -11330,21 +11330,25 @@
       setup(e) { e._cheap = waveMoney(1.5); e._exp = waveMoney(5); },
       optionsFor(e) {
         const due = p => { boostBase(p, meRandStat()); boostBase(p, meRandStat()); };
-        const sano = () => game.party.filter(p => !p.fainted && p.hp / p.maxHp > 0.5)[0];
+        const sani = () => game.party.filter(p => !p.fainted && p.hp / p.maxHp > 0.5);
         return [
           { label: "Accordo economico", sub: `₽${e._cheap} · 2 vitamine, ma ci sono effetti collaterali`,
             cond: () => game.money >= e._cheap,
-            run() { game.money -= e._cheap; const p = sano(); due(p);
+            run() { return encScegli("A chi le dai?", "perderà metà dei PS e cambierà natura", sani(), p => {
+              game.money -= e._cheap; due(p);
               p.hp = Math.max(1, p.hp - Math.floor(p.maxHp / 2));
               // come nell'originale la roba adulterata gli cambia anche la NATURA
               const vecchia = NATURES[p.nature].it;
               let n = rollNature(); while (n === p.nature) n = rollNature();
               p.nature = n; recomputeStats(p);
-              return `${p.name} prende due vitamine e si potenzia… ma la roba era adulterata: perde metà dei PS e da ${vecchia} diventa ${NATURES[n].it}!`; } },
+              return conSblocchi(p, `${p.name} prende due vitamine e si potenzia… ma la roba era adulterata: perde metà dei PS e da ${vecchia} diventa ${NATURES[n].it}!`);
+            }); } },
           { label: "Accordo costoso", sub: `₽${e._exp} · 2 vitamine, nessun rischio`,
             cond: () => game.money >= e._exp,
-            run() { game.money -= e._exp; const p = sano(); due(p);
-              return `${p.name} prende due vitamine di qualità e si potenzia!`; } },
+            run() { return encScegli("A chi le dai?", "due vitamine buone, nessun rischio", sani(), p => {
+              game.money -= e._exp; due(p);
+              return `${p.name} prende due vitamine di qualità e si potenzia!`;
+            }); } },
           { label: "Vai via", run: () => "Meglio non fidarsi. Prosegui." },
         ];
       },
@@ -11452,17 +11456,20 @@
           { label: "Trova la Fonte", sub: "combattimento difficile · strumento da tenere",
             run() { encBattle(e._mon, `${e._mon.name} è la fonte di tutto quel calore!`,
               () => `Fra le braci trovi: ${encGive("charcoal") || encReward("ULTRA")}!`); return null; } },
-          { label: "Accovacciati", sub: "subisci il meteo, ma impari qualcosa", run() {
-              encDamageParty(0.2);
-              const p = rndOf(aliveParty());
-              const sp = S[p.speciesId];
-              const cand = (sp.abilities.normal || []).filter(a => ABIL[a]);
-              if (cand.length) p.ability = ABIL[rndOf(cand)];
-              return `Il calore vi sfianca (tutti perdono PS), ma ${p.name} impara ad adattarsi: ora ha ${p.ability ? p.ability.it : "una nuova abilità"}!`; } },
+          { label: "Accovacciati", sub: "subisci il meteo, ma uno impara qualcosa", run() {
+              return encScegli("Chi si adatta al calore?", "cambia abilità", aliveParty(), p => {
+                encDamageParty(0.2);
+                const sp = S[p.speciesId];
+                const cand = (sp.abilities.normal || []).filter(a => ABIL[a]);
+                if (cand.length) p.ability = ABIL[rndOf(cand)];
+                return conSblocchi(p, `Il calore vi sfianca (tutti perdono PS), ma ${p.name} impara ad adattarsi: ora ha ${p.ability ? p.ability.it : "una nuova abilità"}!`);
+              }); } },
           { label: "I tuoi Pokémon di Fuoco aiutano", sub: "serve un Pokémon di tipo Fuoco",
             cond: () => fuoco().length > 0,
-            run() { const p = rndOf(fuoco()); addHeld(p, "leftovers");
-              return `${p.name} assorbe le fiamme e placa l'incendio! Fra i resti trovi degli Avanzi.`; } },
+            run() { return encScegli("Chi assorbe le fiamme?", "riceverà gli Avanzi", fuoco(), p => {
+              addHeld(p, "leftovers");
+              return `${p.name} assorbe le fiamme e placa l'incendio! Fra i resti trovi degli Avanzi.`;
+            }); } },
         ];
       },
     },
@@ -11492,22 +11499,24 @@
       cond: () => game.party.length > 1,
       options: [
         { label: "Controlla le offerte di scambio", sub: "scambia un tuo Pokémon con uno migliore", run() {
-            const i = Math.floor(Math.random() * game.party.length);
-            const vecchio = game.party[i];
-            const nuovo = makeFighter(specieDaIncontro(vecchio.speciesId), vecchio.level, { shiny: rollShiny() });
-            game.party[i] = nuovo;
-            if (game.active >= game.party.length) game.active = 0;
-            game.player = game.party[game.active];
-            if (!meta.unlocked[nuovo.speciesId]) { meta.unlocked[nuovo.speciesId] = nuovo.shiny ? 2 : 1; saveMeta(); }
-            return `Scambio concluso: ${vecchio.name} parte, arriva ${nuovo.name}!`; } },
-        { label: "Scambio Prodigioso", sub: "un Pokémon a caso, in cambio di uno a caso", run() {
-            const i = Math.floor(Math.random() * game.party.length);
-            const vecchio = game.party[i];
-            const nuovo = makeFighter(specieDaIncontro(null), vecchio.level + 3, { shiny: Math.random() < 0.05 || rollShiny() });
-            game.party[i] = nuovo;
-            game.player = game.party[game.active] || game.party[0];
-            if (!meta.unlocked[nuovo.speciesId]) { meta.unlocked[nuovo.speciesId] = nuovo.shiny ? 2 : 1; saveMeta(); }
-            return `Scambio Prodigioso! ${vecchio.name} vola via… e arriva ${nuovo.name}!`; } },
+            return encScegli("Chi metti in scambio?", "tornerà uno del suo livello", game.party.slice(), vecchio => {
+              const i = game.party.indexOf(vecchio);
+              const nuovo = makeFighter(specieDaIncontro(vecchio.speciesId), vecchio.level, { shiny: rollShiny() });
+              game.party[i] = nuovo;
+              if (game.active >= game.party.length) game.active = 0;
+              game.player = game.party[game.active];
+              if (!meta.unlocked[nuovo.speciesId]) { meta.unlocked[nuovo.speciesId] = nuovo.shiny ? 2 : 1; saveMeta(); }
+              return `Scambio concluso: ${vecchio.name} parte, arriva ${nuovo.name}!`;
+            }); } },
+        { label: "Scambio Prodigioso", sub: "cedi chi vuoi, torna uno a caso (di 3 livelli piu' alto)", run() {
+            return encScegli("Chi affidi allo Scambio Prodigioso?", "quello che torna non lo decidi tu", game.party.slice(), vecchio => {
+              const i = game.party.indexOf(vecchio);
+              const nuovo = makeFighter(specieDaIncontro(null), vecchio.level + 3, { shiny: Math.random() < 0.05 || rollShiny() });
+              game.party[i] = nuovo;
+              game.player = game.party[game.active] || game.party[0];
+              if (!meta.unlocked[nuovo.speciesId]) { meta.unlocked[nuovo.speciesId] = nuovo.shiny ? 2 : 1; saveMeta(); }
+              return `Scambio Prodigioso! ${vecchio.name} vola via… e arriva ${nuovo.name}!`;
+            }); } },
         { label: "Scambia un oggetto", sub: "un tuo strumento per uno migliore", run() {
             const p = aliveParty().find(x => Object.keys(x.held || {}).length);
             if (!p) return "Non hai strumenti da scambiare: il terminale si spegne.";
@@ -11667,17 +11676,18 @@
       id: "offer", tier: "GREAT", emoji: "🤝", npc: "rich_m", title: "Un'offerta che non puoi rifiutare",
       text: "Un ragazzino ben vestito ha adocchiato uno dei tuoi Pokémon e apre il portafoglio.",
       cond: () => game.party.length > 1,
-      setup(e) { e._i = Math.floor(Math.random() * game.party.length); e._prezzo = waveMoney(4); },
+      setup(e) { e._prezzo = waveMoney(4); },
       optionsFor(e) {
-        const mon = game.party[e._i] || game.party[0];
         const v = fastest();
         return [
-          { label: "Accetta l'offerta", sub: `cedi ${mon.name} · ₽${e._prezzo} + uno strumento`, run() {
-              game.party.splice(game.party.indexOf(mon), 1);
-              if (game.active >= game.party.length) game.active = 0;
-              game.player = game.party[game.active];
-              game.money += e._prezzo;
-              return `${mon.name} parte col ragazzino. Ricevi ₽${e._prezzo} e ${encReward("ULTRA")}!`; } },
+          { label: "Accetta l'offerta", sub: `cedi un Pokémon a tua scelta · ₽${e._prezzo} + uno strumento`, run() {
+              return encScegli("Chi cedi al ragazzino?", `₽${e._prezzo} e uno strumento in cambio`, game.party.slice(), mon => {
+                game.party.splice(game.party.indexOf(mon), 1);
+                if (game.active >= game.party.length) game.active = 0;
+                game.player = game.party[game.active];
+                game.money += e._prezzo;
+                return `${mon.name} parte col ragazzino. Ricevi ₽${e._prezzo} e ${encReward("ULTRA")}!`;
+              }); } },
           { label: "Deruba il ragazzino", sub: `${v.name} usa la sua Velocità`, run() {
               if (v.stats.spd >= encSoglia(2.4)) {
                 const s = encMoney(3);
@@ -11906,7 +11916,7 @@
       text: "Un vecchio maestro ti propone un allenamento mirato. Quanto vuoi spingere?",
       options: [
         { label: "Facile", sub: "migliora 2 IV di un membro", run() {
-            const p = rndOf(aliveParty());
+            return encScegli("Chi si allena?", "due IV bassi salgono", aliveParty(), p => {
             const bassi = VITS.filter(s => (p.ivs[s] || 0) < 31);
             if (!bassi.length) return `${p.name} ha già dato il massimo: nessun margine.`;
             const scelti = [];
@@ -11916,20 +11926,24 @@
               p.ivs[s] = Math.min(31, iv + (iv < 10 ? 10 : iv <= 20 ? 5 : 3));
             }
             recomputeStats(p);
-            return `${p.name} si allena: ${scelti.map(s => VIT_IT[s]).join(" e ")} ${scelti.length > 1 ? "migliorano" : "migliora"}!`; } },
+            return `${p.name} si allena: ${scelti.map(s => VIT_IT[s]).join(" e ")} ${scelti.length > 1 ? "migliorano" : "migliora"}!`;
+            }); } },
         { label: "Intermedio", sub: "cambia la natura di un membro", run() {
-            const p = rndOf(aliveParty());
+            return encScegli("Chi si allena?", "cambierà natura", aliveParty(), p => {
             const vecchia = NATURES[p.nature].it;
             p.nature = rndOf(NATURE_KEYS.filter(k => NATURES[k].su && k !== p.nature));
             recomputeStats(p);
-            return `Allenamento mirato: ${p.name} passa da ${vecchia} a ${natureLabel(p)}!`; } },
+            return conSblocchi(p, `Allenamento mirato: ${p.name} passa da ${vecchia} a ${natureLabel(p)}!`);
+            }); } },
         { label: "Pesante", sub: "cambia abilità a un membro", run() {
-            const p = rndOf(aliveParty()); const sp = S[p.speciesId];
+            return encScegli("Chi si allena?", "cambierà abilità", aliveParty(), p => {
+            const sp = S[p.speciesId];
             const scelte = (sp.abilities.normal || []).concat(sp.abilities.hidden ? [sp.abilities.hidden] : [])
               .filter(a => ABIL[a] && (!p.ability || ABIL[a].it !== p.ability.it));
             if (!scelte.length) return `${p.name} non ha altre abilità da provare.`;
             p.ability = ABIL[rndOf(scelte)];
-            return `Allenamento estremo! ${p.name} sviluppa una nuova abilità: ${p.ability.it}!`; } },
+            return conSblocchi(p, `Allenamento estremo! ${p.name} sviluppa una nuova abilità: ${p.ability.it}!`);
+            }); } },
         { label: "Vai via", run: () => "Ringrazi e prosegui." },
       ],
     },
@@ -11959,22 +11973,33 @@
       optionsFor(e) {
         return [
           { label: "Affronta il Clown", sub: "combattimento strano · cambia un'abilità",
-            run() { encBattle(e._mon, "« E allora si balla! » Il clown manda in campo Mr. Mime!", () => {
-                const p = rndOf(aliveParty()); const sp = S[p.speciesId];
+            /* ⚠️ La scelta si fa PRIMA della lotta. Il premio di un incontro
+               che finisce in battaglia si riscuote dentro `game.encReward`,
+               che gira mentre si compone il racconto della vittoria: aprire
+               li' una schermata la farebbe sparire sotto ai messaggi. */
+            run() { return encScegli("Su chi cade lo scherzo?", "se vinci, il clown gli cambia abilità", aliveParty(), p => {
+              encBattle(e._mon, "« E allora si balla! » Il clown manda in campo Mr. Mime!", () => {
+                const sp = S[p.speciesId];
                 const scelte = (sp.abilities.normal || []).filter(a => ABIL[a]);
                 if (scelte.length) p.ability = ABIL[rndOf(scelte)];
-                return `Lo scherzo finisce: ${p.name} si ritrova con l'abilità ${p.ability ? p.ability.it : "di sempre"}!`;
-              }); return null; } },
+                const sbl = registraCambio(p);
+                return `Lo scherzo finisce: ${p.name} si ritrova con l'abilità ${p.ability ? p.ability.it : "di sempre"}!`
+                     + (sbl.length ? "\n" + sbl.join("\n") : "");
+              });
+              return null;      // la lotta e' partita: nessun esito da mostrare adesso
+            }); } },
           { label: "Resta impassibile", sub: "cambia gli strumenti di un Pokémon", run() {
-              const p = rndOf(aliveParty());
-              p.held = {};
-              addHeld(p, rndOf(["leftovers", "shellbell", "focusband", "scopelens", "widelens"]));
-              return `Il clown si annoia e per dispetto rimescola lo zaino di ${p.name}: ora tiene ${heldSummary(p)}.`; } },
+              return encScegli("A chi rimescola lo zaino?", "perde quel che tiene e prende un altro strumento", aliveParty(), p => {
+                p.held = {};
+                addHeld(p, rndOf(["leftovers", "shellbell", "focusband", "scopelens", "widelens"]));
+                return `Il clown si annoia e per dispetto rimescola lo zaino di ${p.name}: ora tiene ${heldSummary(p)}.`;
+              }); } },
           { label: "Restituisci gli insulti", sub: "cambia i tipi di un Pokémon", run() {
-              const p = rndOf(aliveParty());
-              const tipi = Object.keys(T).filter(t => t !== "UNKNOWN");
-              p.types = [rndOf(tipi)];
-              return `Il clown esplode in una nuvola colorata: ${p.name} diventa di tipo ${T[p.types[0]].it}!`; } },
+              return encScegli("A chi cambia i tipi?", "diventerà di un tipo solo, a caso", aliveParty(), p => {
+                const tipi = Object.keys(T).filter(t => t !== "UNKNOWN");
+                p.types = [rndOf(tipi)];
+                return `Il clown esplode in una nuvola colorata: ${p.name} diventa di tipo ${T[p.types[0]].it}!`;
+              }); } },
         ];
       },
     },
@@ -12022,15 +12047,16 @@
       cond: () => game.party.length > 1,
       options: [
         { label: "Accetta", sub: "5 Rogue Ball · un tuo Pokémon viene 'potenziato'", run() {
-            game.rogueballs = (game.rogueballs || 0) + 5;
-            const i = Math.floor(Math.random() * game.party.length);
-            const vecchio = game.party[i];
-            const nuovo = makeFighter(specieDaIncontro(vecchio.speciesId), vecchio.level + 5, { shiny: rollShiny() });
-            game.party[i] = nuovo;
-            if (game.active >= game.party.length) game.active = 0;
-            game.player = game.party[game.active];
-            if (!meta.unlocked[nuovo.speciesId]) { meta.unlocked[nuovo.speciesId] = nuovo.shiny ? 2 : 1; saveMeta(); }
-            return `Ricevi 5 Rogue Ball. Poi la macchina si accende: ${vecchio.name} sparisce e al suo posto compare ${nuovo.name}!`; } },
+            return encScegli("Chi finisce nella macchina?", "sparirà, e al suo posto ne compare un altro (+5 livelli)", game.party.slice(), vecchio => {
+              game.rogueballs = (game.rogueballs || 0) + 5;
+              const i = game.party.indexOf(vecchio);
+              const nuovo = makeFighter(specieDaIncontro(vecchio.speciesId), vecchio.level + 5, { shiny: rollShiny() });
+              game.party[i] = nuovo;
+              if (game.active >= game.party.length) game.active = 0;
+              game.player = game.party[game.active];
+              if (!meta.unlocked[nuovo.speciesId]) { meta.unlocked[nuovo.speciesId] = nuovo.shiny ? 2 : 1; saveMeta(); }
+              return `Ricevi 5 Rogue Ball. Poi la macchina si accende: ${vecchio.name} sparisce e al suo posto compare ${nuovo.name}!`;
+            }); } },
         { label: "Rifiuta", run: () => "Non ti piace il modo in cui ti guarda. Prosegui." },
       ],
     },
@@ -12131,6 +12157,80 @@
     game.encTiersSeen = (game.encTiersSeen || []).concat(scelto.tier || "COMMON");
     return scelto;
   }
+
+  /* ======================================================================
+     🔴 NEGLI INCONTRI SCEGLIEVA IL GIOCO, NON TU (§66)
+
+     Una dozzina di opzioni degli incontri misteriosi facevano `rndOf(aliveParty())`:
+     l'allenamento che cambia natura, il clown che cambia abilita' o tipi, la
+     GTS che scambia un Pokemon, l'Offerta Oscura, il ragazzino che ne compra
+     uno. Sono tutte scelte IMPORTANTI — in certi casi perdi un Pokemon — e le
+     prendeva il sorteggio. Con sei in squadra la probabilita' di beccare quello
+     giusto era una su sei.
+     Adesso l'opzione apre la squadra e scegli tu. ⚠️ Se il candidato e' uno
+     solo non si chiede niente: una schermata con un pulsante e' rumore.
+     ====================================================================== */
+  function scegliMonIncontro(titolo, sotto, cand, poi) {
+    const cards = cand.map(p => cardCompatta(p, game.party.indexOf(p), "vivo")).join("");
+    showMetaScreen(`
+      <div class="meta-title" style="font-size:clamp(19px,5.6vw,30px)">${titolo}</div>
+      <div class="meta-sub">${sotto}</div>
+      <div class="pd-list griglia2">${cards}</div>`);
+    metaEl().querySelectorAll(".pd-card[data-i]").forEach(b => b.onclick = () => {
+      poi(game.party[parseInt(b.dataset.i, 10)]);
+    });
+  }
+  /* Da usare dentro una `run()` di incontro. Torna `null` quando ha aperto la
+     scelta (il motore lo legge come «me ne occupo io»), oppure direttamente il
+     testo dell'esito quando non c'era niente da scegliere. */
+  function encScegli(titolo, sotto, cand, poi) {
+    if (!cand.length) return "Nessun Pok\u00e9mon adatto: l'occasione sfuma.";
+    if (cand.length === 1) return poi(cand[0]);
+    scegliMonIncontro(titolo, sotto, cand, p => {
+      const t = poi(p);
+      if (t != null) meResult(t);
+    });
+    return null;
+  }
+
+  /* 🔴 UN CAMBIO IN RUN NON ENTRAVA NEL DEX.
+     Natura e abilita' si sbloccano per la specie quando le VEDI su un
+     esemplare (§33): e' cosi' che poi le puoi scegliere schierando quella
+     specie come starter. Ma il controllo stava solo nella cattura: se l'abilita'
+     te la cambiava un incontro — o adesso un oggetto — quel Pokemon la aveva
+     davvero e il dex non ne sapeva niente.
+     ⚠️ Si registra sul CAPOSTIPITE, come fa la cattura: e' lui che si
+     schiera. E si aggiorna anche `abilIndex` dell'esemplare, o al salvataggio
+     successivo l'indice non corrisponderebbe piu' all'abilita' vera. */
+  function indiceAbilita(speciesId, ab) {
+    const sp = S[speciesId];
+    if (!sp || !ab) return -1;
+    const norm = sp.abilities.normal || [];
+    for (let i = 0; i < norm.length; i++) if (ABIL[norm[i]] && ABIL[norm[i]].it === ab.it) return i;
+    if (sp.abilities.hidden && ABIL[sp.abilities.hidden] && ABIL[sp.abilities.hidden].it === ab.it) return 2;
+    return -1;
+  }
+  function registraCambio(p) {
+    if (!p) return [];
+    const root = rootOf(p.speciesId), fuori = [];
+    const idx = indiceAbilita(p.speciesId, p.ability);
+    if (idx >= 0) {
+      p.abilIndex = idx;
+      const nuova = registraAbilita(root, idx);
+      if (nuova) fuori.push(nuova.nascosta
+        ? `\u{1f513}\u2728 Abilit\u00e0 NASCOSTA sbloccata per ${S[root].it}: ${nuova.it}!`
+        : `\u{1f513} Nuova abilit\u00e0 sbloccata per ${S[root].it}: ${nuova.it}`);
+    }
+    const nat = registraNatura(root, p.nature);
+    if (nat) fuori.push(`\u{1f331} Nuova natura sbloccata per ${S[root].it}: ${nat}`);
+    if (fuori.length) saveMeta();
+    return fuori;
+  }
+  // Comodo dentro gli incontri: attacca gli sblocchi in coda al testo dell'esito.
+  const conSblocchi = (p, testo) => {
+    const x = registraCambio(p);
+    return x.length ? `${testo}<br><br>${x.join("<br>")}` : testo;
+  };
 
   function showMysteryEncounter(enc) {
     game.phase = "MYSTERY";
@@ -12598,12 +12698,57 @@
       ${extra ? `<div class="ms-extra">${extra}</div>` : ""}
     </div>`;
   }
+  /* Tutte le abilita' che quella SPECIE puo' avere: le due normali e la
+     nascosta. Non c'entra niente col dex — li' si tiene conto di quali hai
+     gia' VISTO, e serve a scegliere lo starter; qui e' un esemplare che ce
+     l'ha gia' davanti a se'. */
+  function abilitaPossibili(p) {
+    const sp = S[p.speciesId];
+    if (!sp) return [];
+    return (sp.abilities.normal || []).concat(sp.abilities.hidden ? [sp.abilities.hidden] : [])
+      .filter(a => ABIL[a]);
+  }
+
   function snippetAbilita(a) {
     const ab = ABIL[a]; if (!ab) return "";
     return `<div class="snippet">
       <div class="snip-top"><b>${ab.it}</b></div>
       <div class="snip-testo">${ab.description || "Nessuna descrizione."}</div>
     </div>`;
+  }
+
+  /* Il sottomenu delle nature. Raggruppate per la statistica che ALZANO: e'
+     l'unico ordine che serve a chi sta scegliendo («mi serve piu' Velocita'»),
+     e mette le cinque neutre da parte invece che sparse in mezzo. */
+  const NAT_GRUPPI = [
+    ["", "nessun effetto"], ["atk", "Attacco"], ["def", "Difesa"],
+    ["spatk", "Att. Speciale"], ["spdef", "Dif. Speciale"], ["spd", "Velocit\u00e0"],
+  ];
+  function showSceltaNatura() {
+    const c = starterCfg, sp = S[c.k];
+    const blocchi = NAT_GRUPPI.map(([stat, tit]) => {
+      const dentro = NATURE_KEYS.filter(n => (NATURES[n].su || "") === stat && (stat ? true : natureNeutra(n)));
+      if (!dentro.length) return "";
+      const chips = dentro.map(n => {
+        const libera = c.natPool.includes(n);
+        return `<button class="chip nat-chip ${c.nature === n ? "on" : ""} ${libera ? "" : "chiusa"}"
+          data-nat="${n}" ${libera ? "" : "disabled"} title="${naturaEffetto(n)}">${libera ? "" : "\u{1f512} "}${NATURES[n].it}
+          <span class="nat-eff">${naturaEffetto(n)}</span></button>`;
+      }).join("");
+      return `<div class="nat-gruppo"><div class="nat-gruppo-tit">${stat ? "+ " + tit : tit}</div>
+        <div class="nat-griglia">${chips}</div></div>`;
+    }).join("");
+    showMetaScreen(`
+      <div class="meta-title" style="font-size:clamp(19px,5.6vw,30px)">Natura di ${sp.it}</div>
+      <div class="meta-sub">${c.natPool.length} su ${NATURE_KEYS.length} sbloccate \u00b7 le altre si conquistano incontrandole</div>
+      <div class="nat-menu">${blocchi}</div>
+      <div class="meta-actions"><button class="meta-btn ghost" data-act="back">\u21a9 Indietro</button></div>`);
+    metaEl().querySelectorAll("[data-nat]").forEach(b => b.onclick = () => {
+      if (b.disabled) return;
+      c.nature = b.dataset.nat;
+      renderStarterDetail();
+    });
+    metaEl().querySelector('[data-act="back"]').onclick = renderStarterDetail;
   }
 
   function renderStarterDetail() {
@@ -12631,25 +12776,18 @@
         <button class="chip-i ${aperto("ab", a) ? "on" : ""}" data-i-ab="${a}" title="cosa fa">ⓘ</button>
       </span>`;
     }).join("");
-    /* NATURE: come le abilità, si vedono TUTTE e 25 ma quelle non ancora
-       incontrate sono chiuse col lucchetto — così si sa cosa c'è da
-       conquistare. Sotto il nome c'è l'effetto, che è l'unica cosa che serve
-       davvero per scegliere. */
-    /* ⚠️ Le nature sono VENTICINQUE: metterle tutte in elenco come le tre
-       abilità riempiva mezza schermata e spingeva le mosse fuori campo (visto
-       a schermo). Di base si vedono solo quelle che hai, più un chip che dice
-       quante ne restano; toccandolo si apre l'elenco completo col lucchetto,
-       che è il punto — sapere cosa c'è da conquistare. */
-    const natChiuse = NATURE_KEYS.filter(n => !c.natPool.includes(n));
-    const natVisibili = c.natTutte ? NATURE_KEYS : c.natPool;
-    const nature = natVisibili.map(n => {
-      const libera = c.natPool.includes(n);
-      return `<button class="chip nat-chip ${c.nature === n ? "on" : ""} ${libera ? "" : "chiusa"}"
-        data-nat="${n}" ${libera ? "" : "disabled"} title="${naturaEffetto(n)}">${libera ? "" : "🔒 "}${NATURES[n].it}
-        <span class="nat-eff">${naturaEffetto(n)}</span></button>`;
-    }).join("")
-    + (natChiuse.length ? `<button class="chip nat-chip nat-piu" data-nat-tutte="1">${c.natTutte ? "− nascondi" : "🔒 +" + natChiuse.length}
-        <span class="nat-eff">${c.natTutte ? "le bloccate" : "da scoprire"}</span></button>` : "");
+    /* 🔴 LE VENTICINQUE NATURE STAVANO DENTRO LA SCHEDA.
+       Anche mostrando solo quelle sbloccate erano una fila che, arrivati a
+       dieci o quindici, riempiva mezza schermata e spingeva le mosse fuori
+       campo. E il chip «più N da scoprire» apriva l'elenco COMPLETO li' dentro,
+       cioe' peggiorava proprio la cosa che doveva risolvere.
+       Adesso nella scheda c'e' UNA riga — la natura scelta col suo effetto —
+       e il resto sta in un sottomenu suo, dove le venticinque ci stanno
+       comode e raggruppate per statistica alzata. ⚠️ Il lucchetto
+       resta: sapere cosa c'e' da conquistare e' il punto. */
+    const nature = `<button class="chip nat-chip nat-apri on" data-nat-menu="1">${NATURES[c.nature].it}
+        <span class="nat-eff">${naturaEffetto(c.nature)}</span></button>
+      <span class="sd-nota">${c.natPool.length}/${NATURE_KEYS.length} sbloccate · tocca per cambiarla</span>`;
     /* Le mosse da uovo si mostrano in fondo e marcate: sono la ricompensa delle
        schiuse, non qualcosa che hai per diritto. La 4a e' la RARA. */
     const chip = (id, uovo) => {
@@ -12793,9 +12931,7 @@
       renderStarterDetail();
     });
     metaEl().querySelectorAll("[data-ab]").forEach(b => b.onclick = () => { c.ability = b.dataset.ab; renderStarterDetail(); });
-    metaEl().querySelectorAll("[data-nat]").forEach(b => b.onclick = () => { c.nature = b.dataset.nat; renderStarterDetail(); });
-    const natPiu = metaEl().querySelector("[data-nat-tutte]");
-    if (natPiu) natPiu.onclick = () => { c.natTutte = !c.natTutte; renderStarterDetail(); };
+    metaEl().querySelector("[data-nat-menu]").onclick = showSceltaNatura;
     metaEl().querySelectorAll("[data-mv]").forEach(b => b.onclick = () => {
       const id = b.dataset.mv, i = c.moves.indexOf(id);
       if (i >= 0) c.moves.splice(i, 1);
@@ -13240,6 +13376,28 @@
          sempre. */
       ricorda: true,
       apply: (p, pk, id) => insegnaTm(id || rndOf(mosseDimenticate(p)), p) },
+    /* 🔴 CAPSULA ABILITA' (nostra).
+       Nei giochi la Capsula Abilità scambia fra le due normali e il Cerotto
+       Abilità da' la nascosta; nell'originale non c'e' né l'una né l'altro,
+       l'abilità con cui esce un Pokémon te la tieni. Qui le due cose stanno
+       in un oggetto solo, e la nascosta è compresa: è il motivo per cui vale
+       la fascia MASTER.
+       ⚠️ Si sceglie PRIMA di consumarla — il Pokémon e poi l'abilità — e la
+       nuova entra nel dex del capostipite (`registraCambio`): da lì in poi la
+       puoi scegliere schierando quella specie.
+       Sprite: `lock_capsule`, l'unica capsula degli asset e non usata da
+       nessun altro oggetto. */
+    { tier: "MASTER", weight: 10, id: "abilitycapsule", label: "Capsula Abilità",
+      desc: "cambia l'abilit\u00e0 di un Pok\u00e9mon, anche in quella nascosta", icon: "lock_capsule",
+      target: "mon", abilita: true,
+      valid: p => !p.fainted && abilitaPossibili(p).length > 1,
+      avail: someone(p => !p.fainted && abilitaPossibili(p).length > 1),
+      apply: (p, pk, a) => {
+        if (!a || !ABIL[a]) return;
+        p.ability = ABIL[a];
+        registraCambio(p);
+      } },
+
     /* Fascia ROGUE: e' la cosa piu' vicina a una MT jolly che ci sia, e nei
        giochi non esiste affatto. Deve restare un colpo di fortuna. */
     { tier: "ROGUE", weight: 4, id: "strangemushroom", label: "Strano fungo",
@@ -14854,6 +15012,48 @@
       pick._strane, onDone, back);
   }
 
+  /* 🔴 LA SCELTA DELL'ABILITA'.
+     Stessa forma dell'elenco delle mosse (§59): un pulsante per riga con la
+     ⓘ che apre la spiegazione. Quella che ha adesso e' marcata e non si puo'
+     ripescare — spendere l'oggetto per non cambiare niente sarebbe solo un
+     modo di buttarlo. La NASCOSTA porta il suo bollino: e' il motivo per cui
+     uno tiene da parte la capsula. */
+  let abilitaApertaScelta = null;
+  function scegliAbilita(pick, mon, onDone, back) {
+    const tutte = abilitaPossibili(mon);
+    const sp = S[mon.speciesId];
+    const disegna = () => {
+      const righe = tutte.map(a => {
+        const ab = ABIL[a];
+        const suo = mon.ability && ab.it === mon.ability.it;
+        const nascosta = sp.abilities.hidden === a;
+        const on = abilitaApertaScelta === a;
+        return `<div class="mv-riga">
+          <button class="btn move-btn ab-scelta ${suo ? "gia" : ""}" data-ab="${a}" ${suo ? "disabled" : ""}>
+            <span class="move-name">${ab.it}</span>
+            <span class="move-meta">${nascosta ? '<span class="ab-nascosta">nascosta</span>' : ""}${suo ? '<span class="ab-gia">gi\u00e0 sua</span>' : ""}</span>
+          </button>
+          <button class="mv-info${on ? " aperta" : ""}" data-i-ab="${a}" aria-label="Informazioni">\u24d8</button>
+        </div>${on ? snippetAbilita(a) : ""}`;
+      }).join("");
+      showMetaScreen(`
+        <div class="meta-title tit-oggetto" style="font-size:clamp(19px,5.6vw,30px)"><img class="tit-icona" src="${itemIcon("lock_capsule")}" alt="">Capsula Abilit\u00e0</div>
+        <div class="meta-sub">Quale abilit\u00e0 per ${mon.name}?</div>
+        <div class="ms-mosse-scelta">${righe}</div>
+        <div class="meta-actions"><button class="meta-btn ghost" data-act="back">\u21a9 Indietro</button></div>`);
+      metaEl().querySelectorAll("[data-ab]").forEach(b => b.onclick = () => {
+        if (b.disabled) return;
+        abilitaApertaScelta = null; onDone(b.dataset.ab);
+      });
+      metaEl().querySelectorAll("[data-i-ab]").forEach(b => b.onclick = () => {
+        abilitaApertaScelta = abilitaApertaScelta === b.dataset.iAb ? null : b.dataset.iAb;
+        disegna();
+      });
+      metaEl().querySelector('[data-act="back"]').onclick = () => { abilitaApertaScelta = null; back(); };
+    };
+    disegna();
+  }
+
   function chooseMove(pick, mon, onDone, back) {
     const item = pick.item;
     const utile = (m, i) => item.ppUp ? (m.ppUp || 0) < 3 : m.pp < m.maxPp;
@@ -14948,6 +15148,8 @@
         else if (item.ricorda) scegliMossaDimenticata(pick, p, (id) => conRacconto(p, () => item.apply(p, pick, id)), back);
         // lo Strano fungo propone dieci mosse fuori scuola
         else if (item.strana) scegliMossaStrana(pick, p, (id) => conRacconto(p, () => item.apply(p, pick, id)), back);
+        // la Capsula chiede QUALE abilita' — prima di consumarsi
+        else if (item.abilita) scegliAbilita(pick, p, (a) => conRacconto(p, () => item.apply(p, pick, a)), back);
         else conRacconto(p, () => item.apply(p, pick));
       }, back);
     } else {

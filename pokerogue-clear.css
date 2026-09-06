@@ -2027,3 +2027,26 @@ button.zn:active { transform: translateY(1px); }
 }
 .zn-leg-riga { opacity: .9; }
 .zn-leg-riga b { opacity: .6; font-weight: 600; margin-right: 4px; }
+
+/* Il sottomenu delle nature (§68): venticinque voci raggruppate per la
+   statistica che alzano. Scorre da solo, cosi' il tasto Indietro resta fermo
+   in fondo invece di scappare sotto lo schermo. */
+.nat-menu { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; gap: 8px; }
+.nat-gruppo-tit { font-size: clamp(10px, 2.8vw, 13px); opacity: .55; letter-spacing: .4px; margin-bottom: 3px; }
+.nat-griglia { display: flex; flex-wrap: wrap; gap: 5px; }
+/* La riga nella scheda: un solo chip, quello scelto. */
+.nat-apri { min-width: 108px; }
+
+/* La scelta dell'abilità (Capsula) riusa la forma del pulsante mossa, ma le
+   mosse il colore lo prendono dal TIPO, con uno stile in linea. Senza un
+   colore suo qui restava il bianco di `.btn` col testo bianco sopra: il
+   pulsante buono era illeggibile e quello grigio sembrava l'unico attivo. */
+.ab-scelta       { background: #3d4a63; color: #fff; }
+.ab-scelta.gia   { background: #262c3a; color: rgba(255,255,255,.45); box-shadow: 0 2px 0 rgba(0,0,0,.3); }
+.ab-scelta.gia:active { transform: none; }
+.ab-scelta .move-meta { gap: 6px; }
+.ab-nascosta {
+  background: #b06cd8; color: #fff; border-radius: 999px; padding: 1px 8px;
+  font-size: 10px; font-weight: 800; letter-spacing: .3px; text-shadow: none;
+}
+.ab-gia { font-size: 11px; opacity: .75; }

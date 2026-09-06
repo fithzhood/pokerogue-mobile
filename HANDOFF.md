@@ -5509,3 +5509,84 @@ da conquistare è il punto.
 Misurato a 384 px con la scala caratteri al 130%: tutte e 25 ci stanno senza
 scorrere, e nella scheda tornano visibili insieme mosse, nota delle mosse da
 uovo e barre delle statistiche.
+
+
+## 69. Divinazione arriva due turni dopo (rev 178)
+
+> «Controllare la mossa divinazione»
+
+Nei dati **Divinazione** e **Desiderio Fatale** hanno `attrs: []`: l'estrattore
+non traduce `DelayedAttackAttr`. Senza quel mattoncino erano due attacchi
+**secchi** da 120 e 140 di potenza con precisione 100 — cioè la miglior mossa
+Psico e la miglior mossa Acciaio del gioco, con tutto il loro prezzo (aspettare)
+cancellato.
+
+Nell'originale la mossa non fa niente subito: mette in coda un attacco **sullo
+slot** del bersaglio (`DelayedAttackTag`, `turnCount: 3`) e due turni dopo
+quell'attacco parte da solo. Colpisce chi si trova lì in quel momento, anche se
+non è più quello di prima.
+
+Da noi: `MOSSE_DIFFERITE`, `accodaDifferita` (agganciata in `resolveMove`
+**prima** del danno) e `scattaDifferite` (in `endOfTurnResidual`, dal lato del
+giocatore, dove stanno già gli altri contatori di squadra).
+
+⚠️ **`turni: 3`, non 2.** Il contatore scende anche alla fine del turno in cui
+la mossa è partita — esattamente come `activateAllTags` là — quindi con 2 il
+colpo arrivava un turno prima del dovuto. Misurato in gioco: turno 1 «prevede un
+attacco» e 0 danni, turno 2 niente, fine del turno 3 «Mr. Mime subisce l'attacco
+di Divinazione!».
+
+⚠️ Sullo stesso slot non se ne accodano due (`getCondition` dell'originale
+rifiuta la mossa se una è già in volo lì sopra).
+
+⚠️ Gli attacchi in volo **viaggiano col salvataggio della lotta**: la sorgente
+si salva come posizione, con lo stesso schema del `roster` (−1 in campo, −2 il
+secondo, 0.. la panchina). Salvare il riferimento all'oggetto avrebbe rifatto il
+guaio dei cicli in `JSON.stringify` (§26).
+
+
+## 70. Gli stati si perdono cadendo (rev 178)
+
+> «I pokemon che vengono riportati in vita con revitalizzante devono perdere gli
+> scatti di alterazione come scottato o simili, anzi, li devono perdere quando
+> vanno ko»
+
+Aveva ragione anche sul *dove*. Un Pokémon andava KO scottato e tornava dal
+Revitalizzante ancora scottato: la targhetta SCT restava e ricominciava a
+mangiargli i PS dal turno dopo. Nell'originale `FaintPhase` fa
+`resetSummonData()` e poi `doSetStatus(StatusEffect.FAINT)` — cioè **il KO
+sostituisce lo stato**, e il Revitalizzante toglie il FAINT lasciando pulito.
+
+`spegniStato(f)` azzera stato, contatori di sonno/tossina, sbalzi e volatili;
+è agganciata a **tutti e 25** i punti in cui si scrive `fainted = true`. Farlo
+sul KO e non sulla rianimazione vuol dire che vale per ogni strada —
+Revitalizzante, Cenere magica, cura delle decine — senza correggerle una per una.
+
+⚠️ Trappola trovata applicandola: uno dei 25 punti era un `if` **senza graffe**
+(`if (foe.hp <= 0) foe.fainted = true;`). L'inserimento automatico ci ha messo
+`spegniStato(foe);` *fuori* dall'if, cioè lo stato si sarebbe azzerato anche a
+chi sopravviveva. `node --check` non dice niente: è JS validissimo.
+
+
+## 71. I capipalestra non sono più tutti di Kanto (rev 178)
+
+> «Mi pare di incontrare capi palestra solo di kanto, è una mia impressione?»
+
+Non era un'impressione. Si prendevano **in ordine** dalla lista,
+`GYM_LEADERS[(ondata / 30) − 1]`, e in una run se ne incontrano sei (ondate 30,
+60, 90, 120, 150, 180): erano sempre e solo Brock, Misty, Lt. Surge, Erika,
+Koga, Sabrina. **62 capipalestra su 68 non li vedeva nessuno, mai.**
+
+Ora i sei li sorteggia la run una volta sola (`sorteggiaCapipalestra`,
+`game.gymRoster` in `CAMPI_RUN`): non cambiano ricaricando e non se ne ripete
+uno.
+
+⚠️ Si sorteggiano a **tipi diversi**. Sei monotipo pescati alla cieca possono
+uscire tre volte Acqua, e sei lotte contro la stessa squadra sono la stessa
+lotta sei volte. (Nell'originale l'allenatore delle ondate x30 esce dal pool
+BOSS del bioma, quindi cambia per run e per posto: lo spirito è questo.)
+
+Prova: `__items.palestre(true)` risorteggia e stampa i sei.
+Quattro tirate → Wattson/Lenora/Korrina/Jasmine/Katy/Grusha ·
+Ramos/Katy/Byron/Kabu/Grusha/Raihan · Gordie/Elesa/Wulfric/Lenora/Ramos/Wake ·
+Gardenia/Jasmine/Marlon/Korrina/Lt. Surge/Morty. Senza argomento resta stabile.
