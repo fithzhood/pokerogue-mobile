@@ -5177,3 +5177,40 @@ potenza sì — e se proprio non ci sta, sparisce lei.
   stringa Python non raw, ha infilato un **byte nullo** nel CSS. Da lì in poi
   `grep` trattava il file come binario. Se un file di testo diventa "binary",
   è quello.
+
+## 60. Gacha leggibile e riga mosse più stretta (rev 174)
+
+### 60.1 «Continua» non diceva cosa fa
+
+Col risultato a schermo c'erano tre tasti: «Ancora», «✓ Continua» e
+«Indietro». Ma Continua non continuava niente — toglieva l'uovo dal palco e
+riportava alla **scelta della macchina** — mentre Indietro usciva davvero dal
+gacha. Due tasti che sembravano la stessa cosa e non lo erano, e nessuno dei
+due diceva dove portava.
+
+Ora i tre nominano i tre posti dove si può andare:
+
+| prima | adesso |
+|---|---|
+| 🎰 Ancora | ✅ invariato — un altro tiro alla stessa macchina |
+| ✓ Continua | **↺ Cambia macchina** · torna alla scelta fra le tre |
+| Indietro | **↩ Esci dal gacha** |
+
+⚠️ La regola CSS che impila titolo e sottotitolo era legata a `.macchina`:
+«Cambia macchina» non è una macchina e li aveva appaiati. Ora c'è
+`.due-righe` per chi ha la stessa forma senza essere la stessa cosa.
+
+### 60.2 La potenza non sparisce più: si stringe la riga
+
+Nella rev 173 avevo fatto cedere la potenza quando lo spazio mancava. Sbagliato:
+va tenuta. Lo spazio si guadagna **stringendo**, non tagliando —
+
+- `gap` fra le voci: 5 → 3 px
+- targhette tipo e categoria: `zoom` .78 → .70
+- font della riga: `clamp(10px,3vw,14px)` → `clamp(9px,2.7vw,13px)`
+
+e ora **né la potenza né i PP si restringono** (`flex: 0 0 auto` su entrambi).
+
+Misurato nel caso peggiore (Idropompa, «P110 · 120/120») a 384 px di larghezza
+**con la scala caratteri al 130%**, cioè le condizioni del telefono:
+`scrollWidth 145 = clientWidth 145`. Nessun taglio su nessuna delle quattro.

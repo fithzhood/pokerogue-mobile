@@ -10567,15 +10567,22 @@
          <div class="meta-sub">dal ${GACHA[result.tipo].emoji} ${GACHA[result.tipo].it} · si schiude superando ${result.waves} ondate</div>`
       : `${macchina}
          <div class="meta-sub">Scegli la macchina: cambia cosa è più probabile che l'uovo ti dia.</div>`;
-    /* Col risultato a schermo non si rimostrano le tre macchine: si offre di
-       rifare lo STESSO tiro, o di togliere l'uovo di mezzo. */
+    /* 🔴 «CONTINUA» NON DICEVA COSA FA.
+       Col risultato a schermo c'erano tre tasti: «Ancora», «✓ Continua» e
+       «Indietro». Ma Continua non continuava niente: toglieva l'uovo dal palco
+       e riportava alla scelta della macchina — mentre Indietro usciva davvero
+       dal gacha. Due tasti che sembravano la stessa cosa e non lo erano, e
+       nessuno dei due diceva dove ti portava.
+       Adesso i tre dicono i tre posti dove si puo' andare: ancora qui, a
+       un'altra macchina, o fuori. */
     const macchine = result
       ? `<button class="meta-btn gacha macchina" data-g="${result.tipo}" ${canPull ? "" : "disabled"}>
            <span class="mac-tit">${icoGacha()} Ancora ${GACHA[result.tipo].emoji}</span>
            <span class="mac-sub">${canPull ? "un altro tiro alla stessa macchina" : "non hai più voucher"}</span>
          </button>
-         <button class="meta-btn ghost" data-a="chiudi">
-           <span class="mac-tit">✓ Continua</span></button>`
+         <button class="meta-btn ghost due-righe" data-a="chiudi">
+           <span class="mac-tit">↺ Cambia macchina</span>
+           <span class="mac-sub">torna alla scelta fra le tre</span></button>`
       : `<div class="gacha-quante">
            ${[1, 10].map(n => `<button class="chip filtro-chip${gachaQuante === n ? " on" : ""}"
              data-q="${n}" ${meta.vouchers >= n ? "" : "disabled"}
@@ -10594,7 +10601,7 @@
       <div class="meta-stats"><span>${ico("voucher")} ${meta.vouchers} voucher</span></div>
       <div class="gacha-stage">${stage}</div>
       <div class="macchine">${macchine}</div>
-      <div class="meta-actions"><button class="meta-btn ghost" data-a="back">Indietro</button></div>`);
+      <div class="meta-actions"><button class="meta-btn ghost" data-a="back">↩ Esci dal gacha</button></div>`);
     metaEl().querySelectorAll("[data-q]").forEach(b => b.onclick = () => {
       if (b.disabled) return;
       gachaQuante = parseInt(b.dataset.q, 10);

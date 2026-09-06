@@ -2694,6 +2694,7 @@
     game.ultraballs = 0;
     game.rogueballs = 0;
     game.legendballs = 0;
+    game.lastballs = 0;
     game.theftballs = 0;
     game.pendingTheft = 0;
     game.money = 400;
@@ -4460,6 +4461,19 @@
         <span class="stat-val">${st[k] || 0}</span></div>`;
     // la categoria della mossa nuova decide quale statistica mettere in risalto
     const fisica = nv.category === "PHYSICAL", speciale = nv.category === "SPECIAL";
+    /* 🔴 L'ABILITA' DI CHI IMPARA.
+       Qui si decide quale mossa buttare, e meta' delle volte la risposta
+       dipende dall'abilita': con Forzabruta gli effetti aggiuntivi non partono
+       (quindi una mossa presa per l'effetto non serve), con Leggiadro partono
+       il doppio, Piromania e Erbaiuto cambiano quale tipo conviene tenere,
+       Fenditura ignora gli scudi. La schermata mostrava nome, livello e sei
+       statistiche, e non diceva con che abilita' quel Pokemon combatte.
+       Anche la PASSIVA, se sbloccata: fa parte di lui quanto l'altra. */
+    const abs = [mon.ability, mon.passiveAbility].filter(Boolean);
+    const abilitaRiga = abs.length
+      ? abs.map((a, i) => `<button class="learn-abchip${learnAperto("ab", a.id) ? " on" : ""}" data-i-ab="${a.id}"
+            >${i ? "+" : ""}${a.it}<span class="chip-i">\u24d8</span></button>`).join("")
+      : `<span class="learn-abchip vuota">nessuna abilit\u00e0</span>`;
 
     const btns = mon.moves.map((mi, i) => {
       const mv = M[mi.id], ty = T[mv.type];
@@ -4475,7 +4489,10 @@
     showMetaScreen(`
       <div class="learn-head">
         <span class="learn-sprite" id="learnSprite"></span>
-        <div class="learn-nome">${mon.name} <span class="learn-lv">Lv.${mon.level}</span></div>
+        <div class="learn-id">
+          <div class="learn-nome">${mon.name} <span class="learn-lv">Lv.${mon.level}</span></div>
+          <div class="learn-ab">${abilitaRiga}</div>
+        </div>
       </div>
       <div class="sd-stats learn-stats">
         ${bar("PS", "hp")}${bar("Att", "atk", fisica)}${bar("Dif", "def")}
@@ -4485,6 +4502,7 @@
         Vuole imparare <b>${nv.it}</b>
         <button class="chip-i ${learnAperto("nuova", moveId) ? "on" : ""}" data-i-new="1" title="cosa fa">ⓘ</button>
       </div>
+      ${learnAperto("ab", (learnInfo || {}).id) ? snippetAbilita((learnInfo || {}).id) : ""}
       ${learnAperto("nuova", moveId) ? snippetMossa(moveId) : ""}
       <div class="meta-sub">Quale mossa dimentica?</div>
       <div class="learn-lista">${btns}</div>
@@ -4503,6 +4521,8 @@
 
     const m = metaEl();
     m.querySelector("[data-i-new]").onclick = () => learnInfoTocca("nuova", moveId, item, done);
+    m.querySelectorAll("[data-i-ab]").forEach(b =>
+      b.onclick = () => learnInfoTocca("ab", b.dataset.iAb, item, done));
     m.querySelectorAll("[data-i-old]").forEach(b =>
       b.onclick = () => learnInfoTocca("vecchia", b.dataset.iOld, item, done));
     m.querySelectorAll(".move-btn").forEach(b => b.onclick = () => {
@@ -4743,7 +4763,7 @@
      e poi si apre e' un'informazione, non un effetto.
      ⚠️ Vive sopra la scena ma SOTTO gli overlay meta (z-index 20).
      ====================================================================== */
-  const BALL_IMG_KEY = { balls: "pb", greatballs: "gb", ultraballs: "ub", rogueballs: "rb", theftballs: "tb", masterballs: "mb", legendballs: "lb" };
+  const BALL_IMG_KEY = { balls: "pb", greatballs: "gb", ultraballs: "ub", rogueballs: "rb", theftballs: "tb", masterballs: "mb", legendballs: "lb", lastballs: "xb" };
 
   /* Toglie dal campo la ball rimasta dopo una cattura riuscita e rimette a
      posto lo sprite avversario (che era stato "risucchiato"). Va chiamata
@@ -5018,6 +5038,17 @@
        E' una ball specializzata, non un aggiornamento — se no la Rogue non
        avrebbe piu' motivo di esistere. */
     { key: "legendballs", it: "Legend Ball", mult: 2, legend: true },
+    /* 🔴 LAST BALL — nostra, non esiste nell'originale.
+       Il tiro di cortesia di fine ondata si calcola come se l'avversario fosse
+       INTEGRO (`psUltimaBall` restituisce `maxHp`): e' una scelta voluta, se
+       no bastava abbatterlo per prenderlo quasi sempre e tutto il resto —
+       indebolire, addormentare, lanciare durante la lotta — non serviva piu'.
+       La Last Ball e' l'unica che quel conto lo fa DAVVERO sui PS che sono
+       rimasti, cioe' zero. E' la ball dell'ultima occasione.
+       ⚠️ In lotta vale 1, come una Poke Ball: contro un Pokemon in piedi non
+       ha niente di speciale, e non ruba il mestiere a nessun'altra. Il suo
+       vantaggio esiste solo dove e' pensata per esistere. */
+    { key: "lastballs",   it: "Last Ball",   mult: 2, ultima: true },
     { key: "masterballs", it: "Master Ball", mult: 255 },
   ];
   function totalBalls() { return BALL_TYPES.reduce((s, b) => s + (game[b.key] || 0), 0); }
@@ -5038,8 +5069,16 @@
      una Master Ball a buon mercato. Contro i selvatici vale quindi quanto una
      Mega Ball. */
   const MULT_CLEPTO_SELVATICO = 1.5;
-  const multBall = (ball, bersaglio) =>
-    (ball.theft && bersaglio && !bersaglio.trainer) ? MULT_CLEPTO_SELVATICO : ball.mult;
+  const multBall = (ball, bersaglio) => {
+    if (ball.theft) return (bersaglio && !bersaglio.trainer) ? MULT_CLEPTO_SELVATICO : ball.mult;
+    // Last Ball: vale il suo solo su chi e' gia' a terra, se no e' una Poke Ball
+    if (ball.ultima) return (bersaglio && bersaglio.fainted) ? ball.mult : 1;
+    return ball.mult;
+  };
+  /* Quanti PS contare per il tiro. Di regola l'ultima ball di fine ondata fa
+     il conto su un avversario INTEGRO; la Last Ball no, e' tutto il suo senso. */
+  const psPerBall = (ball, bersaglio) =>
+    ball.ultima ? Math.max(1, bersaglio.hp) : psUltimaBall(bersaglio);
   /* Il pavimento della Legend Ball: contro un leggendario (o semi-leggendario,
      o misterioso) il tasso di cattura non scende sotto quello di una specie
      comune. Su tutto il resto non fa niente. */
@@ -5375,11 +5414,25 @@
     const enemy = game.enemy;
     const esito = ball.mult >= 255
       ? { preso: true, scosse: 1, critica: true }
-      : rollCaptureDettaglio(enemy, multBall(ball, enemy), psUltimaBall(enemy), pavimentoBall(ball, enemy));
+      : rollCaptureDettaglio(enemy, multBall(ball, enemy), psPerBall(ball, enemy), pavimentoBall(ball, enemy));
     // stessa animazione del lancio in battaglia (§ dondolio)
     game.phase = "MESSAGE";
     cmd().innerHTML = `<div class="msgbox"><div class="log-line">Lanci una ${ball.it} su ${enemy.name}…</div></div>`;
     animaBall(ballKey, esito, () => risolviUltimaBall(enemy, esito.preso));
+  }
+
+  /* 🔴 IL LEGGENDARIO CHE TI SFUGGE LASCIA UNA LEGEND BALL.
+     Battere un leggendario selvatico e non riuscire a prenderlo e' il momento
+     piu' amaro della run: e' l'occasione che non torna, e finiva con una riga
+     di testo e nient'altro. Adesso lascia cadere la ball fatta apposta per
+     lui — cosi' la volta dopo ci arrivi attrezzato.
+     ⚠️ Solo SELVATICI e solo se NON l'hai preso: se l'hai catturato il
+     premio ce l'hai gia', ed e' il Pokemon. */
+  function dropLegendBall(enemy, messages) {
+    if (!enemy || enemy.trainer || !fasciaLeggendaria(enemy.speciesId)) return;
+    game.lastballs = game.lastballs || 0;
+    game.legendballs = (game.legendballs || 0) + 1;
+    stessoMomento(messages, `Fra le tracce di ${enemy.name} trovi una Legend Ball!`);
   }
 
   function risolviUltimaBall(enemy, caught) {
@@ -5393,6 +5446,7 @@
       registerCaught(enemy.speciesId, enemy.shiny, enemy.ivs, messages, enemy.variant, enemy.abilIndex, enemy.nature, enemy.shinyVar, enemy.gender, enemy.boss);
     } else {
       messages.push(`Oh no! ${enemy.name} si è liberato!`);
+      dropLegendBall(enemy, messages);
     }
     queueMessages(messages, () => chiediPostoInSquadra(finitaLaCattura));
   }
@@ -7327,7 +7381,7 @@
     gripclaw: 90, quickclaw: 80, leek: 60, eviolite: 40, mysticalrock: 60,
     kingsrock: 30, toxicorb: 30, flameorb: 30, shellbell: 30, scopelens: 30,
     souldew: 30, blackhole: 30, reviverseed: 30,
-    leftovers: 10, focusband: 10, widelens: 10, multilens: 10,
+    leftovers: 10, focusband: 10, widelens: 10, multilens: 10, sciarpanera: 10,
   };
   const primaBacca   = (f) => Object.keys(f.berries || {}).find(k => f.berries[k] > 0 && BACCA_DONO[k]);
   const primoOggetto = (f) => Object.keys(f.held || {}).find(k => k !== "typeboost" && f.held[k] > 0);
@@ -7826,8 +7880,18 @@
        partono affatto. E' il patto dell'abilita', non un effetto collaterale. */
     if (!isStatus && ha(actor, "SHEER_FORCE") && move.effectChance > 0) return;
     // LEGGIADRO: gli effetti aggiuntivi scattano il doppio delle volte
-    const ch = ha(actor, "SERENE_GRACE") && move.effectChance > 0
-      ? Math.min(100, move.effectChance * 2) : move.effectChance;
+    /* 🔴 SCIARPA NERA (nostra): alza la probabilita' degli effetti
+       aggiuntivi del 50% per pezzo. Nell'originale un oggetto cosi' non
+       esiste — c'e' solo l'abilita' Leggiadro, che raddoppia — e per meta'
+       delle mosse la percentuale e' l'unica cosa che le distingue da un
+       attacco secco. Si somma a Leggiadro e si ferma a 100. */
+    const sciarpe = (actor.held && actor.held.sciarpanera) || 0;
+    let ch = move.effectChance;
+    if (ch > 0) {
+      if (ha(actor, "SERENE_GRACE")) ch *= 2;
+      if (sciarpe) ch *= 1 + 0.5 * sciarpe;
+      ch = Math.min(100, Math.round(ch));
+    }
     /* 🔴 OGNI COLPO HA IL SUO TIRO.
        Gli effetti aggiuntivi si applicavano UNA VOLTA per mossa, anche quando
        la mossa colpiva cinque volte: Semitraglia con il 30% di paralisi
@@ -9408,10 +9472,10 @@
   }
 
   function renderCaptureScreen() {
-    const BALL_IMG = { balls: "pb", greatballs: "gb", ultraballs: "ub", rogueballs: "rb", theftballs: "tb", masterballs: "mb", legendballs: "lb" };
+    const BALL_IMG = { balls: "pb", greatballs: "gb", ultraballs: "ub", rogueballs: "rb", theftballs: "tb", masterballs: "mb", legendballs: "lb", lastballs: "xb" };
     const owned = BALL_TYPES.filter(b => (game[b.key] || 0) > 0);
     const btns = owned.map(b => {
-      const pct = b.mult >= 255 ? 100 : captureChancePct(game.enemy, multBall(b, game.enemy), psUltimaBall(game.enemy), pavimentoBall(b, game.enemy));
+      const pct = b.mult >= 255 ? 100 : captureChancePct(game.enemy, multBall(b, game.enemy), psPerBall(b, game.enemy), pavimentoBall(b, game.enemy));
       return `<button class="btn ball-btn" data-b="${b.key}">
         <img class="ball-icon" src="${ballIcon(BALL_IMG[b.key])}" alt="">
         <span class="move-name">${b.it}</span>
@@ -9453,7 +9517,14 @@
       ritornoSquadra = () => { game.phase = "CAPTURE"; renderCaptureScreen(); };
       renderParty("check");
     };
-    metaEl().querySelector('[data-act="skip"]').onclick = () => { hideMeta(); finitaLaCattura(); };
+    metaEl().querySelector('[data-act="skip"]').onclick = () => {
+      /* Vale anche rinunciando al tiro: il leggendario l'hai battuto comunque,
+         ed e' quello il gesto che lascia la ball. */
+      const msgs = [];
+      dropLegendBall(game.enemy, msgs);
+      hideMeta();
+      if (msgs.length) queueMessages(msgs, finitaLaCattura); else finitaLaCattura();
+    };
   }
 
   /* ---------------- LANCIO BALL IN BATTAGLIA ----------------
@@ -9476,7 +9547,7 @@
   function showBallMenu() {
     if (game.phase !== "CHOICE") return;
     const owned = BALL_TYPES.filter(b => (game[b.key] || 0) > 0);
-    const BALL_IMG = { balls: "pb", greatballs: "gb", ultraballs: "ub", rogueballs: "rb", theftballs: "tb", masterballs: "mb", legendballs: "lb" };
+    const BALL_IMG = { balls: "pb", greatballs: "gb", ultraballs: "ub", rogueballs: "rb", theftballs: "tb", masterballs: "mb", legendballs: "lb", lastballs: "xb" };
     if (!owned.length) { notAvailable("Non hai nessuna ball!"); return; }
     const btns = owned.map(b => {
       const blocked = ballBlockReason(b);
@@ -9677,7 +9748,7 @@
           <span class="move-meta">
             <span class="ticon t-${mv.type}"></span>
             <span class="cicon c-${mv.category}"></span>
-            <span class="move-pp">${mv.power ? "P" + mv.power + " · " : ""}${mi.pp}/${mi.maxPp}</span>
+            ${mv.power ? `<span class="move-pot">P${mv.power}</span>` : ""}<span class="move-pp">${mi.pp}/${mi.maxPp}</span>
             ${chipEfficacia(mv)}
           </span>
         </button>`;
@@ -9893,7 +9964,7 @@
   /* ⚠️ `masterballs` mancava da questo elenco: era l'unica delle sei a non
      essere salvata, quindi la Master Ball — il premio piu' raro del gioco,
      uno su duemila scelte — spariva riaprendo l'app. */
-  const CAMPI_RUN = ["balls", "greatballs", "ultraballs", "rogueballs", "theftballs", "masterballs", "legendballs",
+  const CAMPI_RUN = ["balls", "greatballs", "ultraballs", "rogueballs", "theftballs", "masterballs", "legendballs", "lastballs",
     "pendingTheft", "money", "stones", "charms", "tempBoost", "tempBoostN", "shopMarkup", "lati", "cuccagna",
     "cicloOffset", "encSeen", "encTiersSeen", "leagueIdx", "evilIdx", "finalBossIdx",
     "rivalFemale", "rivalRoster", "hasMegaRing", "hasDynamaxBand", "active", "biome", "starterSpecies"];
@@ -12641,7 +12712,7 @@
     widelens: "wide_lens", multilens: "multi_lens", eviolite: "eviolite",
     reviverseed: "reviver_seed", toxicorb: "toxic_orb", flameorb: "flame_orb",
     souldew: "soul_dew", leek: "leek", mysticalrock: "mystical_rock",
-    gripclaw: "grip_claw", blackhole: "mini_black_hole",
+    gripclaw: "grip_claw", blackhole: "mini_black_hole", sciarpanera: "sciarpa_nera",
   };
 
   /* ----------------------------------------------------------------------
@@ -12881,6 +12952,8 @@
     /* Tre e non cinque: e' una ball da tenere per l'occasione, non da spendere. */
     { tier: "ROGUE", weight: 4, id: "legendballs", label: "Legend Ball ×3", desc: "cattura ×2, ma i leggendari come i comuni", icon: "lb", ball: true,
       target: "run", apply: () => { game.legendballs = (game.legendballs || 0) + 3; } },
+    { tier: "ULTRA", weight: 5, id: "lastballs", label: "Last Ball ×3", desc: "sul tiro di fine ondata conta i PS veri", icon: "xb", ball: true,
+      target: "run", apply: () => { game.lastballs = (game.lastballs || 0) + 3; } },
     { tier: "ROGUE", weight: 3, id: "leftovers", label: "Avanzi", desc: "held: rigenera 1/16 a fine turno", icon: "leftovers",
       target: "mon", valid: alive, apply: p => addHeld(p, "leftovers") },
     { tier: "ROGUE", weight: 3, id: "shellbell", label: "Conchinella", desc: "held: recuperi 1/8 del danno", icon: "shell_bell",
@@ -12928,6 +13001,8 @@
       target: "mon", valid: alive, apply: p => addHeld(p, "multilens") },
     { tier: "ROGUE", weight: 5, id: "gripclaw", label: "Presartigli", desc: "held: 10% al contatto di rubargli un oggetto (se ne ha)", icon: "grip_claw",
       target: "mon", valid: alive, apply: p => addHeld(p, "gripclaw") },
+    { tier: "ULTRA", weight: 6, id: "sciarpanera", label: "Sciarpa nera", desc: "held: +50% alla probabilità degli effetti aggiuntivi", icon: "sciarpa_nera",
+      target: "mon", valid: alive, apply: p => addHeld(p, "sciarpanera") },
     { tier: "MASTER", weight: 10, id: "blackhole", label: "Piccolo buco nero", desc: "held: ruba un oggetto ogni turno", icon: "mini_black_hole",
       target: "mon", valid: alive, apply: p => addHeld(p, "blackhole") },
     { tier: "MASTER", weight: 4, id: "voucherpremium", label: "Buono Uovo Premium", desc: "+10 tiri al gacha", icon: "coupon",
@@ -13841,6 +13916,8 @@
     /* Strano fungo: e' il fungo normale con la tinta girata al turchese —
        lo stesso oggetto, ma «sbagliato», che e' esattamente quel che fa. */
     strano_fungo: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAADTUlEQVR42u2XTUgUYRjHf9tu6VqwCBG7eHBWk8hDYOtp3UseEnSXRPPQJQ3cCMQwCPIodCkQIiOQpkN1CSphY9eFPNRlWzokgn146GPdwzJLBcuCYlHrdtB3nNmZ8WMquvjcZt73nf//eZ73/zzPwK79Z3PYPShJUln7vLi46PinBCoBmyd8AGScDSx1NuH038MOIcd2QY9NhwE4d2QAgFN5LwBPvXndmYvOBICO0GZkHJuBf06lqK+7C8BEKayuyclh0zPRzlsGItncIA2hkCUJhxX4WOY+s0qKmO+nCq4F1oJZrcnJYd5EOrjKCcb8/aYkXFYRqAQ387QS1Coys0rKMs17rLwX9vzLM37tWd0y5AJcS87VGCCbG+Tmaj+lzIDhIpumQJKksvt2G0udTWRzgwDU193dVhq0ZN5EOgBoef+NmYU8fncVK0MvDWmwvAPu2200SbXMLKzd8pNHvfQ09+Ep7d/0Igrgr1Nv1XMfFgum4FuqIJKOki0o1Nf6kNNzuvWH3aO65zOxa/r0BFvUs/GgvDMVVNaBSDq6Jqn1DwIGQtFgi2FPPCjbrwNWRASAFqjy3XaAbfUCQUTUCK0FfCHG/P077gsOO81GW6i04HYakssK+MbHJ7r3lw6fLlcSCfhCf7cdS5JUFsBCZq7GAHPNB+lW9qqeikIlJFl0LgPYioJLC17KDHAq56W7uCGpmGeUcLyPWKSDGC/4Ot6qgnuc1WubShskzNK32b3QpeBA8gM1KyNM9g7jWW+74WQfieOPqZka0cnNzCLpKPGgXM6Pt+J3V3Gl8zyzSopsQYGuRNmMiMOsAgJkVn4YdC6n54gGWwj4QroIFEvfKTqXmVVSyOk5JnuHeRQfVVPY09zH2VwjNa9G8F5+rSPhqgyTNEQZ4OR02KB3QYIgtB/qsIzE9eQd3h1/DMCDuk9cmLrFhfWyPL9TGYoqKACFp9mCok5HIv8iAlrzu6tokmoBmO9KGFJgOQ+IjfGgXBYkPM5qKAn5pQzgwtr35TYApADzXQnLi+jajlQCvhBFlqFk8k4Dni0o+N1VuKSAus/Ma1u9QDukmE052YLCzEIe7+XXO5qObY3lYkKutK28/Ws/JmaF5k9+Tnbtv9pvKfSw9TmS3vwAAAAASUVORK5CYII=",
+    /* Sciarpa nera: la Sciarpa seta portata su una rampa scura. */
+    sciarpa_nera: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAABbUlEQVR42u2WvYrCQBDHxyDL2gUJVnKViCCIhQ8gFlfcA1h67T3S1T6EZeysUgTh4BC5IgQOlkVSHjZ71Yag+zGbVbTIv8tO2N/MzszuADRq9GC1fDcghAqT/Xz+a93FAQleLN4AAIBzdvVPUZwgy36MjrTrwieTGUynM6X9ePyG+fy1/M7zDOJ4I1ROBLeA53lWgjlnEIZdSNOktPf7L9r92reEh2EXoqhX2tI0gaI4wWAw8ndAB+ecweHwBcPhWJsSVX04paAOXNqjqAf7faItwsCn4ExwrFAnoALsdlsjXEbv5QAhVKxWH17wON4YL6PAFW6ThJtaz9oFl/BqqzH2ayw6W9+j23C9/lSuU9q5WqvCda3o5IAuZ4RQoYqec6YE2/Jf6ypWRa+CY1sx8H2AXPJ9lxPQnQrm+L2uYhPcuwgv4ZR2rPAqGBs9+jVcLt/RYMwYhh7JCKFCjlwm1QFbHbANmy6DZ6NGT61/FS3nSzY+j9sAAAAASUVORK5CYII=",
     x_attack: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgBAMAAACBVGfHAAAAIVBMVEUAAAAgICCDMTGkSkrFYnPmg3uclJTunKzm1dX/5t7///8icg1iAAAAAXRSTlMAQObYZgAAAKpJREFUeF5joC9gFBRAFRBLS0QRYcxIW5mIoqA1alWaALICl1VLwxACgiJlXqtcwxLh8q7lRrOWl5jDBYRUwqdLugMFkBRUFoaYBjfCBEzDp4uXiJhGCMAEFFUrC8OdgArgKsrVS0SdK+C2iobPBCoIMWSAC1TOLFV1DhFAEpgeahpigiRQXhpsFKKCEBAJDTU2dFFE8pmxsbERUAcCCBsbCwqiBp8gA30BAGrtJrnF5vaHAAAAAElFTkSuQmCC",
     x_defense: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgBAMAAACBVGfHAAAAIVBMVEUAAAAgICA5OYtKSqRzYsV7g+aUlJysnO7V1ebe5v////+/l/rsAAAAAXRSTlMAQObYZgAAAKpJREFUeF5joC9gFBRAFRBLS0QRYcxIW5mIoqA1alWaALICl1VLwxACgiJlXqtcwxLh8q7lRrOWl5jDBYRUwqdLugMFkBRUFoaYBjfCBEzDp4uXiJhGCMAEFFUrC8OdgArgKsrVS0SdK+C2iobPBCoIMWSAC1TOLFV1DhFAEpgeahpigiRQXhpsFKKCEBAJDTU2dFFE8pmxsbERUAcCCBsbCwqiBp8gA30BAGrtJrnF5vaHAAAAAElFTkSuQmCC",
     x_sp_atk: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgBAMAAACBVGfHAAAAIVBMVEUAAAAgICBqaiCcnEqkpFrNzWqcnJTm5qzm5tX//97////u9APtAAAAAXRSTlMAQObYZgAAAKpJREFUeF5joC9gFBRAFRBLS0QRYcxIW5mIoqA1alWaALICl1VLwxACgiJlXqtcwxLh8q7lRrOWl5jDBYRUwqdLugMFkBRUFoaYBjfCBEzDp4uXiJhGCMAEFFUrC8OdgArgKsrVS0SdK+C2iobPBCoIMWSAC1TOLFV1DhFAEpgeahpigiRQXhpsFKKCEBAJDTU2dFFE8pmxsbERUAcCCBsbCwqiBp8gA30BAGrtJrnF5vaHAAAAAElFTkSuQmCC",
@@ -13897,7 +13974,7 @@
      Mega, l'indaco della Rogue, il verdeacqua della Clepto, il viola della
      Master. L'Ultra Ball ha del giallo, ma solo come fascia su corpo bianco e
      nero: una ball TUTTA dorata non si confonde. */
-  const BALL_DATAURI = { lb: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAwAAAAQCAYAAAAiYZ4HAAABCklEQVR42tWSoWvDUBDGfyklRD0xKiojIqImQinPDKYm3lxgMjCqplao3B9QOZirKoPJQUVhEVODRVSMiYkRaMX+gonAYMzc1At5bSYme+7uvu877ruD/Q9vu2C0kmaeryqvlWC0kov0oFV1tvisiV5TdRAHZGnIeFrW4NfNDwBJ5JOvKq9jGxYcHV9zcxXXhCTy3R2MVjKIg7qQpSF3iw8AXsrvnSmdZgNgPC3J0pAsDWkKOa5IVYjRSoxWsl4ORapCpCrk6/1S+r1A+r1A1suhGK2kC3B6Ynh4zAHYPE0cwef5IQBHozeSyHddsnE/PwfgbHS741K3zfcm8M9L2ynbQGurc7j/vMYvPZxnoVHQSuoAAAAASUVORK5CYII=" };
+  const BALL_DATAURI = { lb: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAwAAAAQCAYAAAAiYZ4HAAABCklEQVR42tWSoWvDUBDGfyklRD0xKiojIqImQinPDKYm3lxgMjCqplao3B9QOZirKoPJQUVhEVODRVSMiYkRaMX+gonAYMzc1At5bSYme+7uvu877ruD/Q9vu2C0kmaeryqvlWC0kov0oFV1tvisiV5TdRAHZGnIeFrW4NfNDwBJ5JOvKq9jGxYcHV9zcxXXhCTy3R2MVjKIg7qQpSF3iw8AXsrvnSmdZgNgPC3J0pAsDWkKOa5IVYjRSoxWsl4ORapCpCrk6/1S+r1A+r1A1suhGK2kC3B6Ynh4zAHYPE0cwef5IQBHozeSyHddsnE/PwfgbHS741K3zfcm8M9L2ynbQGurc7j/vMYvPZxnoVHQSuoAAAAASUVORK5CYII=", xb: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAwAAAAQCAYAAAAiYZ4HAAAA8UlEQVR42tWRsW7CMBRFj2kZcGmGiMGKUId8TgY+gqFCzBkZGDoyM/AZHVAXfoIho4eIMfLAYBYiM9l10vABvYv1nu498nsP/r9EvzGf5y6uLxctBgNSJi5NZ4NUYxqsvQqAUWxWKmO5XKFUhlJZCKTpDCkTFwLeXBQL1utPimIB8CcE8Br/+Xj87rx9SZk44QMxrarOHWo8y8v93m5vN0vbtkyn71TVGa1rxuM3TqcfJhMZzGGGstxgTBPI+/2hQzWmoSw3v2uVMnFa18GU5x94kNdu94W1VzHyjZiqdd0xPz1cn+rJQDicGFpdXHuj1wObm1+TovoTngAAAABJRU5ErkJggg==" };
   const ballIcon = n => BALL_DATAURI[n] || `assets/ui/pokeball/${n}.png`;
   const VIT_ICON = { hp: "hp_up", atk: "protein", def: "iron", spatk: "calcium", spdef: "zinc", spd: "carbos" };
   /* Nome ufficiale dello strumento che potenzia un tipo: nell'originale non
@@ -14330,7 +14407,7 @@
             <span class="move-name">${mv.it}</span>
             <span class="move-meta">
               <span class="ticon t-${mv.type}"></span><span class="cicon c-${mv.category}"></span>
-              <span class="move-pp">${mv.power > 0 ? "P" + mv.power + " \u00b7 " : ""}${mv.pp}/${mv.pp}</span>
+              ${mv.power > 0 ? `<span class="move-pot">P${mv.power}</span>` : ""}<span class="move-pp">${mv.pp}/${mv.pp}</span>
             </span>
           </button>
           <button class="mv-info${on ? " aperta" : ""}" data-i-mv="${id}" aria-label="Informazioni">\u24d8</button>
@@ -14647,6 +14724,7 @@
     gripclaw: "Presartigli", blackhole: "Piccolo buco nero", mysticalrock: "Rocciamistica",
     lightball: "Elettropalla", thickclub: "Osso spesso", metalpowder: "Metalpolvere",
     quickpowder: "Velopolvere", deepseascale: "Squamabissi", deepseatooth: "Dente Abissi",
+    sciarpanera: "Sciarpa nera",
   };
   // Nome leggibile di un oggetto tenuto (i Boost di Tipo non hanno voce fissa)
   const nomeHeld = k => k === "typeboost" ? "uno strumento di tipo" : (HELD_IT[k] || k);
