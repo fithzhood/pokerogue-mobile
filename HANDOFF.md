@@ -5725,3 +5725,127 @@ Verificato: rubato un Porygon-Z all'ondata 145 → alla 195 «Tu mi hai rubato i
 mio Porygon-Z! Oggi me lo riprendo.», roster senza Porygon e con un Gengar al suo
 posto. Rubato un Pineco alla recluta dell'ondata 35 → alla 62 «Ti riconosco: ci
 hai rubato un Pineco. Adesso paghi.»
+
+
+## 76. I selvatici erano sottolivello (rev 182)
+
+> «Controlla i livelli dei pokemon selvatici, mi sono sembrati deboli, come sale
+> il livello medio con le ondate nell'originale?»
+
+La formula di partenza era **giusta**: `1 + ondata/2 + (ondata/25)²` è identica a
+quella dell'originale. Sbagliato era lo **scarto** che ci si somma sopra — e
+sbagliato al contrario.
+
+Là è `Math.abs(randSeedGaussForLevel(10 / ondata))`, e quella funzione fa
+«somma di N sorteggi / N» con N = lo scarto passato. Sopra l'ondata 10 lo scarto
+scende **sotto 1**, il ciclo gira una volta sola e il risultato diventa
+`sorteggio / (10/ondata)`, cioè **sorteggio × ondata/10**: un bonus da 0 a
+ondata/10 livelli.
+
+Noi invece **moltiplicavamo** per quello scarto invece di dividerci:
+`random × min(2, 10/ondata)`. All'ondata 100 faceva da 0 a +0,1 — cioè niente.
+
+| ondata | base | medio ora | max ora | tetto squadra |
+|---|---|---|---|---|
+| 25 | 14,5 | 15,8 | 17 | 24 |
+| 75 | 47,5 | 51,2 | 55 | 64 |
+| 125 | 88,5 | 94,8 | 101 | 114 |
+| 199 | 163,9 | 174,1 | 184 | 200 |
+
+⚠️ I **boss** avevano lo stesso buco al contrario: là oscillano di ±ondata/10
+attorno al loro livello (`realInRange(-1,1) × ondata/10`), da noi erano fissi. E
+il boss **finale** si arrotonda per eccesso al multiplo di 25, che è il motivo
+per cui all'ondata 200 sta a 200 tondi. Ora anche questo.
+
+Prova: `__items.livelli(ondata)` dà min, medio, max su 400 tiri e il tetto della
+squadra su quell'ondata.
+
+
+## 77. La seconda fase del boss è un avversario nuovo (rev 182)
+
+> «Nella seconda fase il boss finale dovrebbe essere completamente rigenerato e
+> con nuovi scudi»
+
+⚠️ **Qui ci si stacca dall'originale, per scelta del proprietario.** Là
+`calculateStats` somma ai PS solo l'**aumento** del massimo e `setBoss` non si
+richiama più: Eternamax si presenta a circa un terzo di vita e con la barra
+all'ultimo spicchio, quindi la seconda fase dura meno della prima.
+
+Ora ogni fase riparte a **PS pieni** e con **scudi nuovi**, calcolati sulla forma
+nuova. L'ultima fase gli scudi ce li ha come le altre: lì `bloccoFinale` non vale
+più, quindi non impediscono di vincere — tagliano il danno un pezzo alla volta e
+a ogni rottura il boss cresce.
+
+Verificato: Ho-Oh 810/810 con 4 scudi in fase 1 → rotti tutti → «Ho-Oh Ombra»
+923/923 con 4 scudi nuovi, nessuno rotto.
+
+
+## 78. Il tetto era una porta, non un soffitto (rev 182)
+
+> «Ho cominciato una nuova run con Ho-Oh e dopo il primo incontro è salito al 23»
+
+Due difetti, uno sopra l'altro.
+
+**Il gruzzolo della run precedente.** `expPending` raccoglie l'esperienza dei
+nemici caduti e si svuota a fine ondata. Ma se una run finisce **prima** che
+l'ondata si chiuda — esci dal menù con un avversario già a terra, oppure vai KO —
+quel gruzzolo resta lì. La partenza di una run nuova azzerava una ventina di
+campi ma non quello (il **caricamento** di un salvataggio sì: era solo la
+partenza da zero a non farlo). Così la prima ondata consegnava l'esperienza di
+un'ondata 125.
+
+**E niente lo fermava.** Il tetto d'ondata si controllava solo *all'ingresso*
+(«sei già al tetto? allora niente esperienza»), ma il livello che ne usciva non
+era limitato: una sola consegna poteva scavalcarlo di dieci livelli. Nell'origi-
+nale (`Pokemon.addExp`) il tetto sta **dentro** il ciclo dei passaggi di livello
+— `while (level < maxExpLevel && ...)` — e subito dopo l'esperienza in eccesso
+viene ritagliata, o la barra resterebbe piena di una crescita impossibile.
+
+Verificato iniettando 200.000 di esperienza in sospeso all'ondata 1: Bulbasaur si
+ferma al livello **10** (il tetto) con l'esperienza tagliata a 857, invece di
+schizzare oltre il 60.
+
+
+## 79. La schermata di selezione: filtri, passiva, memoria (rev 182)
+
+Tre segnalazioni della stessa serata, tutte sulla stessa schermata.
+
+### 79.1 Filtro cromatici e barra ordinata
+
+> «Serve un filtro anche per gli shiny nel menù di selezione. Assicurati di fare
+> un layout ordinato tra i filtri»
+
+La barra era **una sola riga a capo automatico** con dentro tre cose diverse: la
+casella di ricerca, cinque menù a tendina e i tastini a interruttore. A 384 px
+andavano a capo dove capitava e cambiavano posizione a ogni filtro acceso — il
+tasto che cercavi non era mai dove l'avevi lasciato.
+
+Ora sono **tre file per tre mestieri**: cerca (larghezza piena), restringi (i
+cinque menù in una griglia `auto-fit` che si dispone da sola in due o tre
+colonne) e spunta (i quattro interruttori, centrati). Il nuovo è
+`✨ solo cromatici`.
+
+### 79.2 La ⓘ sulla passiva
+
+> «Nel menù di selezione iniziale manca il tasto per avere la descrizione della
+> passiva»
+
+Abilità e mosse hanno la loro ⓘ da sempre; la passiva no, e si vedeva solo il
+nome. Ma è l'unica cosa che si **compra** con le caramelle: decidere se spenderle
+senza sapere cosa fa era una scommessa al buio.
+
+### 79.3 Le scelte si ricordano
+
+> «Una volta fatte delle scelte riguardo natura, abilità… assicurati che rimangano
+> preselezionate per le prossime run, fino a che non si decide di cambiarle»
+
+Natura, abilità, mosse, sesso, forma e livrea si ricomponevano da capo ogni volta
+coi valori d'ufficio. Ora la configurazione **confermata** (il tasto «Aggiungi»)
+si scrive in `meta.sceltaStarter[specie]` e torna preselezionata.
+
+⚠️ Si salva sulla **conferma**, non a ogni tocco dentro la scheda: se no
+basterebbe curiosare per cambiare le preferenze.
+
+⚠️ Ogni pezzo si riprende solo se è **ancora valido**. Mosse da uovo e abilità si
+sbloccano nel tempo, e una scelta salvata può puntare a roba che in questo
+salvataggio non c'è: si controlla voce per voce e si ricade sul valore d'ufficio.

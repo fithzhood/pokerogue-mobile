@@ -29,11 +29,44 @@
      progressione "sembrava troppo veloce": lo era davvero, di quasi tre volte.
      ⚠️ Il livello adesso NON dipende piu' da START_LEVEL.
      ====================================================================== */
+  /* ======================================================================
+     🔴 I SELVATICI ERANO SOTTOLIVELLO (§76)
+
+     Segnalazione: «i livelli dei selvatici mi sono sembrati deboli». Vero, e
+     la formula di partenza era giusta: `1 + ondata/2 + (ondata/25)²` è
+     identica a quella dell'originale. Sbagliato era lo SCARTO che ci si somma
+     sopra — e sbagliato al contrario.
+
+     La' e' `Math.abs(randSeedGaussForLevel(10 / ondata))`, e quella funzione
+     fa `somma di N sorteggi / N` con N = lo scarto passato. Sopra l'ondata 10
+     lo scarto scende sotto 1, il ciclo gira UNA volta sola e il risultato
+     diventa `sorteggio / (10/ondata)`, cioe' **sorteggio × ondata/10**: un
+     bonus da 0 a ondata/10 livelli. All'ondata 100 vuol dire da 0 a +10, alla
+     200 da 0 a +20.
+
+     Noi invece MOLTIPLICAVAMO per quello scarto invece di dividerci:
+     `random × min(2, 10/ondata)`. All'ondata 100 faceva da 0 a +0,1 — cioe'
+     niente. I selvatici restavano incollati alla curva di base mentre la'
+     galleggiano parecchio sopra.
+
+     ⚠️ I BOSS avevano lo stesso buco al contrario: la' oscillano di
+     ±ondata/10 attorno al loro livello (`realInRange(-1,1) × ondata/10`), da
+     noi erano fissi. E il boss FINALE si arrotonda per eccesso al multiplo di
+     25 piu' vicino, che e' il motivo per cui all'ondata 200 sta a 200 tondi.
+     ====================================================================== */
+  function scartoLivello(dev) {
+    let r = 0;
+    for (let i = dev; i > 0; i--) r += Math.random();
+    return Math.abs(r / dev);
+  }
   function enemyLevelFor(w) {
     const base = 1 + w / 2 + Math.pow(w / 25, 2);
-    if (w % BOSS_EVERY === 0) return Math.max(1, Math.floor(base * 1.2));
-    // piccola variazione verso l'alto, come il `randSeedGauss` dell'originale
-    return Math.max(1, Math.round(base + Math.random() * Math.min(2, 10 / Math.max(1, w))));
+    if (w % BOSS_EVERY === 0) {
+      const ret = Math.floor(base * 1.2);
+      if (w >= FINAL_WAVE) return Math.ceil(ret / 25) * 25;
+      return Math.max(1, ret + Math.round((Math.random() * 2 - 1) * Math.floor(w / 10)));
+    }
+    return Math.max(1, Math.round(base + scartoLivello(10 / Math.max(1, w))));
   }
 
   /* ======================================================================
@@ -1611,6 +1644,16 @@
     },
     roll: (n) => Array.from({ length: n || 10 }, () => rollReward([])),
     waveMoney: (w) => { const o = game.wave; game.wave = w; const m = waveMoney(1); game.wave = o; return m; },
+    /* Livello degli avversari: minimo, medio e massimo su 400 tiri, e il tetto
+       a cui puo' arrivare la tua squadra su quell'ondata. */
+    livelli: (w) => {
+      const v = [];
+      for (let i = 0; i < 400; i++) v.push(enemyLevelFor(w || game.wave));
+      const base = 1 + (w || game.wave) / 2 + Math.pow((w || game.wave) / 25, 2);
+      return { ondata: w || game.wave, base: Math.round(base * 10) / 10,
+               min: Math.min(...v), medio: Math.round(v.reduce((a, b) => a + b, 0) / v.length * 10) / 10,
+               max: Math.max(...v), tettoSquadra: livelloMassimo(w || game.wave) };
+    },
     /* Quanti Pokemon ha ogni squadra importante, ondata per ondata. */
     squadre: () => ({
       capipalestra: [30, 60, 90, 120, 150, 180].map(w => w + ":" + quantiPokemon("gym", w)),
@@ -2971,6 +3014,15 @@
     game.encSeen = [];        // incontri gia' capitati in questa run
     game.encTiersSeen = [];   // e i loro tier, per abbassarne il peso
     game.encReward = null;    // premio promesso da un incontro finito in lotta
+    /* 🔴 L'ESPERIENZA DELLA RUN PRECEDENTE FINIVA NELLA NUOVA.
+       `expPending` raccoglie l'esperienza dei nemici caduti e si svuota a fine
+       ondata. Ma se una run finisce PRIMA che l'ondata si chiuda — esci dal
+       menu con un avversario gia' a terra, oppure vai KO — quel gruzzolo
+       resta li'. Ricominciando, la prima ondata della run nuova lo consegnava
+       tutto: un Ho-Oh appena schierato saliva al livello 23 all'ondata 1.
+       (Il caricamento di un salvataggio lo azzerava gia'; era solo la partenza
+       da zero a non farlo.) */
+    game.expPending = 0;
     starterTeam = [];
     // Lega e Team cattivo di QUESTA run (come l'originale: casuali ma coerenti)
     game.leagueIdx = Math.floor(Math.random() * LEAGUES.length);
@@ -4002,15 +4054,23 @@
     const fase = boss.fasi[prossima];
     if (!fase) return false;
     for (const g of (fase.grida || [])) messages.push(g);
-    const vecchioMax = e.maxHp;
     const nome = applicaFase(e, boss, prossima);
     recomputeStats(e);
-    e.hp = Math.max(1, Math.min(e.maxHp, e.hp + (e.maxHp - vecchioMax)));
-    // scudi solo se restano altre fasi dopo questa
-    if (boss.fasi[prossima + 1]) {
-      const bst = Object.values(e.baseStats).reduce((a, b) => a + b, 0);
-      setSegments(e, bossSegmentsFor(e.level, bst, game.wave));
-    } else { e.segTotal = 0; e.segBounds = []; e.segBroken = 0; }
+    /* 🔴 LA FASE NUOVA E' UN AVVERSARIO NUOVO (§77)
+       Prima ai PS si sommava solo l'AUMENTO del massimo (`hp + (maxHp -
+       vecchioMax)`) e gli scudi si davano solo se restava un'altra fase dopo.
+       E' quello che fa l'originale — `calculateStats` aggiunge la differenza e
+       `setBoss` non si richiama piu' — e vuol dire che Eternamax si presenta
+       gia' a un terzo di vita e con la barra all'ultimo spicchio: la seconda
+       fase durava meno della prima.
+       ⚠️ QUI SI STACCA DALL'ORIGINALE, per scelta del proprietario: ogni
+       fase riparte a PS PIENI e con scudi nuovi, calcolati sulla forma nuova.
+       L'ultima fase gli scudi ce li ha come le altre: li' `bloccoFinale` non
+       vale piu', quindi non impediscono di vincere — tagliano il danno un
+       pezzo alla volta e a ogni rottura il boss cresce. */
+    e.hp = e.maxHp;
+    const bst = Object.values(e.baseStats).reduce((a, b) => a + b, 0);
+    setSegments(e, bossSegmentsFor(e.level, bst, game.wave));
     if (fase.buconero) { addHeld(e, "blackhole"); e._heldFisso = ["blackhole"]; }
     e.spr = null;
     loadFighterSprite(e, "front").then(s => { e.spr = s; redrawScene(); });
@@ -7277,7 +7337,21 @@
       if (p.exp == null) p.exp = expTotalePerLivello(p.level, p.growthRate);
       p.exp += guadagno;
       const prima = p.level;
-      p.level = livelloPerExp(p.exp, p.growthRate);
+      /* 🔴 IL TETTO ERA SOLO UNA PORTA, NON UN SOFFITTO.
+         Si controllava se il Pokemon fosse GIA' al tetto per non dargli altra
+         esperienza, ma il livello che ne usciva non era limitato: una sola
+         consegna poteva scavalcarlo di dieci livelli in un colpo.
+         Nell'originale (`Pokemon.addExp`) il ciclo che fa salire di livello ha
+         il tetto nella condizione — `while (level < maxExpLevel && ...)` — e
+         subito dopo l'esperienza in eccesso viene ritagliata, o la barra
+         resterebbe piena di una crescita che non puo' avvenire. */
+      let lv = p.level;
+      while (lv < tetto && lv < LIVELLO_MAX
+             && p.exp >= expTotalePerLivello(lv + 1, p.growthRate)) lv++;
+      p.level = lv;
+      if (p.level >= tetto || p.level >= LIVELLO_MAX) {
+        p.exp = Math.max(expTotalePerLivello(p.level, p.growthRate), p.exp - guadagno);
+      }
       if (p.level > prima) {
         recomputeStats(p);
         /* Tutti i passaggi di livello dell'ondata stanno INSIEME: sono un
@@ -12864,7 +12938,7 @@
      quando si ha voglia di guardare quanto manca, non ogni volta che si compone
      la squadra. Con "Tutto" tornano tutte e 544. */
   const starterFilters = { gen: 0, type: "", stato: "libero", sort: "dex", q: "",
-                           soloPkrs: false, senzaFiocco: false,
+                           soloPkrs: false, soloCrom: false, senzaFiocco: false,
                            passiva: "", scontabile: false };
   const SORT_IT = { dex: "Num. Dex", cost: "Costo", name: "Nome", candy: "Caramelle" };
   const STATO_IT = { libero: "Schierabili", tutto: "Tutto", visto: "Visti", ignoto: "Mancanti" };
@@ -12905,6 +12979,8 @@
          sagoma mai incontrata non ha senso parlare di caramelle da spendere. */
       if (f.passiva && (starterState(k) !== "libero" || passivaStato(k) !== f.passiva)) return false;
       if (f.scontabile && (starterState(k) !== "libero" || !costoScontabile(k))) return false;
+      // chi colleziona cerca proprio questi: quelli di cui hai un cromatico
+      if (f.soloCrom && (starterState(k) !== "libero" || meta.unlocked[k] !== 2)) return false;
       // La ricerca per nome vale solo su chi il nome ce l'ha scoperto: cercare
       // fra le sagome direbbe come si chiama un Pokémon che non hai ancora
       // incontrato, e la griglia il nome non lo mostra apposta.
@@ -12971,19 +13047,32 @@
       <div class="budget-bar"><span>Punti: <b>${costoIt(teamCost())}</b> / ${STARTER_BUDGET}</span>
         <span class="budget-left">${left} disponibili</span></div>
       <div class="starter-team">${teamRow}</div>
+      <!-- 🔴 LA BARRA DEI FILTRI ERA UN MUCCHIO.
+           Una sola riga a capo automatico con dentro tre cose diverse: la
+           casella di ricerca, cinque menu a tendina e i tastini a
+           interruttore. A 384 px andavano a capo dove capitava e cambiavano
+           posizione a ogni filtro acceso — il tasto che cercavi non era mai
+           dove l'avevi lasciato. Adesso sono tre file per tre mestieri:
+           cerca, restringi, spunta. -->
       <div class="filter-bar">
         <input id="fq" class="filter-q" type="search" placeholder="🔎 Nome…" value="${f.q.replace(/"/g, "&quot;")}">
-        <select id="fgen" class="filter-sel">${opt(0, f.gen, "Gen: tutte")}${[1,2,3,4,5,6,7,8,9].map(g => opt(g, f.gen, "Gen " + g)).join("")}</select>
-        <select id="ftype" class="filter-sel">${opt("", f.type, "Tipo: tutti")}${Object.keys(CHART).map(t => opt(t, f.type, T[t].it)).join("")}</select>
-        <select id="fstato" class="filter-sel">${Object.keys(STATO_IT).map(s => opt(s, f.stato, STATO_IT[s])).join("")}</select>
-        <select id="fsort" class="filter-sel">${Object.keys(SORT_IT).map(s => opt(s, f.sort, "↕ " + SORT_IT[s])).join("")}</select>
-        <select id="fpassiva" class="filter-sel">${Object.keys(PASSIVA_IT).map(v => opt(v, f.passiva, PASSIVA_IT[v])).join("")}</select>
-        <button class="chip filtro-chip${f.soloPkrs ? " on" : ""}" data-fx="soloPkrs"
-          title="mostra solo chi ha il Pokérus di oggi">💜 solo Pokérus</button>
-        <button class="chip filtro-chip${f.senzaFiocco ? " on" : ""}" data-fx="senzaFiocco"
-          title="nascondi quelli che hanno già il fiocco">🎀 senza fiocco</button>
-        <button class="chip filtro-chip${f.scontabile ? " on" : ""}" data-fx="scontabile"
-          title="hai abbastanza caramelle per abbassargli il costo">${ico("caramella")} costo riducibile</button>
+        <div class="filter-sels">
+          <select id="fgen" class="filter-sel">${opt(0, f.gen, "Gen: tutte")}${[1,2,3,4,5,6,7,8,9].map(g => opt(g, f.gen, "Gen " + g)).join("")}</select>
+          <select id="ftype" class="filter-sel">${opt("", f.type, "Tipo: tutti")}${Object.keys(CHART).map(t => opt(t, f.type, T[t].it)).join("")}</select>
+          <select id="fstato" class="filter-sel">${Object.keys(STATO_IT).map(s => opt(s, f.stato, STATO_IT[s])).join("")}</select>
+          <select id="fsort" class="filter-sel">${Object.keys(SORT_IT).map(s => opt(s, f.sort, "↕ " + SORT_IT[s])).join("")}</select>
+          <select id="fpassiva" class="filter-sel">${Object.keys(PASSIVA_IT).map(v => opt(v, f.passiva, PASSIVA_IT[v])).join("")}</select>
+        </div>
+        <div class="filter-chips">
+          <button class="chip filtro-chip${f.soloCrom ? " on" : ""}" data-fx="soloCrom"
+            title="mostra solo le specie di cui hai un cromatico">✨ solo cromatici</button>
+          <button class="chip filtro-chip${f.soloPkrs ? " on" : ""}" data-fx="soloPkrs"
+            title="mostra solo chi ha il Pokérus di oggi">💜 solo Pokérus</button>
+          <button class="chip filtro-chip${f.senzaFiocco ? " on" : ""}" data-fx="senzaFiocco"
+            title="nascondi quelli che hanno già il fiocco">🎀 senza fiocco</button>
+          <button class="chip filtro-chip${f.scontabile ? " on" : ""}" data-fx="scontabile"
+            title="hai abbastanza caramelle per abbassargli il costo">${ico("caramella")} costo riducibile</button>
+        </div>
       </div>
       <div class="meta-sub" style="margin:.4vh 0">Sbloccati ${presi}/${tot} · ${pool.length} mostrati · 💜 Pokérus · 🎀 fiocco · ● = costo</div>
       <div class="starter-dex">${cells || '<div class="meta-sub">Nessun Pokémon con questi filtri.</div>'}</div>
@@ -13068,20 +13157,37 @@
     const formePool = formeSbloccate(k);
     const formeTutte = (VARIANTS[k] && !FORM_BY_GENDER.has(k) && k !== "TOXTRICITY")
       ? VARIANTS[k].slice(0, Math.max(1, collectableForms(k))) : [];
+    /* 🔴 LE SCELTE NON SOPRAVVIVEVANO ALLA RUN.
+       Natura, abilita', mosse, sesso, forma e livrea si ricomponevano da capo
+       ogni volta con i valori di ufficio. Chi ha un Pokemon del cuore lo
+       configura sempre uguale, e rifarlo a ogni partita e' lavoro a vuoto.
+       Adesso la configurazione confermata (il tasto «Aggiungi») si scrive in
+       `meta.sceltaStarter[specie]` e torna preselezionata la volta dopo.
+       ⚠️ Ogni pezzo si riprende solo se e' ANCORA valido: le mosse da uovo
+       si sbloccano, le abilita' pure, e una scelta salvata potrebbe puntare a
+       roba che in questo salvataggio non c'e' (o non c'e' piu'). Si controlla
+       voce per voce e si ricade sul valore di ufficio. */
+    const ric = (meta.sceltaStarter && meta.sceltaStarter[k]) || null;
+    const ok = (v, elenco) => (v != null && elenco.includes(v)) ? v : null;
+    const mosseRic = ric && Array.isArray(ric.moves)
+      ? ric.moves.filter(id => learnPool.includes(id) || eggPool.includes(id))
+      : null;
     starterCfg = {
       k, shiny, pkrs,
       formePool, formeTutte,
-      formKey: formePool.length ? (formePool[0].key || null) : null,
-      gender: sessoPool[0],
+      formKey: (ric && formePool.some(f2 => (f2.key || null) === (ric.formKey || null)))
+        ? (ric.formKey || null)
+        : (formePool.length ? (formePool[0].key || null) : null),
+      gender: (ric && ok(ric.gender, sessoPool)) || sessoPool[0],
       sessoPool,
-      shinyVar: livreaMax,
+      shinyVar: (ric && ric.shinyVar != null && ric.shinyVar <= livreaMax) ? ric.shinyVar : livreaMax,
       livreaMax,
-      ability: abilPool[0],
-      nature: natPool[0],
+      ability: (ric && ok(ric.ability, abilPool)) || abilPool[0],
+      nature: (ric && ok(ric.nature, natPool)) || natPool[0],
       natPool,
       /* selezione di partenza: come nell'originale, le prime 4 dell'elenco
          "mosse di livello, poi mosse da uovo" (`speciesStarterMoves`) */
-      moves: [...learnPool, ...eggPool].slice(0, 4),
+      moves: (mosseRic && mosseRic.length) ? mosseRic.slice(0, 4) : [...learnPool, ...eggPool].slice(0, 4),
       learnPool, eggPool, abilPool, abilTutte,
     };
     renderStarterDetail();
@@ -13271,7 +13377,13 @@
         <div class="sd-id">
           <div class="sd-name">${c.shiny ? cromStella(c.shinyVar) : ""}${sp.it}${genderSymbol({ gender: c.gender })} ${c.pkrs ? '<span class="sb-pkrs">💜</span>' : ""} ${hasRibbon(c.k) ? "🎀" : ""}</div>
           <div class="sd-types">${tipi.map(t => `<span class="ticon t-${t}"></span>`).join("")}</div>
-          <div class="sd-passive">Passiva: <b>${(ABIL[sp.passive] || {}).it || "—"}</b>${meta.passiveOn && meta.passiveOn[c.k] ? " ✅" : " 🔒"}</div>
+          <!-- 🔴 LA PASSIVA NON SI POTEVA LEGGERE.
+               Abilita' e mosse hanno la loro ⓘ da sempre; la passiva no, e
+               si vedeva solo il nome. Ma e' l'unica cosa che si COMPRA con le
+               caramelle: decidere se spenderle senza sapere cosa fa era una
+               scommessa al buio. -->
+          <div class="sd-passive">Passiva: <b>${(ABIL[sp.passive] || {}).it || "—"}</b>${meta.passiveOn && meta.passiveOn[c.k] ? " ✅" : " 🔒"}${
+            ABIL[sp.passive] ? `<button class="chip-i ${aperto("ab", sp.passive) ? "on" : ""}" data-i-ab="${sp.passive}" title="cosa fa">ⓘ</button>` : ""}</div>
           <div class="sd-passive">Occupa <b>${costoIt(starterCost(c.k))}</b> dei ${STARTER_BUDGET} punti squadra</div>
         </div>
       </div>
@@ -13366,6 +13478,13 @@
       starterTeam.push({ k: c.k, ability: c.ability, nature: c.nature, moves: c.moves.slice(),
                          shiny: c.shiny, shinyVar: c.shinyVar, gender: c.gender, pkrs: c.pkrs,
                          formKey: c.formKey || null });
+      /* La configurazione CONFERMATA si ricorda: la prossima run questa specie
+         si riapre gia' cosi'. E' questo il momento giusto — non a ogni tocco
+         dentro la scheda, o basterebbe curiosare per cambiare le preferenze. */
+      meta.sceltaStarter = meta.sceltaStarter || {};
+      meta.sceltaStarter[c.k] = { ability: c.ability, nature: c.nature, moves: c.moves.slice(),
+                                  shinyVar: c.shinyVar, gender: c.gender, formKey: c.formKey || null };
+      saveMeta();
       tornaAllaGrigliaStarter();
     };
   }
