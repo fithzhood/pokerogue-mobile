@@ -5016,3 +5016,35 @@ Calcolarla sul grafo vivo invece di scriverla a mano vuol dire che resta giusta
 anche se un domani i collegamenti cambiano.
 
 Provato: 40 avvii → tutti e undici i biomi escono.
+
+### 57.3 ⚠️ Niente coppie andata-e-ritorno
+
+Due biomi collegati nei due sensi fanno un **anello da due**: senza la Mappa il
+gioco sorteggia, e c'è una probabilità su quattro di rimbalzare avanti e
+indietro fra gli stessi due posti a ogni cambio zona. Un anello da **tre** si
+rompe molto più in fretta, perché a ogni giro ci sono più vie d'uscita.
+
+La prima stesura ne aveva chiuso uno: Città ↔ Metropoli. Il caso era obbligato —
+l'entrata a Città poteva darla solo la Metropoli, ma Città → Metropoli esisteva
+già. La soluzione è un **triangolo**:
+
+```
+Città → Metropoli → Sobborghi → Città
+```
+
+che dà a tutti e tre quel che serve senza chiudere nessun anello da due.
+Metropoli guadagna come seconda uscita il Cantiere (Cantiere → Metropoli non
+esiste, quindi niente reciproco).
+
+Verificato sul grafo intero: **zero coppie reciproche, ciclo diretto più corto = 3**.
+
+Effetto collaterale gradito: le partenze scendono da 14 a 13 e sono più
+plausibili — entrano Dojo e Centrale al posto di Grotta, Grotta Fatata e
+Foresta.
+
+⚠️ **Trappola dei commenti**: la prima stesura usava un disegnino ASCII con
+`// \` a fine riga. La barra rovesciata si è mangiata la riga successiva e
+`POWER_PLANT: ["METROPOLIS"]` è finito **dentro il commento** — la Centrale è
+rimasta con una sola uscita e `node --check` non se n'è accorto (era JS
+valido). Trovato solo aprendo la schermata di scelta in gioco. Niente arte
+ASCII con barre rovesciate nei commenti.
