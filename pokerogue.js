@@ -3543,6 +3543,20 @@
      nasce al primo incontro, si allunga di uno a ogni tappa e non cambia mai
      ordine. A ogni sfida si rifanno i combattenti da quelle radici, portate al
      livello del momento con `evolvedFormFor`. */
+  /* 🔴 IL SESTO POSTO DELLA RIVALE E' RAYQUAZA — E ALL'ULTIMO GIRO E' MEGA.
+     La sua squadra si riempiva di specie a tema pescate a caso, quindi
+     l'incontro dell'ondata 195 — l'ultimo allenatore prima del boss finale —
+     era sei Pokemon normali. Nell'originale il sesto posto e' fissato
+     (`SLOT_6_FINAL = [RAYQUAZA]`, dal quinto incontro in poi) e al SESTO
+     `postProcessSlot6Fight6` gli mette `formIndex = 1`, cioe' **Mega
+     Rayquaza**. Un leggendario e una mega nello stesso Pokemon.
+     ⚠️ Scende gia' trasformato, non megaevolve durante la lotta: la'
+     nasce con la forma mega addosso, e da noi la megaevoluzione in campo e'
+     roba del giocatore (`canTransform` guarda `game.hasMegaRing`).
+     ⚠️ E scende per ULTIMO. L'asso-starter va in fondo da sempre (scelta
+     nostra, l'originale lo manda per primo); l'ultima parola pero' adesso ce
+     l'ha lui. */
+  const ASSO_FINALE_RIVALE = "RAYQUAZA";
   function buildRival(eLevel) {
     const rivalStage = RIVAL_WAVES.indexOf(game.wave);       // 0..5
     const count = Math.min(6, rivalStage + 2);               // 2..6 Pokemon
@@ -3559,10 +3573,18 @@
     /* I compagni NUOVI entrano gia' all'altezza dell'ondata in cui li recluta
        (se no, aggiunti alla wave 195, sarebbero cuccioli); quelli che c'erano
        gia' non si toccano: crescono da soli con `evolvedFormFor`. */
+    /* Quello che le hai rubato non torna: non glielo si ridà come rimpiazzo
+       (nemmeno il Rayquaza del sesto posto, se e' finito nelle tue mani). */
+    const rubati = (game.rivalRubati || []).map(x => rootOf(x.sp));
+    const giaVisto = k => !k || rubati.includes(rootOf(k)) || r.some(x => rootOf(x.sp) === rootOf(k));
     while (r.length < count) {
+      // il SESTO posto non si sorteggia: e' suo (a meno che non gliel'abbia rubato)
+      if (r.length === 5 && S[ASSO_FINALE_RIVALE] && !giaVisto(ASSO_FINALE_RIVALE)) {
+        r.push({ sp: ASSO_FINALE_RIVALE }); continue;
+      }
       // il confronto va sulla RADICE: Applin e Hydrapple sono lo stesso Pokemon
       let k = null;
-      for (let t = 0; t < 25 && (!k || r.some(x => rootOf(x.sp) === rootOf(k))); t++) k = pickThemed(null, eLevel);
+      for (let t = 0; t < 25 && giaVisto(k); t++) k = pickThemed(null, eLevel);
       r.push({ sp: k || pickThemed(null, eLevel) });
     }
     const mons = [];
@@ -3589,9 +3611,14 @@
       r[i].variant = f.variant == null ? null : f.variant;
       if (f.gender && f.gender !== "GENDERLESS") r[i].gender = f.gender;
       f.trainer = game.rivalFemale ? "la Rivale" : "il Rivale"; f.rival = true;
+      // all'ULTIMO incontro il suo Rayquaza arriva gia' megaevoluto
+      if (r[i].sp === ASSO_FINALE_RIVALE && rivalStage >= 5) transform(f, "mega", []);
       mons.push(f);
     }
-    mons.push(mons.shift());          // ma scende in campo per ULTIMO
+    mons.push(mons.shift());          // l'asso-starter scende in campo per ULTIMO
+    /* …tranne quando c'e' Rayquaza: allora e' lui a chiudere. */
+    const iRay = mons.findIndex(m => m.speciesId === ASSO_FINALE_RIVALE);
+    if (iRay >= 0) mons.push(mons.splice(iRay, 1)[0]);
     return mons;
   }
 
@@ -4372,8 +4399,10 @@
         ? `«Il mio piano è perfetto! ${evil.name} dominerà!»`
         : evilKind === "admin" ? `«Sono un Admin di ${evil.name}. Non passerai!»`
         : `«${evil.name} non tollera intrusi!»`;
+      const rinfaccio = battutaDelDerubato("team");
       startTrainerBattle(mons, sprite, who,
-        [`💀 Ondata ${game.wave}: ${who} ti sbarra la strada!`, cry]);
+        [`💀 Ondata ${game.wave}: ${who} ti sbarra la strada!`]
+          .concat(rinfaccio ? [rinfaccio] : []).concat([cry]));
       return;
     }
     if (isGym) {
@@ -4388,9 +4417,11 @@
     if (isRival) {
       const mons = buildRival(eLevel);
       const rf = !!game.rivalFemale;
+      const rimprovero = battutaDelDerubato("rivale");
       startTrainerBattle(mons, rf ? "rival_f" : "rival_m", rf ? "la Rivale" : "il Rivale",
-        [`Ondata ${game.wave}: ${rf ? "la tua Rivale" : "il tuo Rivale"} ti blocca la strada!`,
-         rf ? "«Fatti sotto! Ti mostro quanto sono diventata forte!»" : "«Fatti sotto! Ti mostro quanto sono diventato forte!»"]);
+        [`Ondata ${game.wave}: ${rf ? "la tua Rivale" : "il tuo Rivale"} ti blocca la strada!`]
+          .concat(rimprovero ? [rimprovero] : [])
+          .concat([rf ? "«Fatti sotto! Ti mostro quanto sono diventata forte!»" : "«Fatti sotto! Ti mostro quanto sono diventato forte!»"]));
       return;
     }
     if (isTrainer) {
@@ -5563,6 +5594,11 @@
         ereditaPs(mon, m);
         accogliPokemon(mon, msgs, `${ico("clepto")} Rubato!`);
         registerCaught(m.speciesId, m.shiny, m.ivs, msgs, m.variant, m.abilIndex, m.nature, m.shinyVar, m.gender, m.boss);
+        /* ⚠️ Anche di qui. Le Clepto Ball si tirano da DUE strade — in lotta,
+           come una ball qualunque, e a lotta finita da questa schermata — e la
+           seconda e' quella che si usa quasi sempre. Registrare il furto solo
+           nella prima voleva dire che il furto "vero" non lo ricordava nessuno. */
+        ricordaIlFurto(m);
       } else msgs.push(`${m.name} è sfuggito alla Clepto Ball!`);
       game.phase = "MESSAGE";
       cmd().innerHTML = `<div class="msgbox"><div class="log-line">Lanci una Clepto Ball su ${m.name}…</div></div>`;
@@ -10109,6 +10145,60 @@
       chipIv ? `<div class="cap-iv">${chipIv}</div>` : ""}</div>`;
   }
 
+  /* ======================================================================
+     🔴 IL DERUBATO NON SE NE ACCORGEVA NEMMENO (§75)
+
+     La Clepto Ball toglie il Pokemon dalla squadra dell'allenatore, ma solo
+     per QUELLA lotta: la Rivale se lo ritrovava tutto intero all'incontro
+     dopo, come se niente fosse. E' l'unica avversaria che torna sei volte con
+     la stessa squadra (§`buildRival`), quindi e' anche l'unica a cui un furto
+     dovrebbe lasciare un buco.
+
+     Adesso: il Pokemon esce dalle sue RADICI (`game.rivalRoster`) e al giro
+     dopo il posto e' preso da un altro — lo ha sostituito, come dice il
+     proprietario. E se ne lamenta, per nome.
+
+     ⚠️ Il confronto va sulla RADICE: le sue radici tengono la specie base
+     e in campo scende la forma evoluta del momento. Rubarle un Charizard deve
+     cancellare il Charmander da cui viene, non cercare un "CHARIZARD" che li'
+     dentro non c'e' mai stato.
+
+     ⚠️ La specie rubata resta nell'elenco anche dopo: serve a NON
+     riproporgliela come rimpiazzo (compreso il Rayquaza del sesto posto), e a
+     farle dire la battuta giusta.
+
+     Il team malvagio non ha radici — recluta, admin e boss sono persone
+     diverse — ma la squadra si ricorda lo stesso di cosa gli hai preso, e te
+     lo rinfaccia al prossimo incontro. */
+  function ricordaIlFurto(enemy) {
+    if (!enemy) return;
+    const nome = (S[enemy.speciesId] || {}).it || enemy.name;
+    if (enemy.rival) {
+      game.rivalRubati = game.rivalRubati || [];
+      game.rivalRubati.push({ sp: rootOf(enemy.speciesId), nome });
+      game.rivalRoster = (game.rivalRoster || []).filter(x => rootOf(x.sp) !== rootOf(enemy.speciesId));
+    } else if (enemy.evil) {
+      game.evilRubati = game.evilRubati || [];
+      game.evilRubati.push(nome);
+    }
+  }
+  /* La frase del derubato, se c'e' qualcosa da rinfacciare. Si nomina l'ULTIMO
+     rubato: elencarli tutti sarebbe un inventario, non una battuta. */
+  function battutaDelDerubato(chi) {
+    const rub = chi === "rivale" ? (game.rivalRubati || []) : (game.evilRubati || []);
+    if (!rub.length) return null;
+    const ultimo = rub[rub.length - 1];
+    const nome = chi === "rivale" ? ultimo.nome : ultimo;
+    if (chi === "rivale") {
+      return rub.length > 1
+        ? `«Tu! Continui a rubarmi i Pokémon! Ridammi il mio ${nome}!»`
+        : `«Tu mi hai rubato il mio ${nome}! Oggi me lo riprendo.»`;
+    }
+    return rub.length > 1
+      ? `«Sei quello che ci ruba i Pokémon! Il ${nome} ce lo ripaghi caro.»`
+      : `«Ti riconosco: ci hai rubato un ${nome}. Adesso paghi.»`;
+  }
+
   function renderCaptureScreen() {
     const BALL_IMG = { balls: "pb", greatballs: "gb", ultraballs: "ub", rogueballs: "rb", theftballs: "tb", masterballs: "mb", legendballs: "lb", lastballs: "xb" };
     const owned = BALL_TYPES.filter(b => (game[b.key] || 0) > 0);
@@ -10255,6 +10345,7 @@
         // togli il Pokémon rubato dalla squadra dell'allenatore
         game.trainerRoster = game.trainerRoster.filter(m => m !== enemy);
         if (game.trainerTotal) { game.trainerDefeated++; renderTrainerBalls(); }
+        ricordaIlFurto(enemy);
       }
       renderScene();
       playEvents(log.events, () => chiediPostoInSquadra(() => {
@@ -10606,7 +10697,8 @@
   const CAMPI_RUN = ["balls", "greatballs", "ultraballs", "rogueballs", "theftballs", "masterballs", "legendballs", "lastballs",
     "pendingTheft", "money", "stones", "charms", "tempBoost", "tempBoostN", "shopMarkup", "lati", "cuccagna",
     "cicloOffset", "encSeen", "encTiersSeen", "leagueIdx", "evilIdx", "finalBossIdx",
-    "rivalFemale", "rivalRoster", "gymRoster", "hasMegaRing", "hasDynamaxBand",
+    "rivalFemale", "rivalRoster", "rivalRubati", "evilRubati", "gymRoster",
+    "hasMegaRing", "hasDynamaxBand",
     "active", "biome", "zoneViste", "starterSpecies"];
 
   /* Un Pokemon e' gia' quasi tutto JSON. Le due eccezioni: `spr` (i dati

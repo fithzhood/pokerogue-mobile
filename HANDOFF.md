@@ -5665,3 +5665,63 @@ quindi cadono esattamente sui loro appuntamenti.
 Verificato: `__items.squadre()` → capipalestra 30:3 · 60:4 · 90:5 · 120:6 ·
 150:6 · 180:6; reclute 35:2 · 62:3 · 64:3; admin e boss 6; Superquattro 6;
 Campione 6. E in gioco, Shauntal all'ondata 182 arriva col vassoio da sei.
+
+
+## 74. Il sesto posto della Rivale è Rayquaza — e all'ultimo giro è Mega (rev 181)
+
+> «Nell'ultimo scontro con la rivale lei dovrebbe avere almeno un leggendario e
+> una mega/giga»
+
+Aveva ragione, ed è esattamente quello che fa l'originale. La sua squadra si
+riempiva di specie a tema pescate a caso, quindi l'incontro dell'ondata 195 —
+l'ultimo allenatore prima del boss finale — era sei Pokémon normali. Là il sesto
+posto è **fissato** (`SLOT_6_FINAL = [RAYQUAZA]`, dal quinto incontro in poi) e
+al sesto `postProcessSlot6Fight6` gli mette `formIndex = 1`, cioè **Mega
+Rayquaza**. Un leggendario e una mega nello stesso Pokémon.
+
+⚠️ Scende **già trasformato**, non megaevolve durante la lotta: là nasce con la
+forma addosso, e da noi la megaevoluzione in campo è roba del giocatore
+(`canTransform` guarda `game.hasMegaRing`).
+
+⚠️ E scende **per ultimo**. L'asso-starter va in fondo da sempre (scelta nostra;
+l'originale lo manda per primo), ma l'ultima parola adesso ce l'ha lui.
+
+Verificato: ondata 145 → Rayquaza normale in coda; ondata 195 → «Mega Rayquaza»,
+BST 780, Drago/Volante, 604 Att e 602 Att.Sp al livello 160, sprite `384-mega`.
+
+
+## 75. Il derubato se ne accorge (rev 181)
+
+> «Se le rubo un pokemon durante la run, nel prossimo incontro non deve
+> avercelo, lo avrà sostituito. E potrebbe anche dire qualcosa a riguardo.»
+
+La Clepto Ball toglieva il Pokémon dalla squadra dell'allenatore, ma solo per
+**quella** lotta: la Rivale se lo ritrovava tutto intero all'incontro dopo. È
+l'unica avversaria che torna sei volte con la stessa squadra, quindi è anche
+l'unica a cui un furto dovrebbe lasciare un buco.
+
+Ora `ricordaIlFurto`: il Pokémon esce dalle sue **radici** (`game.rivalRoster`) e
+al giro dopo il posto è preso da un altro. E se ne lamenta, per nome.
+
+⚠️ Il confronto va sulla **radice**: le radici tengono la specie base e in campo
+scende la forma evoluta del momento. Rubarle un Porygon-Z deve cancellare il
+`PORYGON` da cui viene, non cercare un «PORYGON_Z» che lì dentro non c'è mai
+stato.
+
+⚠️ La specie rubata resta in `game.rivalRubati` anche dopo: serve a **non**
+riproporgliela come rimpiazzo — Rayquaza compreso, se sei riuscito a prenderle
+quello.
+
+⚠️ **Le Clepto Ball si tirano da due strade**: in lotta, come una ball qualunque,
+e a lotta finita dalla schermata `offerSteal` — che è quella che si usa quasi
+sempre. Registrare il furto solo nella prima voleva dire che il furto «vero» non
+lo ricordava nessuno. Trovato provandolo: il Salamence era in squadra e
+`rivalRubati` restava `null`.
+
+Il team malvagio non ha radici (recluta, admin e boss sono persone diverse) ma la
+squadra si ricorda lo stesso di cosa gli hai preso e te lo rinfaccia.
+
+Verificato: rubato un Porygon-Z all'ondata 145 → alla 195 «Tu mi hai rubato il
+mio Porygon-Z! Oggi me lo riprendo.», roster senza Porygon e con un Gengar al suo
+posto. Rubato un Pineco alla recluta dell'ondata 35 → alla 62 «Ti riconosco: ci
+hai rubato un Pineco. Adesso paghi.»

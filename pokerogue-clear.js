@@ -1610,6 +1610,15 @@
     },
     roll: (n) => Array.from({ length: n || 10 }, () => rollReward([])),
     waveMoney: (w) => { const o = game.wave; game.wave = w; const m = waveMoney(1); game.wave = o; return m; },
+    /* Quanti Pokemon ha ogni squadra importante, ondata per ondata. */
+    squadre: () => ({
+      capipalestra: [30, 60, 90, 120, 150, 180].map(w => w + ":" + quantiPokemon("gym", w)),
+      reclute: EVIL_GRUNT_WAVES.map(w => w + ":" + quantiPokemon("grunt", w)),
+      admin: EVIL_ADMIN_WAVES.map(w => w + ":" + quantiPokemon("admin", w)),
+      boss: EVIL_BOSS_WAVES.map(w => w + ":" + quantiPokemon("boss", w)),
+      superquattro: E4_WAVES.map(w => w + ":" + quantiPokemon("e4", w)),
+      campione: CHAMPION_WAVE + ":" + quantiPokemon("champion", CHAMPION_WAVE),
+    }),
     /* I sei capipalestra sorteggiati per questa run, in ordine di comparsa. */
     palestre: (rifai) => {
       if (rifai) game.gymRoster = null;
@@ -3994,8 +4003,43 @@
   }
 
   // Squadra di un capopalestra: monotipo, con l'ultimo più forte (asso).
+  /* ======================================================================
+     🔴 LE SQUADRE IMPORTANTI ERANO TUTTE PIU' PICCOLE DEL DOVUTO (§73)
+
+     Segnalazione: «e' giusto che i superquattro abbiano solo 4 Pokemon a
+     testa?». No: nell'originale ne hanno **sei**. E controllando gli altri,
+     erano corti quasi tutti.
+
+     Nell'originale il numero non e' scritto a mano: viene dai
+     `trainerPartyTemplates`, che sono elenchi di «quanti di che forza».
+     Contati, dicono questo:
+
+       Superquattro   ELITE_FOUR      1+3+1+1 = 6   (noi: 4)
+       Campione       CHAMPION        4+2     = 6   (noi: 6, gia' giusto)
+       Boss malvagio  EVIL_LEADER     1+2+2+1 = 6   (noi: 5)
+       Admin          RIVAL_5         1+1+3+1 = 6   (noi: 3)
+       Recluta        due ondate      2 / 3 / 6     (noi: 2 sempre)
+       Capopalestra   GYM_LEADER_1..5 2/3/4/5/6 a scaglioni (noi: 3+ondata/60)
+
+     ⚠️ Per i capipalestra e le reclute il numero CRESCE con l'ondata, ed e'
+     una scala a gradini precisa, non una formula: la si copia com'e'.
+     Le soglie delle reclute sono le ondate dei loro incontri (35, 62/64, poi
+     gli admin), quindi cadono esattamente sui loro appuntamenti.
+     ====================================================================== */
+  function quantiPokemon(ruolo, wave) {
+    switch (ruolo) {
+      case "gym":       return wave <= 20 ? 2 : wave <= 30 ? 3 : wave <= 60 ? 4 : wave <= 90 ? 5 : 6;
+      case "grunt":     return wave <= 35 ? 2 : wave <= 64 ? 3 : 6;
+      case "admin":     return 6;
+      case "boss":      return 6;
+      case "e4":        return 6;
+      case "champion":  return 6;
+      default:          return 3;
+    }
+  }
+
   function buildGymLeader(leader, eLevel) {
-    const count = 3 + Math.floor(game.wave / 60);   // 3-5 Pokemon
+    const count = quantiPokemon("gym", game.wave);   // 2..6, a scaglioni
     const mons = [];
     const presi = new Set();                        // niente due volte la stessa specie
     for (let i = 0; i < count; i++) {
@@ -4288,7 +4332,7 @@
       return;
     }
     if (e4) {
-      const mons = buildElite([e4.type], eLevel, 4, e4.name);
+      const mons = buildElite([e4.type], eLevel, quantiPokemon("e4"), e4.name);
       startTrainerBattle(mons, e4.sprite, e4.name,
         [`👑 Ondata ${game.wave}: ${e4.name} dei Superquattro!`,
          `«Solo i più forti superano la Lega. Vediamo se lo sei.»`]);
@@ -4296,7 +4340,7 @@
     }
     if (isChampion) {
       const champName = "Campione " + league.champ[0];
-      const mons = buildElite(null, eLevel, 6, champName);
+      const mons = buildElite(null, eLevel, quantiPokemon("champion"), champName);
       startTrainerBattle(mons, league.champ[1], champName,
         [`🏆 Ondata ${game.wave}: ${champName} della regione di ${league.region} ti attende!`,
          `«Sono il Campione. Mostrami tutto quello che hai imparato!»`]);
@@ -4305,7 +4349,7 @@
 
     if (evilKind) {
       const lvl = eLevel + (evilKind === "boss" ? 4 : evilKind === "admin" ? 2 : 0);
-      const count = evilKind === "boss" ? 5 : evilKind === "admin" ? 3 : 2;
+      const count = quantiPokemon(evilKind, game.wave);
       let who, sprite;
       if (evilKind === "boss") { who = `${evil.boss[0]} (${evil.name})`; sprite = evil.boss[1]; }
       else if (evilKind === "admin") { const a = evil.admins[Math.floor(Math.random() * evil.admins.length)]; who = `${a[0]} (${evil.name})`; sprite = a[1]; }
