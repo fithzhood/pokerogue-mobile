@@ -1325,7 +1325,11 @@
     const evio = (defender.held && defender.held.eviolite && (S[defender.speciesId].evolutions || []).length) ? 1.5 : 1;
     // FOLTOPELO: Difesa raddoppiata. DENTISTRETTI: +50% Attacco se stai male.
     const foltopelo = (isPhysical && ha(defender, "FUR_COAT")) ? 2 : 1;
-    const defAb = abStatMult(defender, isPhysical ? "DEF" : "SPDEF") * evio * foltopelo;
+    /* PELLEDURA: +50% Difesa quando stai male. E' il gemello difensivo di
+       Dentistretti, e come lui nei dati estratti e' un'abilita' vuota: senza
+       riconoscerla per nome non faceva niente. */
+    const pelledura = (isPhysical && defender.status && ha(defender, "MARVEL_SCALE")) ? 1.5 : 1;
+    const defAb = abStatMult(defender, isPhysical ? "DEF" : "SPDEF") * evio * foltopelo * pelledura;
     const grinta = (isPhysical && attacker.status && ha(attacker, "GUTS")) ? 1.5 : 1;
     const atk = (isPhysical ? attacker.stats.atk : attacker.stats.spatk) * stageMult(atkStage) * atkAb * grinta
               * tempStatMult(attacker, isPhysical ? "atk" : "spatk");
@@ -1474,7 +1478,21 @@
   }
   function velEffBase(f) {
     const vento = (game.lati && game.lati[latoDi(f)].tailwind > 0) ? 2 : 1;
-    return f.stats.spd * stageMult(f.stages.spd) * tempStatMult(f, "spd") * vento;
+    /* 🔴 LA PARALISI NON DIMEZZAVA LA VELOCITA' (§84).
+       Segnalazione: «gli effetti aggiuntivi di scottatura e paralisi sono
+       implementati?». La scottatura si': dimezza il fisico (e Dentistretti la
+       scavalca, anzi ti da' +50%). La paralisi no: faceva solo il 25% di
+       «non riesce a muoversi», e quella era meta' della mossa. L'altra meta' —
+       la Velocita' a meta', che RIBALTA L'ORDINE DEL TURNO — non c'era.
+       Nell'originale sta in `getEffectiveStat`: `ret >>= 1` sulla SPD di chi e'
+       paralizzato, dopo il Ventoincoda.
+       ⚠️ PIEDISVELTI la annulla e ci aggiunge il suo +50%: e' tutta la sua
+       ragione d'essere, e nei dati estratti l'abilita' e' vuota (`attrs: []`),
+       quindi come Dentistretti va riconosciuta per nome. */
+    const paralisi = f.status === "PARALYSIS" ? 0.5 : 1;
+    const svelti = ha(f, "QUICK_FEET")
+      ? (f.status ? (f.status === "PARALYSIS" ? 2 * 1.5 : 1.5) : 1) : 1;
+    return f.stats.spd * stageMult(f.stages.spd) * tempStatMult(f, "spd") * vento * paralisi * svelti;
   }
 
   // Moltiplicatore statistica da abilita' (StatMultiplierAbAttr).
@@ -1655,6 +1673,13 @@
     },
     roll: (n) => Array.from({ length: n || 10 }, () => rollReward([])),
     waveMoney: (w) => { const o = game.wave; game.wave = w; const m = waveMoney(1); game.wave = o; return m; },
+    /* Velocita' EFFETTIVA di chi e' in campo: quella che decide l'ordine del
+       turno, con dentro stadi, Ventoincoda, paralisi e abilita'. Serve per
+       controllare a occhio effetti che non si vedono in nessuna schermata. */
+    velocita: () => onField().map(f => ({
+      chi: f.name, scheda: f.stats.spd, effettiva: Math.round(velEff(f)),
+      stato: f.status || "-", stadio: f.stages.spd,
+    })),
     /* Livello degli avversari: minimo, medio e massimo su 400 tiri, e il tetto
        a cui puo' arrivare la tua squadra su quell'ondata. */
     livelli: (w) => {
@@ -6926,6 +6951,29 @@
     if (v._baraondaFinita) { v._baraondaFinita = false; stessoMomento(messages, `${actor.name} si è calmato.`); }
   }
 
+  /* 🔴 GLI ALLENATORI SPRECAVANO IL TURNO (§85.1).
+     Segnalazione: «gli avversari non dovrebbero usare mosse che causano
+     addormentamento o simili se il pokemon ha gia' uno stato». L'IA pescava
+     una mossa A CASO fra quelle con PP, quindi un allenatore poteva tirare
+     Sonnifero contro un Pokemon gia' avvelenato, e poi rifarlo il turno dopo.
+     Una mossa di STATO il cui unico scopo e' appioppare uno stato che il
+     bersaglio non puo' ricevere e' un turno regalato, e un allenatore che lo
+     regala non sembra un avversario: sembra un guasto.
+     ⚠️ Vale per gli ALLENATORI, non per i selvatici: quelli restano
+     istintivi, ed e' giusto che ogni tanto sbaglino — tanto adesso, quando
+     capita, il gioco lo dice (§85).
+     ⚠️ Il filtro guarda che TUTTI gli effetti della mossa siano sprecati:
+     una mossa che addormenta E abbassa una statistica resta buona. */
+  function mossaSprecata(foe, move) {
+    if (!move || !foe || move.category !== "STATUS") return false;
+    const attrs = move.attrs || [];
+    if (!attrs.length) return false;
+    if (!attrs.every(a => a.kind === "status" || a.kind === "confuse")) return false;
+    return attrs.every(a => a.kind === "confuse"
+      ? (foe.volatile.confusion > 0 || ha(foe, "OWN_TEMPO") || ha(foe, "OBLIVIOUS"))
+      : (!!foe.status || (STATUS_IMMUNE[a.status] || []).some(t => foe.types.includes(t))));
+  }
+
   function enemyChooseMove() { return aiChooseMove(game.enemy); }
   /* Sceglie una mossa per un combattente guidato dal computer (vale sia per gli
      avversari sia per il secondo alleato nelle lotte in doppio). */
@@ -6933,7 +6981,12 @@
     if (!f || !f.moves || !f.moves.length) return null;
     const obb = mossaObbligata(f);       // furia, rotolamento, baraonda, carica
     if (obb) return obb.inst;
-    const usable = f.moves.filter(m => m.pp > 0);
+    let usable = f.moves.filter(m => m.pp > 0);
+    if (f.trainer || f.trainerMon) {
+      const bersaglio = pickFoeFor(f);
+      const sensate = usable.filter(m => !mossaSprecata(bersaglio, M[m.id]));
+      if (sensate.length) usable = sensate;      // se sono TUTTE sprecate, tira lo stesso
+    }
     return usable.length ? usable[Math.floor(Math.random() * usable.length)] : f.moves[0];
   }
 
@@ -7217,8 +7270,10 @@
   function probabilitaFuga() {
     const miei = [game.player, game.player2].filter(p => p && !p.fainted);
     const loro = enemiesOnField();
-    const vMia = miei.reduce((t, p) => t + p.stats.spd, 0) || 1;
-    const vSua = loro.reduce((t, p) => t + p.stats.spd, 0) || 1;
+    /* ⚠️ Velocita' EFFETTIVA, non quella di scheda: se sei paralizzato scappi
+       peggio, col Ventoincoda meglio. Prima il conto ignorava tutto. */
+    const vMia = miei.reduce((t, p) => t + velEff(p), 0) || 1;
+    const vSua = loro.reduce((t, p) => t + velEff(p), 0) || 1;
     // FUGAFACILE: la fuga dai selvatici e' garantita, ed e' tutta la sua ragione d'essere
     if (miei.some(p => ha(p, "RUN_AWAY"))) return 100;
     const rapporto = Math.min(4, vMia / vSua);
@@ -8673,8 +8728,8 @@
         if ((modo === "solo-secondari") !== aPercentuale) continue;
       }
       switch (a.kind) {
-        case "status":    if (secondary()) { applyStatus(foe, a.status, messages); sincronizza(foe, actor, a.status, messages); } break;
-        case "confuse":   if (secondary()) applyConfuse(foe, messages); break;
+        case "status":    if (secondary()) { applyStatus(foe, a.status, messages, null, isStatus); sincronizza(foe, actor, a.status, messages); } break;
+        case "confuse":   if (secondary()) applyConfuse(foe, messages, isStatus); break;
         case "flinch":    if (!foe.fainted && quanteVolte() > 0) foe.volatile.flinch = true; break;
         case "statStage": {
           const suDiSe = statSuDiSe(move, a);
@@ -8758,14 +8813,31 @@
     applyStatus(chi, status, messages, "sync");
   }
 
-  function applyStatus(target, status, messages, sourceAbility) {
-    if (target.fainted || target.status) return;
+  /* Come si chiama lo stato che uno ha gia' addosso, per dirglielo. */
+  const GIA_COSI = { BURN: "gi\u00e0 scottato", PARALYSIS: "gi\u00e0 paralizzato",
+                     SLEEP: "gi\u00e0 addormentato", POISON: "gi\u00e0 avvelenato",
+                     TOXIC: "gi\u00e0 iperavvelenato", FREEZE: "gi\u00e0 congelato" };
+  /* 🔴 LE MOSSE DI STATO FALLIVANO IN SILENZIO (§85).
+     `principale` dice che lo stato e' lo SCOPO della mossa, non un effetto
+     aggiuntivo. Solo allora si spiega perche' non ha funzionato: e' la regola
+     dei giochi — un Sonnifero su chi dorme dice «e' gia' addormentato», ma il
+     10% di scottatura di una Fiammata che non attacca resta muto, o a ogni
+     colpo si leggerebbe una riga di niente. */
+  function applyStatus(target, status, messages, sourceAbility, principale) {
+    if (target.fainted) return;
+    if (target.status) {
+      if (principale) messages.push(`${target.name} \u00e8 ${GIA_COSI[target.status] || "gi\u00e0 malmesso"}!`);
+      return;
+    }
     // FOGLIAMANTO: col sole pieno non si prendono problemi di stato
     if (ha(target, "LEAF_GUARD") && weatherKind() === "SUN") {
       messages.push(`${nomeAb(target, "LEAF_GUARD")} protegge ${target.name} sotto il sole!`);
       return;
     }
-    if ((STATUS_IMMUNE[status] || []).some(t => target.types.includes(t))) return;
+    if ((STATUS_IMMUNE[status] || []).some(t => target.types.includes(t))) {
+      if (principale) messages.push(`Non ha effetto su ${target.name}\u2026`);
+      return;
+    }
     // TERRENI: il Nebbioso protegge da tutti gli stati, l'Elettrico dal sonno
     // (vale solo per chi tocca terra).
     if (isGrounded(target)) {
@@ -8958,8 +9030,12 @@
      d'essere, e senza questo era solo un attacco speciale da 90. */
   const baraondaInCorso = () => onField().some(f => f && !f.fainted && f.volatile.baraonda);
 
-  function applyConfuse(target, messages) {
-    if (target.fainted || target.volatile.confusion > 0) return;
+  function applyConfuse(target, messages, principale) {
+    if (target.fainted) return;
+    if (target.volatile.confusion > 0) {
+      if (principale) messages.push(`${target.name} \u00e8 gi\u00e0 confuso!`);
+      return;
+    }
     // MENTE LOCALE e Indifferenza: niente confusione
     if (ha(target, "OWN_TEMPO") || ha(target, "OBLIVIOUS")) {
       messages.push(`${target.name} non si confonde grazie a ${nomeAb(target, ha(target, "OWN_TEMPO") ? "OWN_TEMPO" : "OBLIVIOUS")}!`);

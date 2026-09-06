@@ -394,6 +394,17 @@
      ⚠️ I vicini sono quelli di POSIZIONE, non chi ha combattuto:
      l'ordine della squadra e' parte della meccanica, e spostare un Pokemon
      accanto a un infetto e' una mossa vera. */
+  /* 🔴 LA TARGHETTA DEL POKERUS, UNA SOLA VOLTA (§80).
+     L'avevo messa in `cardCompatta` (§64), che serve le schermate di cambio e
+     di squadra. Ma le caselle dei Pokemon si disegnano a mano in ALTRI posti, e
+     in uno di quelli si decide **chi esce dalla squadra**: la segnalazione e'
+     «non vorrei mandare via l'unico col Pokerus», ed e' proprio la scelta in
+     cui saperlo conta di piu'. Adesso la targhetta la fa questa, e la usano
+     tutte — compresa la scheda di chi ARRIVA, che il Pokerus puo' averlo lui. */
+  const badgePkrs = (p) => (p && p.pokerus)
+    ? `<span class="status-badge st-PKRS" title="Pok\u00e9rus: +50% esperienza, contagia i vicini di posto">PKRS</span>`
+    : "";
+
   function contagiaPokerus(messages) {
     const nuovi = [];
     game.party.forEach((p, i) => {
@@ -3414,6 +3425,14 @@
 
   /* Chi sta nella FASCIA LEGGENDARIA: leggendari, semi-leggendari (ci stanno
      le Ultracreature) e misteriosi. Gli stessi filtri di `specieDaIncontro`. */
+  /* Chi sta in campo dalla stessa parte, in doppio. Il conto lo faceva a mano
+     `bersagliExtra`; adesso serve anche alle cure di squadra. */
+  const compagnoDi = (f) => !game.double ? null
+    : f === game.player ? game.player2
+    : f === game.player2 ? game.player
+    : f === game.enemy ? game.enemy2
+    : f === game.enemy2 ? game.enemy : null;
+
   const fasciaLeggendaria = k => {
     const sp = S[k];
     return !!sp && !!(sp.leggendario || sp.semiLeggendario || sp.misterioso
@@ -3606,7 +3625,23 @@
      ⚠️ E scende per ULTIMO. L'asso-starter va in fondo da sempre (scelta
      nostra, l'originale lo manda per primo); l'ultima parola pero' adesso ce
      l'ha lui. */
-  const ASSO_FINALE_RIVALE = "RAYQUAZA";
+  /* 🔴 NON PER FORZA RAYQUAZA (correzione del proprietario).
+     Nell'originale il sesto posto della Rivale e' fissato a Rayquaza, e cosi'
+     l'avevo fatto. Ma da noi Rayquaza e' anche uno dei tredici possibili BOSS
+     FINALI della run: fissarlo voleva dire, una volta su tredici, vederlo due
+     volte nella stessa partita — prima in mano a lei e poi come finale.
+     Serve quel che serve: un LEGGENDARIO con una FORMA POTENZIATA. Sono
+     dodici (Mewtwo, Latias, Latios, Rayquaza, Heatran, Darkrai, Zygarde,
+     Diancie, Floette Eterna, Magearna, Zeraora, Melmetal), se ne sorteggia uno
+     per run e si esclude quello che chiude la partita. */
+  function specieAssoRivale() {
+    const boss = bossFinaleDellaRun();
+    const potenziabile = k => (FORMS[k] || []).some(f =>
+      /^mega/.test(f.formKey) || f.formKey === "primal" || f.formKey === "gigantamax");
+    const pool = Object.keys(FORMS).filter(k => S[k] && fasciaLeggendaria(k)
+      && k !== (boss && boss.id) && potenziabile(k));
+    return pool.length ? pool[Math.floor(Math.random() * pool.length)] : null;
+  }
   function buildRival(eLevel) {
     const rivalStage = RIVAL_WAVES.indexOf(game.wave);       // 0..5
     const count = Math.min(6, rivalStage + 2);               // 2..6 Pokemon
@@ -3628,9 +3663,13 @@
     const rubati = (game.rivalRubati || []).map(x => rootOf(x.sp));
     const giaVisto = k => !k || rubati.includes(rootOf(k)) || r.some(x => rootOf(x.sp) === rootOf(k));
     while (r.length < count) {
-      // il SESTO posto non si sorteggia: e' suo (a meno che non gliel'abbia rubato)
-      if (r.length === 5 && S[ASSO_FINALE_RIVALE] && !giaVisto(ASSO_FINALE_RIVALE)) {
-        r.push({ sp: ASSO_FINALE_RIVALE }); continue;
+      /* Il SESTO posto e' quello dell'asso: si tira finche' non esce uno che
+         non hai gia' visto (e che non le hai rubato). Se il sorteggio non ne
+         trova, il posto lo prende un Pokemon normale come gli altri. */
+      if (r.length === 5) {
+        let a = null;
+        for (let t = 0; t < 12 && giaVisto(a); t++) a = specieAssoRivale();
+        if (a && !giaVisto(a)) { r.push({ sp: a, asso: true }); continue; }
       }
       // il confronto va sulla RADICE: Applin e Hydrapple sono lo stesso Pokemon
       let k = null;
@@ -3661,14 +3700,17 @@
       r[i].variant = f.variant == null ? null : f.variant;
       if (f.gender && f.gender !== "GENDERLESS") r[i].gender = f.gender;
       f.trainer = game.rivalFemale ? "la Rivale" : "il Rivale"; f.rival = true;
-      // all'ULTIMO incontro il suo Rayquaza arriva gia' megaevoluto
-      if (r[i].sp === ASSO_FINALE_RIVALE && rivalStage >= 5) transform(f, "mega", []);
+      // all'ULTIMO incontro il suo asso arriva gia' trasformato
+      if (r[i].asso) {
+        f._assoRivale = true;
+        if (rivalStage >= 5) transform(f, formsFor(f, "mega").length ? "mega" : "gigamax", []);
+      }
       mons.push(f);
     }
     mons.push(mons.shift());          // l'asso-starter scende in campo per ULTIMO
-    /* …tranne quando c'e' Rayquaza: allora e' lui a chiudere. */
-    const iRay = mons.findIndex(m => m.speciesId === ASSO_FINALE_RIVALE);
-    if (iRay >= 0) mons.push(mons.splice(iRay, 1)[0]);
+    /* …tranne quando c'e' il leggendario: allora e' lui a chiudere. */
+    const iAsso = mons.findIndex(m => m._assoRivale);
+    if (iAsso >= 0) mons.push(mons.splice(iAsso, 1)[0]);
     return mons;
   }
 
@@ -5744,7 +5786,7 @@
       const types = p.types.map(t => `<span class="ticon t-${t}"></span>`).join("");
       return `<button class="pd-card sceglibile ${p.fainted ? "ko" : ""}" data-i="${i}">
           <div class="pd-top"><span class="pd-name">${miniIcon(p.dex, 1.1)}${p.shiny ? cromStella(p.shinyVar) : ""}${p.name.replace("✨", "")}</span><span class="pd-lv">Lv.${p.level}</span></div>
-          <div class="pd-types">${types}${p.ability ? `<span class="pd-ab">${p.ability.it}</span>` : ""}</div>
+          <div class="pd-types">${types}${badgePkrs(p)}${p.ability ? `<span class="pd-ab">${p.ability.it}</span>` : ""}</div>
           <div class="party-hp-track"><div class="party-hp-fill" style="width:${ratio * 100}%;background:${col};"></div></div>
           <div class="pd-hp">${Math.max(0, p.hp)}/${p.maxHp} PS</div>
         </button>`;
@@ -5761,7 +5803,7 @@
           <span class="pd-name">${miniIcon(mon.dex, 1.5)}${mon.shiny ? cromStella(mon.shinyVar) : ""}${mon.name.replace("✨", "")}</span>
           <span class="pd-lv">Lv.${mon.level}</span>
         </div>
-        <div class="pd-types">${tipiN}
+        <div class="pd-types">${tipiN}${badgePkrs(mon)}
           ${mon.ability ? `<span class="pd-ab">${mon.ability.it}</span>` : ""}
           ${mon.nature ? `<span class="pd-ab pd-nat">${natureLabel(mon)}</span>` : ""}
         </div>
@@ -7842,6 +7884,16 @@
     if (MOSSE_SPECIALI[move.id]) MOSSE_SPECIALI[move.id](actor, foe, move, messages);
     game.ultimaMossa = moveInst.id;
 
+    /* 4-quinquies. «COLPISCI E POI ESCI» (vedi il riquadro su
+       `CAMBIA_CHI_COLPISCE`). Va qui: serve `landed`, e serve che il danno sia
+       gia' stato applicato. */
+    if (landed && !actor.fainted && CAMBIA_CHI_COLPISCE.has(move.id)) {
+      chiediCambio(actor, false, messages, `${actor.name} torna indietro!`, true);
+    }
+    if (landed && !foe.fainted && SPAZZA_IL_BERSAGLIO.has(move.id)) {
+      chiediCambio(foe, false, messages, `${foe.name} viene sbalzato fuori dal campo!`);
+    }
+
     // 5. effetti (mattoncini). Se la mossa da danno non e' andata a segno, niente effetti.
     // chi ha incassato e' il fantoccio: gli effetti secondari non passano
     if (landed && !colpisceSub) {
@@ -8651,11 +8703,32 @@
         case "perish":    applyPerish(actor, foe, messages); break;
         case "recharge":  actor.volatile.recharge = true; break;
         case "heal": {
-          if (actor.hp < actor.maxHp) {
-            actor.hp = Math.min(actor.maxHp, actor.hp + Math.max(1, Math.floor(actor.maxHp * a.ratio)));
-            messages.push(`${actor.name} ha recuperato energie!`);
-            if (messages.anim) messages.anim("COMMON_HEALTH_UP", sideOf(actor));
-          } else messages.push(`Le energie di ${actor.name} sono già al massimo!`);
+          /* 🔴 LA CURA DI SQUADRA CURAVA UNO SOLO (§82).
+             Segnalazione: «Goccia vitale fa recuperare solo i PS dell'attivo e
+             non del compagno». Vero: il mattoncino `heal` guardava sempre e
+             solo `actor`, mentre Goccia Vitale e Giunglacura hanno
+             `target: "USER_AND_ALLIES"` — il dato per fare la cosa giusta
+             c'era gia', non lo leggeva nessuno.
+             ⚠️ Giunglacura toglie anche i problemi di STATO, a se' e al
+             compagno: e' meta' della mossa, e senza restava una Goccia Vitale
+             col nome diverso. */
+          const chi = [actor];
+          if (move.target === "USER_AND_ALLIES") {
+            const amico = compagnoDi(actor);
+            if (amico && !amico.fainted) chi.push(amico);
+          }
+          for (const t of chi) {
+            const guarisce = move.id === "JUNGLE_HEALING" && t.status;
+            if (t.hp < t.maxHp) {
+              t.hp = Math.min(t.maxHp, t.hp + Math.max(1, Math.floor(t.maxHp * a.ratio)));
+              messages.push(`${t.name} ha recuperato energie!`);
+              if (messages.anim) messages.anim("COMMON_HEALTH_UP", sideOf(t));
+            } else if (!guarisce) messages.push(`Le energie di ${t.name} sono già al massimo!`);
+            if (guarisce) {
+              t.status = null; t.sleepTurns = 0; t.toxicN = 0;
+              stessoMomento(messages, `${t.name} si rimette in sesto!`);
+            }
+          }
           break;
         }
       }
@@ -9960,7 +10033,7 @@
        decide sia chi mandare in campo sia in che ORDINE tenere la squadra.
        Prima non compariva da nessuna parte e valeva solo per chi se lo
        ricordava dalla schermata di partenza. */
-    const pkrs = p.pokerus ? `<span class="status-badge st-PKRS" title="Pok\u00e9rus: +50% esperienza, contagia i vicini di posto">PKRS</span>` : "";
+    const pkrs = badgePkrs(p);
     const types = p.types.map(t => `<span class="ticon t-${t}"></span>`).join("");
     const tag = tagExtra != null ? tagExtra
       : inCampo ? '<span class="party-active">in campo</span>'
@@ -14897,6 +14970,22 @@
   /* Turbine e Boato scacciano l'AVVERSARIO; Staffetta, Zampata, Monito e
      Teletrasporto fanno uscire CHI LI USA. Solo Staffetta e Zampata passano
      gli sbalzi di statistica a chi entra. */
+  /* 🔴 «COLPISCI E POI ESCI» NON ESISTEVA (§81)
+     Segnalazione: «controlla le mosse come virata». Virata, Retromarcia e
+     Invertivolt hanno `attrs: []` nei dati — l'estrattore non traduce
+     `ForceSwitchOutAttr` — quindi erano tre attacchi normali da 60/70/70 e il
+     cambio, che e' TUTTO il loro senso, non avveniva. Stessa storia per
+     Codadrago e Ribaltiro, che devono buttare fuori il BERSAGLIO: erano due
+     attacchi deboli e basta.
+     Boato, Turbine, Teletrasporto e Staffetta il cambio ce l'avevano gia'
+     (`chiediCambio`): mancavano solo quelle che prima fanno danno.
+     ⚠️ Il cambio si chiede DOPO il colpo e solo se il colpo e' andato a
+     segno: una Virata a vuoto non fa uscire nessuno. Sta in `resolveMove` e
+     non qui, perche' `MOSSE_SPECIALI` gira comunque — anche se la mossa ha
+     mancato — e da li' `landed` non si vede. */
+  const CAMBIA_CHI_COLPISCE = new Set(["U_TURN", "VOLT_SWITCH", "FLIP_TURN"]);
+  const SPAZZA_IL_BERSAGLIO = new Set(["DRAGON_TAIL", "CIRCLE_THROW"]);
+
   MOSSE_SPECIALI.WHIRLWIND = (a, f, m, msg) => chiediCambio(f, false, msg, `${f.name} viene spazzato via dal campo!`);
   MOSSE_SPECIALI.ROAR      = (a, f, m, msg) => chiediCambio(f, false, msg, `Il boato caccia ${f.name} dal campo!`);
   MOSSE_SPECIALI.TELEPORT  = (a, f, m, msg) => chiediCambio(a, false, msg, `${a.name} si teletrasporta via!`, true);
@@ -15417,7 +15506,7 @@
         ? `<span class="pd-held">${ico("zaino")} ${heldSummary(p)}</span>` : "";
       return `<button class="pd-card tgt ${ok ? "" : "ko"}" data-i="${i}" ${ok ? "" : "disabled"}>
           <div class="pd-top">
-            <span class="pd-name">${miniIcon(p.dex, 1.1)}${p.shiny ? cromStella(p.shinyVar) : ""}${p.name.replace("✨", "")}<span class="gen g-${p.gender}">${genderSymbol(p)}</span>${st}</span>
+            <span class="pd-name">${miniIcon(p.dex, 1.1)}${p.shiny ? cromStella(p.shinyVar) : ""}${p.name.replace("✨", "")}<span class="gen g-${p.gender}">${genderSymbol(p)}</span>${st}${badgePkrs(p)}</span>
             <span class="pd-lv">Lv.${p.level}</span></div>
           <div class="party-hp-track"><div class="party-hp-fill" style="width:${ratio * 100}%;background:${col};"></div></div>
           <div class="pd-hp">${p.fainted ? "esausto" : Math.max(0, p.hp) + "/" + p.maxHp + " PS"} · PP ${ppTot}/${ppMax} ${held}</div>

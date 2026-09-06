@@ -5926,3 +5926,65 @@ trasformato» continuano a funzionare qualunque cosa esca dal sorteggio.
 Verificato su sei run con boss finali diversi: Mega Latias · Gigamax Melmetal ·
 Mega Darkrai · Mega Diancie · Mega Darkrai · Mega Zeraora — e col boss finale
 Rayquaza è uscito Mega Diancie, non Rayquaza.
+
+
+## 84. La paralisi non dimezzava la Velocità (rev 184)
+
+> «Gli effetti aggiuntivi di scottatura e paralisi sono implementati? Mi
+> riferisco a riduzione di attacco e velocità»
+
+**Scottatura: sì.** Dimezza il danno fisico (e Dentistretti la scavalca, anzi ti
+dà +50% Attacco), più 1/16 dei PS a turno.
+
+**Paralisi: no, per metà.** C'era il 25% di «non riesce a muoversi», ma la
+Velocità dimezzata — *l'altra metà, quella che ribalta l'ordine del turno* — non
+c'era. Nell'originale sta in `getEffectiveStat`: `ret >>= 1` sulla SPD di chi è
+paralizzato, dopo il Ventoincoda.
+
+⚠️ **Piedisvelti** la annulla e ci aggiunge il suo +50%: è tutta la sua ragione
+d'essere. Nei dati estratti l'abilità è vuota (`attrs: []`, perché è
+condizionale), quindi come Dentistretti va riconosciuta per nome.
+
+Misurato con `__items.velocita()` su un Feraligatr da 51 di Velocità:
+sano **51** · paralizzato **26** · paralizzato con Piedisvelti **77**
+(51 × 0,5 × 2 × 1,5).
+
+Nella stessa passata:
+- **Pelledura** (+50% Difesa quando stai male) era anche lei un'abilità vuota e
+  non faceva niente: è il gemello difensivo di Dentistretti, riconosciuta per
+  nome come lui.
+- La **fuga** contava la Velocità di scheda: ora usa `velEff`, quindi
+  paralizzato scappi peggio e col Ventoincoda meglio.
+
+
+## 85. Le mosse di stato fallivano in silenzio (rev 184)
+
+> «Gli avversari non dovrebbero usare mosse che causano addormentamento o simili
+> se il pokemon ha già uno stato. Dovrebbe comparire un "non ha effetto" oppure
+> "è già addormentato". Idem con le mosse che causano confusione»
+
+Due cose, e tutte e due mancavano.
+
+**Il messaggio.** `applyStatus` usciva muto se il bersaglio aveva già uno stato o
+era immune per tipo: tiravi Spora su un avvelenato e non succedeva *niente*,
+nemmeno una riga. Ora lo dice — ma solo quando lo stato è **lo scopo** della
+mossa (nuovo parametro `principale`). È la regola dei giochi: un Sonnifero su chi
+dorme dice «è già addormentato», il 10% di scottatura di una Fiammata che non
+attacca resta muto, o a ogni colpo si leggerebbe una riga di niente.
+
+**L'IA.** `aiChooseMove` pescava una mossa **a caso** fra quelle con PP: un
+allenatore poteva tirare Spora contro un avvelenato, e rifarlo il turno dopo. Ora
+`mossaSprecata` scarta le mosse di stato il cui *unico* scopo è appioppare uno
+stato (o la confusione) che il bersaglio non può ricevere.
+
+⚠️ Vale per gli **allenatori**, non per i selvatici: quelli restano istintivi ed
+è giusto che ogni tanto sbaglino — tanto adesso, quando capita, il gioco lo dice.
+
+⚠️ Il filtro chiede che **tutti** gli effetti siano sprecati: una mossa che
+addormenta *e* abbassa una statistica resta buona. E se sono sprecate tutte,
+tira lo stesso: meglio una mossa inutile che nessuna mossa.
+
+Verificato: Mareanie del Pescatore con Spora + Azione, bersaglio già avvelenato →
+**Azione 10 volte su 10**. Controllo con bersaglio sano → Spora finché non
+attacca, poi Azione. E i messaggi: «Eroeferreo è già avvelenato!», «Eroeferreo è
+già confuso!».
