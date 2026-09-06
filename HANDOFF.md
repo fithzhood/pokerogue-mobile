@@ -4830,3 +4830,46 @@ una `<select>`, e lì l'HTML non viene reso.
 **Restano** (nessuno sprite che le sostituisca): 👑 boss, ✨ cromatico, ♂/♀,
 🔒 bloccato, 🍀 fortuna, 🏆 record, ⭐ starter, 🎀 fiocco, 📖 dex, 🎁, 💠 scudo,
 🌱 natura, 📈 IV, 🔍 lente, 👥 squadra, 💾, 📦 PC, ▶ ↩ ⓘ ▸ ➕ ⚔ dei pulsanti.
+
+## 55. Il catturato porta con sé la sua roba (rev 165)
+
+### 55.1 🔴 SI PERDEVANO STRUMENTI, VITAMINE E NATURA
+
+Catturare ricostruisce il Pokémon da zero con `makeFighter`, e passavano solo
+l'aspetto e i numeri di nascita (cromatico, forma, IV, abilità, sesso).
+Restavano indietro tre cose che erano **sue**:
+
+- gli **strumenti** e le **bacche** — un selvatico con gli Avanzi o una Bacca
+  Sitrus te li mostrava per tutta la lotta e poi arrivava a mani vuote;
+- le **vitamine**, che nei nemici alzano davvero le statistiche base;
+- la **natura**, ripescata a caso: `registerCaught` registrava nel dex quella
+  che avevi davanti, e l'esemplare in squadra ne aveva un'altra.
+
+Nell'originale non si perde niente perché non si ricostruisce niente:
+`pokemon.addToParty` promuove lo **stesso individuo**, e gli strumenti che
+teneva vengono ri-aggiunti come tuoi (`attempt-capture-phase.ts`:
+`findModifiers(...).map(addModifier)`).
+
+Nuova `ereditaRoba(mon, da)`, chiamata dai tre punti che ricostruiscono un
+catturato o un rubato (ultima ball, lancio in lotta, Clepto Ball).
+
+⚠️ Gli oggetti **inchiodati** (`_heldFisso`, il Piccolo buco nero del boss
+finale) non passano: non si possono nemmeno rubare.
+
+⚠️ Le vitamine cambiano le statistiche, quindi vanno messe **prima** di
+`recomputeStats`, e i PS si ereditano **dopo** — la percentuale va applicata al
+massimale nuovo, non a quello di prima.
+
+Prova: Happiny selvatico con Avanzi×2, Sitrus×1, ATT+2 e natura Adamant →
+catturato con esattamente quelle quattro cose.
+
+### 55.2 La Clepto Ball è forte solo contro gli allenatori
+
+Vale ×5 perché è l'unico modo di prendere il Pokémon di un **allenatore**: un
+tiro solo, su un bersaglio a piena vita che non puoi indebolire né
+addormentare. Su un selvatico quella potenza non ha giustificazione — lì hai
+tutta la lotta per lavorartelo — e ne farebbe una Master Ball a buon mercato.
+Contro i selvatici vale ora quanto una Mega Ball (×1,5), via `multBall`.
+
+Misurato in gioco: sul Mightyena selvatico la Clepto dà ~35%, identica alla
+Mega Ball; sul Pelipper dell'allenatore è l'unica utilizzabile, al 40%.

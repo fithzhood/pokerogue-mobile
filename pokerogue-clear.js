@@ -297,7 +297,7 @@
     // un buono uovo per ogni specie al suo PRIMO fiocco, come nell'originale
     if (nuovi.length) {
       meta.vouchers += nuovi.length;
-      messages.push(`🎟 ${nuovi.length} Voucher Uovo per i primi fiocchi!`);
+      messages.push(`${ico("voucher")} ${nuovi.length} Voucher Uovo per i primi fiocchi!`);
     }
     saveMeta();
   }
@@ -3267,7 +3267,7 @@
     loadFighterSprite(p, side).then(s => { p.spr = s; redrawScene(); });
     messages.push(kind === "mega"
       ? `✨ ${p.preForm.name} sta megaevolvendo… è diventato ${p.name}!`
-      : `🔴 ${p.preForm.name} si gigamaxizza… è diventato ${p.name}!`);
+      : `${ico("dynamax")} ${p.preForm.name} si gigamaxizza… è diventato ${p.name}!`);
     return true;
   }
   // Ripristina la forma base a fine battaglia (come nei giochi veri).
@@ -4547,10 +4547,10 @@
         daiCaramelle(root, quante);
       }
       saveMeta();
-      stessoMomento(messages, `🍬 Traguardo dell'ondata ${game.wave}: +${quante} caramell${quante === 1 ? "a" : "e"} a ogni specie in squadra!`);
+      stessoMomento(messages, `${ico("caramella")} Traguardo dell'ondata ${game.wave}: +${quante} caramell${quante === 1 ? "a" : "e"} a ogni specie in squadra!`);
       if (game.wave % 50 === 0) {
         meta.vouchers++; saveMeta();
-        stessoMomento(messages, "🎟 Un Voucher Uovo in più per il traguardo!");
+        stessoMomento(messages, `${ico("voucher")} Un Voucher Uovo in più per il traguardo!`);
       }
     }
     // ESPERIENZA VERA (non piu' livelli regalati): la si guadagna dai nemici
@@ -4561,7 +4561,7 @@
     // le uova avanzano di 1 ondata (persistente tra le run)
     tickEggs(messages);
     // i boss danno un voucher per il gacha
-    if (wasBoss) { meta.vouchers++; saveMeta(); messages.push("🎟 Ottieni un Voucher Uovo!"); }
+    if (wasBoss) { meta.vouchers++; saveMeta(); messages.push(`${ico("voucher")} Ottieni un Voucher Uovo!`); }
     /* 🔴 QUI C'ERA UNA CURA COMPLETA DOPO OGNI BOSS, e non doveva esserci.
        Nell'originale la squadra si rimette a nuovo in UN SOLO momento: quando
        si cambia zona, cioe' quando l'ondata dopo e' una x1
@@ -4577,7 +4577,7 @@
     if (game.enemy.evil) {
       // quantità dal RANGO dell'avversario: recluta 1 · admin 2 · boss 4
       game.pendingTheft = game.evilRank === "boss" ? 4 : game.evilRank === "admin" ? 2 : 1;
-      messages.push(`🕶 Tra le cose di ${game.enemy.trainer} c'è un bottino speciale…`);
+      messages.push(`${ico("clepto")} Tra le cose di ${game.enemy.trainer} c'è un bottino speciale…`);
     }
     const wasTrainer = !!game.enemy.trainer;
     // premi fissi della run (Espamuleti sulle x10, Monetamuleto a 50/100/150)
@@ -4956,7 +4956,7 @@
         ${infoCattura(m)}</button>`;
     }).join("");
     showMetaScreen(`
-      <div class="meta-title" style="font-size:clamp(19px,5.6vw,29px)">🕶 Furto</div>
+      <div class="meta-title" style="font-size:clamp(19px,5.6vw,29px)">${ico("clepto")} Furto</div>
       <div class="me-text">Hai <b>${game.theftballs}</b> Clepto Ball. Quale Pokémon rubi a ${game.trainerName}?</div>
       <div class="me-opts">${rows}
         <button class="me-opt" data-act="skip"><span class="me-opt-l">Lascia stare</span></button></div>`);
@@ -4979,7 +4979,7 @@
       if (caught) {
         const mon = makeFighter(m.speciesId, m.level, { shiny: m.shiny, shinyVar: m.shinyVar, ivs: m.ivs, variant: m.variant, abilIndex: m.abilIndex, gender: m.gender });
         ereditaPs(mon, m);
-        accogliPokemon(mon, msgs, "🕶 Rubato!");
+        accogliPokemon(mon, msgs, `${ico("clepto")} Rubato!`);
         registerCaught(m.speciesId, m.shiny, m.ivs, msgs, m.variant, m.abilIndex, m.nature, m.shinyVar, m.gender, m.boss);
       } else msgs.push(`${m.name} è sfuggito alla Clepto Ball!`);
       game.phase = "MESSAGE";
@@ -5102,7 +5102,7 @@
   function daiCaramelle(speciesId, quante, messages, coda) {
     meta.candy = meta.candy || {};
     meta.candy[speciesId] = (meta.candy[speciesId] || 0) + quante;
-    const riga = `🍬 +${quante} Caramell${quante === 1 ? "a" : "e"} ${S[speciesId].it} (totale ${meta.candy[speciesId]})`;
+    const riga = `${ico("caramella")} +${quante} Caramell${quante === 1 ? "a" : "e"} ${S[speciesId].it} (totale ${meta.candy[speciesId]})`;
     if (coda) coda.push(riga);
     else if (messages) stessoMomento(messages, riga);
     return quante;
@@ -8741,9 +8741,9 @@
     if (!chi) { game.chooser = 0; game.queued = null; }
     const tf = canTransform(currentChooser() || game.player);   // mega/gigamax disponibile?
     const tfRow = tf
-      ? `<div class="back-row"><button class="btn transform-btn" data-act="transform">${tf === "mega" ? "✨ MEGAEVOLVI" : "🔴 GIGAMAXIZZA"}</button></div>` : "";
+      ? `<div class="back-row"><button class="btn transform-btn" data-act="transform">${tf === "mega" ? "✨ MEGAEVOLVI" : ico("dynamax") + " GIGAMAXIZZA"}</button></div>` : "";
     cmd().innerHTML = `
-      <div class="prompt-line has-menu"><span class="pl-testo">Tocca a <b>${(chi || game.player).name}</b>${game.double ? ` (${game.chooser === 1 ? "2°" : "1°"})` : ""}</span><span class="hud">${alive}/${game.party.length} · 🔴${totalBalls()} · ₽${game.money} · 🍀<b style="color:${luckColor(runLuck())}">${LUCK_RANK[runLuck()]}</b></span><span class="pl-tasti">${bottoneLente()}<button class="menu-btn" data-act="menu" aria-label="Menu">☰</button></span></div>
+      <div class="prompt-line has-menu"><span class="pl-testo">Tocca a <b>${(chi || game.player).name}</b>${game.double ? ` (${game.chooser === 1 ? "2°" : "1°"})` : ""}</span><span class="hud">${alive}/${game.party.length} · ${ico("ball")}${totalBalls()} · ₽${game.money} · 🍀<b style="color:${luckColor(runLuck())}">${LUCK_RANK[runLuck()]}</b></span><span class="pl-tasti">${bottoneLente()}<button class="menu-btn" data-act="menu" aria-label="Menu">☰</button></span></div>
       <div class="grid2">
         <button class="btn main-fight" data-act="fight">Lotta</button>
         <button class="btn main-bag"   data-act="ball">Ball</button>
@@ -8887,7 +8887,7 @@
     if (!trasf) {                                  // 1. DA CHI
       const cards = game.party.map((p, i) =>
         cardCompatta(p, i, haOggetti(p) ? "vivo" : "spento",
-          haOggetti(p) ? `<span class="pc-conta">🎒${heldElenco(p).reduce((x, o) => x + o.n, 0)}</span>` : `<span class="pc-conta vuoto">—</span>`)).join("");
+          haOggetti(p) ? `<span class="pc-conta">${ico("zaino")}${heldElenco(p).reduce((x, o) => x + o.n, 0)}</span>` : `<span class="pc-conta vuoto">—</span>`)).join("");
       showMetaScreen(`
         <div class="meta-title" style="font-size:clamp(19px,5.6vw,30px)">Sposta oggetti</div>
         <div class="meta-sub">da chi li prendi?</div>
@@ -8961,7 +8961,7 @@
         <div class="meta-sub">${nome}${n > 1 ? ` ×${n}` : ""}: da ${da.name.replace("✨", "")} a ${a.name.replace("✨", "")}</div>
         <div class="meta-actions two-col">
           <button class="meta-btn ghost" data-act="squadra">↩ Squadra</button>
-          <button class="meta-btn gacha" data-act="ancora">🎒 Sposta ancora</button></div>`);
+          <button class="meta-btn gacha" data-act="ancora">${ico("zaino")} Sposta ancora</button></div>`);
       metaEl().querySelector('[data-act="squadra"]').onclick = () => renderParty("check");
       metaEl().querySelector('[data-act="ancora"]').onclick = () => renderSposta(null);
     });
@@ -9015,7 +9015,7 @@
     const backRow = (mode === "force" || mode === "staffetta") ? ""
       : mode === "check"
         ? `<div class="meta-actions ${puoSpostare() ? "two-col" : ""}">
-             ${puoSpostare() ? `<button class="meta-btn gacha" data-act="sposta">🎒 Sposta oggetti</button>` : ""}
+             ${puoSpostare() ? `<button class="meta-btn gacha" data-act="sposta">${ico("zaino")} Sposta oggetti</button>` : ""}
              <button class="meta-btn ghost" data-act="back">↩ Indietro</button></div>`
         : `<div class="meta-actions"><button class="meta-btn ghost" data-act="back">↩ Indietro</button></div>`;
     const title = (mode === "force" || mode === "staffetta") ? "Chi mandi in campo?" : mode === "check" ? "La tua Squadra" : "Cambia Pokémon";
@@ -9346,7 +9346,7 @@
       const mon = makeFighter(enemy.speciesId, enemy.level, { shiny: enemy.shiny, shinyVar: enemy.shinyVar, ivs: enemy.ivs, variant: enemy.variant, abilIndex: enemy.abilIndex, gender: enemy.gender });
       ereditaPs(mon, enemy);        // i PS che aveva quando la ball si e' chiusa
       const stolen = !!enemy.trainer;
-      accogliPokemon(mon, log, stolen ? "🕶 Rubato!" : "Preso!");
+      accogliPokemon(mon, log, stolen ? `${ico("clepto")} Rubato!` : "Preso!");
       registerCaught(enemy.speciesId, enemy.shiny, enemy.ivs, log, enemy.variant, enemy.abilIndex, enemy.nature, enemy.shinyVar, enemy.gender, enemy.boss);
       enemy.fainted = true;                        // esce dal campo
       game.capturedThisWave = true;                // niente seconda offerta a fine lotta
@@ -10104,11 +10104,11 @@
     const eggs = meta.eggs.length;
     showMetaScreen(`
       <div class="meta-title">Menu</div>
-      <div class="meta-stats"><span>Ondata ${game.wave}</span><span>🎟 ${meta.vouchers} voucher</span><span>🥚 ${eggs}</span></div>
+      <div class="meta-stats"><span>Ondata ${game.wave}</span><span>${ico("voucher")} ${meta.vouchers} voucher</span><span>${ico("uovo")} ${eggs}</span></div>
       <div class="me-opts">
-        <button class="me-opt" data-a="gacha"><span class="me-opt-l">🎰 Macchine Uova</span>
+        <button class="me-opt" data-a="gacha"><span class="me-opt-l">${icoGacha()} Macchine Uova</span>
           <span class="me-opt-s">${meta.vouchers ? `${meta.vouchers} voucher da spendere` : "nessun voucher: li danno i boss"}</span></button>
-        <button class="me-opt" data-a="uova"><span class="me-opt-l">🥚 Le mie Uova</span>
+        <button class="me-opt" data-a="uova"><span class="me-opt-l">${ico("uovo")} Le mie Uova</span>
           <span class="me-opt-s">${eggs ? `${eggs} in incubazione` : "nessun uovo in incubazione"}</span></button>
         <button class="me-opt" data-a="esci"><span class="me-opt-l">💾 Salva ed esci</span>
           <span class="me-opt-s">la run resta nello slot ${game.slot} · si riprende dall'ondata ${game.wave}</span></button>
@@ -10137,13 +10137,13 @@
       <div class="meta-title">Poké<span class="accent2">Rogue</span></div>
       <div class="meta-sub">roguelite tascabile</div>
       <div class="meta-stats">
-        <span>🎟 ${meta.vouchers}</span><span>🥚 ${eggs}</span>
+        <span>${ico("voucher")} ${meta.vouchers}</span><span>${ico("uovo")} ${eggs}</span>
         <span>⭐ ${unlocked}</span><span>🏆 ${meta.stats.bestWave}</span>
       </div>
       <div class="meta-actions">
         <button class="meta-btn primary" data-a="run">▶ Gioca<span class="sub">${slotOccupati()}</span></button>
-        <button class="meta-btn gacha" data-a="gacha">🎰 Gacha Uova<span class="sub">${meta.vouchers} voucher disponibili</span></button>
-        <button class="meta-btn eggs" data-a="eggs">🥚 Le mie Uova<span class="sub">${eggs} in incubazione · ${unlocked} starter sbloccati</span></button>
+        <button class="meta-btn gacha" data-a="gacha">${icoGacha()} Gacha Uova<span class="sub">${meta.vouchers} voucher disponibili</span></button>
+        <button class="meta-btn eggs" data-a="eggs">${ico("uovo")} Le mie Uova<span class="sub">${eggs} in incubazione · ${unlocked} starter sbloccati</span></button>
         <button class="meta-btn danger" data-a="reset">⚠️ Azzera tutto<span class="sub">cancella ogni progresso</span></button>
       </div>
       <div class="rev-line">${etichettaRevisione()}</div>`);
@@ -10160,9 +10160,9 @@
   function showReset() {
     const righe = [
       ["⭐", `${starterDex().filter(isSelectable).length} starter sbloccati`],
-      ["🍬", `${Object.keys(meta.candy || {}).length} specie con caramelle`],
+      [ico("caramella"), `${Object.keys(meta.candy || {}).length} specie con caramelle`],
       ["📈", `${Object.keys(meta.ivs || {}).length} specie con IV salvati`],
-      ["🥚", `${(meta.eggs || []).length} uova · 🎟 ${meta.vouchers} voucher`],
+      [ico("uovo"), `${(meta.eggs || []).length} uova · ${ico("voucher")} ${meta.vouchers} voucher`],
       ["🏆", `record: ondata ${meta.stats.bestWave} · ${meta.stats.runs} run giocate`],
       ["💾", `${[1,2,3].filter(i => { const d = leggiSlot(i); return d && !d.rotto; }).length} partite salvate nei 3 slot`],
     ].map(([e, t]) => `<div class="reset-row"><span>${e}</span><span>${t}</span></div>`).join("");
@@ -10272,7 +10272,7 @@
        rifare lo STESSO tiro, o di togliere l'uovo di mezzo. */
     const macchine = result
       ? `<button class="meta-btn gacha macchina" data-g="${result.tipo}" ${canPull ? "" : "disabled"}>
-           <span class="mac-tit">🎰 Ancora ${GACHA[result.tipo].emoji}</span>
+           <span class="mac-tit">${icoGacha()} Ancora ${GACHA[result.tipo].emoji}</span>
            <span class="mac-sub">${canPull ? "un altro tiro alla stessa macchina" : "non hai più voucher"}</span>
          </button>
          <button class="meta-btn ghost" data-a="chiudi">
@@ -10292,7 +10292,7 @@
       }).join("");
     showMetaScreen(`
       <div class="meta-title">Gacha Uova</div>
-      <div class="meta-stats"><span>🎟 ${meta.vouchers} voucher</span></div>
+      <div class="meta-stats"><span>${ico("voucher")} ${meta.vouchers} voucher</span></div>
       <div class="gacha-stage">${stage}</div>
       <div class="macchine">${macchine}</div>
       <div class="meta-actions"><button class="meta-btn ghost" data-a="back">Indietro</button></div>`);
@@ -10438,7 +10438,7 @@
       <div class="meta-title" style="font-size:clamp(19px,5.6vw,30px)">${sp.it}${nato.shiny ? " ✨" : ""} è nato!</div>
       <div class="meta-sub">vuoi portarlo con te in questa run?</div>
       <div class="cap-info">
-        <div class="cap-riga nuovo">🥚 IV da uovo: il meglio di due tiri</div>
+        <div class="cap-riga nuovo">${ico("uovo")} IV da uovo: il meglio di due tiri</div>
         ${(nato.nato.mossaUovo && M[nato.nato.mossaUovo])
           ? `<div class="cap-riga nuovo">⚔ Nasce sapendo <b>${M[nato.nato.mossaUovo].it}</b></div>` : ""}
         ${pieno ? `<div class="cap-riga">la squadra è al completo: sceglierai chi gli cede il posto</div>` : ""}
@@ -10531,7 +10531,7 @@
         /* La NOTIZIA della nascita non va nella narrazione: se ne occupa
            `processHatches`, che le dà una schermata con l'uovo che si apre.
            Qui si prepara solo cosa dire DOPO. */
-        const dolciTxt = `🍬 +${dolci} caramell${dolci === 1 ? "a" : "e"}`;
+        const dolciTxt = `${ico("caramella")} +${dolci} caramell${dolci === 1 ? "a" : "e"}`;
         const extra = [eraNuovo
           ? `${S[sp].it} è sbloccato come starter! ${dolciTxt}`
           : primoCromatico
@@ -10564,8 +10564,8 @@
         const em = unlockEggMove(sp, egg.tier, tipo === "MOVE");
         if (em) {
           stessoMomento(extra, em.rara
-            ? `🥚✨ ${S[sp].it} ha imparato la mossa da uovo RARA ${em.it}!`
-            : `🥚 ${S[sp].it} ha imparato la mossa da uovo ${em.it}!`);
+            ? `${ico("uovo")}✨ ${S[sp].it} ha imparato la mossa da uovo RARA ${em.it}!`
+            : `${ico("uovo")} ${S[sp].it} ha imparato la mossa da uovo ${em.it}!`);
         }
         /* Chi è nato, per davvero: serve a costruirlo se lo si vuole in
            squadra (vedi `offriNato`). Gli IV sono il MEGLIO di due tiri, come
@@ -11812,7 +11812,7 @@
         ${miniIcon(sp.dex, 1.15)}
         <span class="sc-name">${sp.it}</span>
         <span class="sc-cost">${"●".repeat(Math.min(cost, 10))}</span>${badges}
-        ${candyOf(k) ? `<span class="sc-candy">🍬${candyOf(k)}</span>` : ""}</button>`;
+        ${candyOf(k) ? `<span class="sc-candy">${ico("caramella")}${candyOf(k)}</span>` : ""}</button>`;
     }).join("");
     const teamRow = starterTeam.length
       ? starterTeam.map((e, i) => `<button class="team-slot" data-rm="${i}">${miniIcon(S[e.k].dex, 1.1)}<span>${S[e.k].it}</span><span class="ts-cost">${costoIt(starterCost(e.k))}</span></button>`).join("")
@@ -11840,7 +11840,7 @@
         <button class="chip filtro-chip${f.senzaFiocco ? " on" : ""}" data-fx="senzaFiocco"
           title="nascondi quelli che hanno già il fiocco">🎀 senza fiocco</button>
         <button class="chip filtro-chip${f.scontabile ? " on" : ""}" data-fx="scontabile"
-          title="hai abbastanza caramelle per abbassargli il costo">🍬 costo riducibile</button>
+          title="hai abbastanza caramelle per abbassargli il costo">${ico("caramella")} costo riducibile</button>
       </div>
       <div class="meta-sub" style="margin:.4vh 0">Sbloccati ${presi}/${tot} · ${pool.length} mostrati · 💜 Pokérus · 🎀 fiocco · ● = costo</div>
       <div class="starter-dex">${cells || '<div class="meta-sub">Nessun Pokémon con questi filtri.</div>'}</div>
@@ -12033,7 +12033,7 @@
       const raro = uovo && isRareEggMove(c.k, id);
       return `<span class="chip-wrap">
         <button class="chip move-chip ${on ? "on" : ""} ${uovo ? "egg" : ""} ${raro ? "rara" : ""}" data-mv="${id}" style="${on ? "background:" + T[mv.type].color : ""}">
-          <span class="ticon t-${mv.type}"></span>${uovo ? (raro ? "🥚✨ " : "🥚 ") : ""}${mv.it}</button>
+          <span class="ticon t-${mv.type}"></span>${uovo ? (raro ? ico("uovo") + "✨ " : ico("uovo") + " ") : ""}${mv.it}</button>
         <button class="chip-i ${aperto("mv", id) ? "on" : ""}" data-i-mv="${id}" title="cosa fa">ⓘ</button>
       </span>`;
     };
@@ -12043,7 +12043,7 @@
        gacha serve a questo. */
     const eggTot = (EGGM[c.k] || []).length;
     const eggNote = eggTot
-      ? `<div class="sd-eggnote">🥚 Mosse da uovo: <b>${c.eggPool.length}/${eggTot}</b> sbloccate${c.eggPool.length < eggTot ? " · si sbloccano facendo schiudere le uova" : ""}</div>`
+      ? `<div class="sd-eggnote">${ico("uovo")} Mosse da uovo: <b>${c.eggPool.length}/${eggTot}</b> sbloccate${c.eggPool.length < eggTot ? " · si sbloccano facendo schiudere le uova" : ""}</div>`
       : "";
     /* SESSO — si vedono tutti quelli che la specie può avere, chiuso col
        lucchetto quello che non hai ancora trovato. Per le specie a sesso unico
@@ -12094,13 +12094,13 @@
           <div class="sd-passive">Occupa <b>${costoIt(starterCost(c.k))}</b> dei ${STARTER_BUDGET} punti squadra</div>
         </div>
       </div>
-      <div class="sd-riga"><span class="sd-lab">🍬 ${candyOf(c.k)}</span><span class="sd-chips">
+      <div class="sd-riga"><span class="sd-lab">${ico("caramella")} ${candyOf(c.k)}</span><span class="sd-chips">
         ${cutPrice == null
           ? `<span class="sd-nota">costo già al minimo</span>`
-          : `<button class="chip candy-btn" data-cc="1" ${candyOf(c.k) >= cutPrice ? "" : "disabled"}>−1 costo · 🍬${cutPrice}</button>`}
+          : `<button class="chip candy-btn" data-cc="1" ${candyOf(c.k) >= cutPrice ? "" : "disabled"}>−1 costo · ${ico("caramella")}${cutPrice}</button>`}
         ${meta.passiveOn && meta.passiveOn[c.k]
           ? `<span class="sd-nota">passiva già sbloccata</span>`
-          : `<button class="chip candy-btn" data-cp="1" ${candyOf(c.k) >= passivePrice(c.k) ? "" : "disabled"}>Sblocca passiva · 🍬${passivePrice(c.k)}</button>`}
+          : `<button class="chip candy-btn" data-cp="1" ${candyOf(c.k) >= passivePrice(c.k) ? "" : "disabled"}>Sblocca passiva · ${ico("caramella")}${passivePrice(c.k)}</button>`}
       </span></div>
       <div class="sd-riga"><span class="sd-lab">Sesso</span><span class="sd-chips">${sessoRiga}</span></div>
       ${formaRiga ? `<div class="sd-riga"><span class="sd-lab">Forma</span><span class="sd-chips">${formaRiga}</span></div>` : ""}
@@ -13642,6 +13642,28 @@
     big_mushroom: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgBAMAAACBVGfHAAAAIVBMVEUAAAAgICDVOSCLe3v/c1ru1Ur25mK0pKT/pIPezc3u3t666kKVAAAAAXRSTlMAQObYZgAAAIxJREFUeF5jGGggKCiAEGAUFBRUynBECAi5uoR0ZCgiFHi0uIZ4dCAEhDpaXF08mhBmiHS4uLh0IAu4uIa4RgB1IARCXUKbkAREQ1zARiAEXFxdOhQFULR0NAkXIpyh5pLRoWheKQAX0OjoUBIun4UQyOhoUhSvXIUQAPIFGGctRJjhBLIB4XsEezABAGkLHpxJELo6AAAAAElFTkSuQmCC",
   };
   const itemIcon = n => ITEM_DATAURI[n] || `assets/ui/items/${n}.png`;
+  /* 🔴 SPRITE AL POSTO DELLE EMOJI.
+     Le emoji le disegna il sistema operativo: cambiano faccia da un telefono
+     all'altro, non c'entrano niente con la pixel art del resto e per meta' di
+     loro l'oggetto vero ce l'abbiamo negli asset. Dove c'e' lo sprite, si usa
+     lo sprite; dove non c'e' (🔒 lucchetto, 🏆 coppa, 🍀 quadrifoglio, 👑
+     corona del boss) resta l'emoji, che e' meglio di niente.
+     ⚠️ `assets/ui/egg.png` NON va bene: e' un foglio con tutte le qualita'
+     d'uovo affiancate (138×31), e come <img> le mostrerebbe tutte. L'uovo
+     singolo e' `items/mystery_egg.png`. */
+  const ICO_SPRITE = {
+    voucher:   () => itemIcon("coupon"),
+    caramella: () => itemIcon("rare_candy"),
+    uovo:      () => itemIcon("mystery_egg"),
+    zaino:     () => itemIcon("berry_pouch"),
+    dynamax:   () => itemIcon("dynamax_band"),
+    ball:      () => ballIcon("pb"),
+    clepto:    () => ballIcon("tb"),
+  };
+  const ico = (k) => `<img class="ico-sp" src="${ICO_SPRITE[k]()}" alt="">`;
+  /* La macchina del gacha e' alta e stretta (106×131): con il riquadro
+     quadrato delle altre icone verrebbe schiacciata. */
+  const icoGacha = () => `<img class="ico-sp alta" src="${GACHA_IMG[gachaScelto] || GACHA_IMG.MOVE}" alt="">`;
   const ballIcon = n => `assets/ui/pokeball/${n}.png`;
   const VIT_ICON = { hp: "hp_up", atk: "protein", def: "iron", spatk: "calcium", spdef: "zinc", spd: "carbos" };
   /* Nome ufficiale dello strumento che potenzia un tipo: nell'originale non
@@ -14030,7 +14052,7 @@
       const st = p.status ? `<span class="status-badge st-${p.status}">${STATUS_IT[p.status]}</span>` : "";
       const ppTot = p.moves.reduce((s, m) => s + m.pp, 0), ppMax = p.moves.reduce((s, m) => s + m.maxPp, 0);
       const held = Object.keys(p.held || {}).length || Object.keys(p.berries || {}).length
-        ? `<span class="pd-held">🎒 ${heldSummary(p)}</span>` : "";
+        ? `<span class="pd-held">${ico("zaino")} ${heldSummary(p)}</span>` : "";
       return `<button class="pd-card tgt ${ok ? "" : "ko"}" data-i="${i}" ${ok ? "" : "disabled"}>
           <div class="pd-top">
             <span class="pd-name">${miniIcon(p.dex, 1.1)}${p.shiny ? cromStella(p.shinyVar) : ""}${p.name.replace("✨", "")}<span class="gen g-${p.gender}">${genderSymbol(p)}</span>${st}</span>
@@ -14305,7 +14327,7 @@
         <div class="meta-title" style="font-size:clamp(18px,5.2vw,28px)">Ondata ${game.wave} superata!</div>
         <div class="shop-head-btns">${evolveBtn}<button class="team-btn" data-act="team">👥 Squadra</button></div>
       </div>
-      <div class="meta-stats"><span>₽ ${game.money}</span><span>🔴 ${totalBalls()}</span><span>squadra ${aliveParty().length}/${game.party.length}</span></div>
+      <div class="meta-stats"><span>₽ ${game.money}</span><span>${ico("ball")} ${totalBalls()}</span><span>squadra ${aliveParty().length}/${game.party.length}</span></div>
       <div class="shopfull">
         ${luckBar()}
         <div class="meta-sub">Scegli un premio</div>
@@ -14365,7 +14387,7 @@
       const col = ratio > 0.5 ? "var(--hp-green)" : ratio > 0.2 ? "var(--hp-yellow)" : "var(--hp-red)";
       const types = p.types.map(t => `<span class="ticon t-${t}"></span>`).join("");
       const st = p.status ? `<span class="status-badge st-${p.status}">${STATUS_IT[p.status]}</span>` : "";
-      const held = Object.keys(p.held || {}).length ? `<span class="pd-held">🎒 ${heldSummary(p)}</span>` : "";
+      const held = Object.keys(p.held || {}).length ? `<span class="pd-held">${ico("zaino")} ${heldSummary(p)}</span>` : "";
       const moves = p.moves.map(m => M[m.id].it).join(", ");
       return `<div class="pd-card ${p.fainted ? "ko" : ""}">
           <div class="pd-top"><span class="pd-name">${miniIcon(p.dex, 1.1)}${p.shiny ? cromStella(p.shinyVar) : ""}${p.name.replace("✨", "")}<span class="gen g-${p.gender}">${genderSymbol(p)}</span>${st}</span><span class="pd-lv">Lv.${p.level}</span></div>
@@ -14433,7 +14455,7 @@
       <div class="meta-title" style="color:#ffcf4a">🏆 CAMPIONE!</div>
       <div class="meta-sub">Hai superato tutte le 200 ondate della modalità Classica.</div>
       <div class="me-text" style="margin-top:2vh"><b>La tua squadra vincente</b><br>${team}</div>
-      <div class="meta-stats"><span>Vittorie totali: ${meta.stats.wins || 1}</span><span>🎟 ${meta.vouchers}</span></div>
+      <div class="meta-stats"><span>Vittorie totali: ${meta.stats.wins || 1}</span><span>${ico("voucher")} ${meta.vouchers}</span></div>
       <div class="meta-actions">
         <button class="meta-btn primary" data-act="again">▶ Nuova Run</button>
         <button class="meta-btn ghost" data-act="home">🏠 Home</button>
