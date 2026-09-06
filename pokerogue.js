@@ -3864,11 +3864,20 @@
     game.trainerTotal = 0; renderTrainerBalls();   // nascondi il vassoio
     game.trainerRoster = []; game.trainerIsRival = false; game.evilRank = null;
     game.capturedThisWave = false;
-    // assicura un Pokemon attivo vivo (se l'attivo e' caduto vincendo l'ondata)
+    /* 🔴 IL PROSSIMO LO SCEGLI TU.
+       Se l'attivo cadeva vincendo l'ondata (colpo finale scambiato, veleno che
+       lo porta via dopo il KO nemico), l'ondata dopo si apriva con
+       `firstAliveIndex()`: il PRIMO vivo della lista, senza chiedere niente.
+       Ti ritrovavi in campo qualcuno che non avevi scelto, contro un avversario
+       che ancora non conoscevi. Durante la lotta la scelta c'era gia'
+       (`promptForceSwitch`); mancava qui, che e' il caso piu' frequente.
+       ⚠️ `nextWave` si richiama da capo dopo la scelta: e' l'unico modo di
+       infilare una schermata in mezzo a una funzione che non e' asincrona. */
     if (game.player.fainted) {
-      const idx = firstAliveIndex();
-      if (idx < 0) return gameOver("KO");
-      setActive(idx);
+      const vivi = game.party.filter(p => !p.fainted);
+      if (!vivi.length) return gameOver("KO");
+      if (vivi.length > 1) { scegliChiApre(); return; }
+      setActive(game.party.indexOf(vivi[0]));
     }
     // ENDGAME (ha priorità su tutto): Superquattro, Campione, boss finale.
     // La Lega è quella della REGIONE estratta per questa run (game.league).
@@ -4499,8 +4508,26 @@
         ${bar("PS", "hp")}${bar("Att", "atk", fisica)}${bar("Dif", "def")}
         ${bar("A.Sp", "spatk", speciale)}${bar("D.Sp", "spdef")}${bar("Vel", "spd")}
       </div>
-      <div class="learn-nuova">
-        Vuole imparare <b>${nv.it}</b>
+      <!-- 🔴 LA MOSSA NUOVA ERA SCRITTA, LE ALTRE ERANO PULSANTI.
+           Qui si confronta: «questa al posto di quale?». Ma la nuova compariva
+           come una frase su fondo grigio e le quattro vecchie come pulsanti
+           colorati col tipo, la categoria e la potenza — due linguaggi diversi
+           per la stessa cosa, e il confronto lo dovevi fare a memoria.
+           Adesso ha la stessa forma delle altre: stesso riquadro, stesso
+           colore di tipo, stessi dati. ⚠️ Non e' cliccabile (non si sceglie
+           lei, si sceglie chi esce): nessun data-i, e il cursore resta
+           normale.
+           ATTENZIONE: dentro un template literal niente apici inversi, nemmeno
+           in un commento HTML: chiudono la stringa. -->
+      <div class="meta-sub learn-etichetta">Vuole imparare</div>
+      <div class="learn-riga">
+        <div class="btn move-btn learn-nuova-btn" style="background:${T[nv.type].color};">
+          <span class="move-name">${nv.it}</span>
+          <span class="move-meta">
+            <span class="ticon t-${nv.type}"></span><span class="cicon c-${nv.category}"></span>
+            ${nv.power > 0 ? `<span class="move-pot">P${nv.power}</span>` : ""}<span class="move-pp">${nv.pp}/${nv.pp}</span>
+          </span>
+        </div>
         <button class="chip-i ${learnAperto("nuova", moveId) ? "on" : ""}" data-i-new="1" title="cosa fa">ⓘ</button>
       </div>
       ${learnAperto("ab", (learnInfo || {}).id) ? snippetAbilita((learnInfo || {}).id) : ""}
@@ -6859,6 +6886,20 @@
     game.phase = "FORCESWITCH";
     renderParty("force");
   }
+  /* Scelta di chi APRE l'ondata, quando l'attivo e' caduto vincendo quella
+     prima. Non e' un cambio in battaglia: non ci sono trappole da far mordere
+     ne' abilita' d'ingresso da lanciare, la lotta non e' ancora cominciata. */
+  function scegliChiApre() {
+    game.phase = "FORCESWITCH";
+    renderParty("apre");
+  }
+  function apriConIndice(index) {
+    const target = game.party[index];
+    if (!target || target.fainted) return;
+    setActive(index);
+    hideMeta();
+    nextWave();
+  }
   function forceSwitchTo(index) {
     if (game.phase !== "FORCESWITCH") return;
     const target = game.party[index];
@@ -8744,14 +8785,19 @@
       ? `<span class="status-badge st-${status}">${STATUS_IT[status]}</span>` : "";
     el.innerHTML = `
       <div class="row1">
-        <span class="name">${iconaDex(fighter)}${fighter.name}<span class="gen g-${fighter.gender}">${genderSymbol(fighter)}</span>${badge}</span>
+        <span class="name">${iconaDex(fighter)}${fighter.name}<span class="gen g-${fighter.gender}">${genderSymbol(fighter)}</span></span>
         <span class="lvl"><span class="lvpfx">Lv.</span>${fighter.level}</span>
       </div>
       <div class="hp-bar-track">
         <div class="hp-bar-fill" style="width:${ratio * 100}%; background:${color};"></div>
         ${(fighter.segBounds || []).map(b => `<div class="seg-mark" style="left:${b / maxHp * 100}%"></div>`).join("")}
       </div>
-      <div class="hp-text">${Math.max(0, hp)} / ${maxHp}</div>
+      <!-- 🔴 LO STATO STAVA DENTRO IL NOME, che ha l'ellissi: con un nome
+           lungo («Tauros di Paldea», «Geyser…») la targhetta SCOTTATURA o
+           PARALISI veniva tagliata via, e lo stato piu' importante da vedere
+           spariva proprio quando il nome era lungo. Adesso sta sulla riga dei
+           PS, a SINISTRA: quella riga ha solo due numeri e spazio libero. -->
+      <div class="hp-text"><span class="hp-stato">${badge}</span><span>${Math.max(0, hp)} / ${maxHp}</span></div>
       ${barraExp(fighter)}
       <div class="ability-line"><span class="tipi-mini">${fighter.types.map(t => `<span class="ticon t-${t}"></span>`).join("")}</span>${fighter.ability ? fighter.ability.it : ""}</div>
       ${badgeStadi(fighter, ov && ov.stages)}
@@ -9271,14 +9317,15 @@
     const boxLine = game.box.length ? `<div class="meta-sub">Box: ${game.box.length} Pokémon in deposito</div>` : "";
     /* Nel cambio FORZATO non si torna indietro: qualcuno deve scendere in campo.
        In «check» (dal negozio) si torna al negozio, e c'è lo spostamento oggetti. */
-    const backRow = (mode === "force" || mode === "staffetta") ? ""
+    const backRow = (mode === "force" || mode === "staffetta" || mode === "apre") ? ""
       : mode === "check"
         ? `<div class="meta-actions ${puoSpostare() ? "two-col" : ""}">
              ${puoSpostare() ? `<button class="meta-btn gacha" data-act="sposta">${ico("zaino")} Sposta oggetti</button>` : ""}
              <button class="meta-btn ghost" data-act="back">↩ Indietro</button></div>`
         : `<div class="meta-actions"><button class="meta-btn ghost" data-act="back">↩ Indietro</button></div>`;
-    const title = (mode === "force" || mode === "staffetta") ? "Chi mandi in campo?" : mode === "check" ? "La tua Squadra" : "Cambia Pokémon";
+    const title = (mode === "force" || mode === "staffetta" || mode === "apre") ? "Chi mandi in campo?" : mode === "check" ? "La tua Squadra" : "Cambia Pokémon";
     const sub = mode === "staffetta" ? "chi entra si tiene gli sbalzi di statistica"
+      : mode === "apre" ? "chi apre la prossima ondata"
       : mode === "force" ? "il tuo Pokémon è esausto"
       : mode === "check" ? "tocca un Pokémon per vedere la sua scheda"
       : "tocca chi deve scendere in campo";
@@ -9431,7 +9478,8 @@
        qualcuno. Il tasto non c'è proprio, invece di esserci spento. */
     if (puoScendere && go) go.onclick = () => {
       hideMeta();
-      if (mode === "force") forceSwitchTo(i);
+      if (mode === "apre") apriConIndice(i);
+      else if (mode === "force") forceSwitchTo(i);
       else if (mode === "staffetta") staffettaVerso(i);
       else playerSwitch(i);
     };

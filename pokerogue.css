@@ -611,7 +611,14 @@ html, body {
   background: var(--hp-green);
   transition: width .5s ease, background-color .5s ease;
 }
-.hp-text { margin-top: 2px; font-size: 10px; text-align: right; opacity: .9; font-variant-numeric: tabular-nums; }
+/* La riga dei PS porta anche lo STATO, a sinistra: e' l'unico posto del
+   riquadro con spazio libero garantito, e non ha ellissi che lo mangi. */
+.hp-text {
+  margin-top: 2px; font-size: 10px; opacity: .9; font-variant-numeric: tabular-nums;
+  display: flex; align-items: center; justify-content: space-between; gap: 6px;
+}
+.hp-text .hp-stato { display: flex; align-items: center; min-width: 0; }
+.hp-text .status-badge { margin-left: 0; }
 /* Riga d'identita' del riquadro PS: i TIPI e l'abilita'.
    ⚠️ Nell'originale i tipi stanno dentro il riquadro come icone a posizione
    fissa (pbinfo_player_type1/2), e infatti la scatola non cambia mai misura.
@@ -1288,11 +1295,13 @@ button.pd-ab, button.pd-held {
 /* la statistica che conta per la mossa nuova (Att se fisica, A.Sp se speciale) */
 .stat-row.spicca .stat-lab, .stat-row.spicca .stat-val { color: #ffd64a; font-weight: 700; opacity: 1; }
 .stat-row.spicca .stat-track { box-shadow: 0 0 0 1px rgba(255,214,74,.55); }
-.learn-nuova {
-  display: flex; align-items: center; justify-content: center; gap: 8px;
-  font-size: clamp(13px, 3.6vw, 16px); flex: 0 0 auto;
-  background: rgba(255,255,255,.06); border-radius: 10px; padding: 8px 10px;
+.learn-etichetta { margin: 2px 0 4px; flex: 0 0 auto; }
+/* La mossa da imparare: stesso pulsante delle altre, ma non si tocca — non e'
+   lei che si sceglie. Un filo di bordo chiaro la stacca dalle quattro sotto. */
+.learn-nuova-btn {
+  cursor: default; box-shadow: 0 0 0 2px rgba(255,255,255,.55), 0 4px 0 rgba(0,0,0,.35);
 }
+.learn-nuova-btn:active { transform: none; }
 .learn-lista { display: flex; flex-direction: column; gap: 7px; margin: 1vh 0; overflow-y: auto; }
 .learn-riga { display: flex; align-items: stretch; gap: 6px; flex: 0 0 auto; }
 .learn-riga .move-btn { flex: 1; min-width: 0; }
@@ -1589,10 +1598,14 @@ button.pd-card:not(:disabled):active { background: rgba(255,255,255,.14); }
    telefoni con gli spigoli arrotondati (e col foro della fotocamera) le icone
    finivano tagliate a meta'. Le stesse variabili di sicurezza che gia' usa il
    riquadro PS avversario qui non c'erano affatto. */
+/* 🔴 E stava sulla STESSA RIGA della targhetta dell'ondata: con un bioma dal
+   nome lungo («Notte · Campo Erboso») la scritta arrivava sotto le icone e
+   le due cose si accavallavano. La targhetta e' alta ~24px: la barra scende
+   sotto di lei, dove lo spazio e' libero. */
 .held-bar.enemy {
   left: auto; bottom: auto;
   right: calc(var(--safe-x) + 8px);
-  top: calc(var(--safe-top) + 10px);
+  top: calc(var(--safe-top) + 34px);
   justify-content: flex-end; align-content: flex-start;
 }
 .held-bar .hi {

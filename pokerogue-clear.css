@@ -704,8 +704,11 @@ html, body {
    fascia comandi: la riga con Descrizioni e Indietro finiva sotto il bordo.
    Se lo spazio manca si accorciano i PP, non si aggiunge una riga. */
 .move-btn .move-meta {
-  display: flex; gap: 5px; align-items: center; flex-wrap: nowrap; justify-content: center;
-  font-size: clamp(10px, 3vw, 14px); font-weight: 600; opacity: .95;
+  /* ⚠️ Lo spazio si guadagna STRINGENDO, non tagliando: gap da 5 a 3 px e
+     un filo di font in meno. Cosi' ci stanno tipo, categoria, potenza E PP
+     interi anche sul telefono con la scala dei caratteri al 130%. */
+  display: flex; gap: 3px; align-items: center; flex-wrap: nowrap; justify-content: center;
+  font-size: clamp(9px, 2.7vw, 13px); font-weight: 600; opacity: .95;
   max-width: 100%; overflow: hidden;
 }
 /* 🔴 A CEDERE DEV'ESSERE LA POTENZA, NON I PP.
@@ -715,8 +718,10 @@ html, body {
    mossa e' ancora usabile e' quello; la potenza sta gia' scritta nella scheda.
    Adesso sono due caselle: i PP non si restringono mai (`flex: 0 0 auto`),
    la potenza si' — e se proprio non ci sta, sparisce lei. */
+/* ⚠️ Ne' la potenza ne' i PP si restringono: sono due numeri, o ci sono o
+   non servono. Lo spazio glielo fanno le targhette piu' strette e il font. */
 .move-btn .move-pp  { flex: 0 0 auto; white-space: nowrap; }
-.move-btn .move-pot { flex: 0 1 auto; overflow: hidden; white-space: nowrap; min-width: 0; }
+.move-btn .move-pot { flex: 0 0 auto; white-space: nowrap; }
 /* ⚠️ Il puntino va scritto COME CARATTERE, non come escape CSS: scritto
    come sequenza di quattro cifre esadecimali senza spazio finale il parser
    ne legge solo due, e a schermo usciva «P60 ◆b7 8/24». */
@@ -725,7 +730,7 @@ html, body {
 /* Le due targhette (tipo e categoria) da sole si prendevano 90 px dei 171
    utili, e i PP finivano tagliati a meta: rimpicciolite un filo ci sta tutto.
    Misurato: 48+42 -> 39+34, e i PP passano da 71 px a 88. */
-.move-btn .ticon, .move-btn .cicon { zoom: .78; }
+.move-btn .ticon, .move-btn .cicon { zoom: .70; }
 /* [ATTENZIONE] Il segno dell efficacia sta nell ANGOLO, fuori dal flusso: in
    riga si mangiava lo spazio dei PP, che finivano tagliati a P4... In
    Scarlatto/Violetto quel segno sta al bordo della riga, non in mezzo ai dati. */
@@ -972,7 +977,9 @@ html, body {
 /* Quante uova per tiro: due chip sopra le macchine. */
 .gacha-quante { display: flex; gap: 8px; justify-content: center; margin-bottom: .4vh; }
 .gacha-quante .chip { min-width: 62px; justify-content: center; font-weight: 800; }
-.meta-btn.macchina {
+/* ⚠️ Vale anche per «Cambia macchina», che non e' una macchina ma ha le
+   stesse due righe: senza questo titolo e sottotitolo finivano appaiati. */
+.meta-btn.macchina, .meta-btn.due-righe {
   display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
   padding: 9px 14px; text-align: left; line-height: 1.25;
 }
