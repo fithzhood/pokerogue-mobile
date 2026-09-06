@@ -4959,3 +4959,60 @@ colpi — un colpo in più non è una mossa in più. Verificato: quattro colpi,
 
 ⚠️ Gli sbalzi di statistica si **sommano** (tre colpi che passano = tre stadi)
 ma si applicano in una volta sola, per non stampare tre righe uguali.
+
+## 57. La mappa aperta (rev 169)
+
+Richiesta del proprietario, ed è una **modifica di progetto, non una
+correzione**: nell'originale i collegamenti fra biomi sono esattamente i nostri
+(`biomeLinks` in `src/data/balance/biomes/*.ts`, Città → solo Pianura).
+
+### 57.1 Due uscite e un'entrata per ogni luogo
+
+Il grafo dell'originale ha **undici luoghi con una sola uscita** e **due senza
+nessuna entrata** (Città e La Fine). Vuol dire che a ogni cambio zona, in un
+terzo dei casi, non si sceglie: si legge dove ti tocca andare. E vuol dire che
+Città la vedi solo all'ondata 1, per sempre.
+
+Undici legami aggiunti, scelti per senso e non a caso:
+
+| da | a | perché |
+|---|---|---|
+| Prato | Prateria Fiorita | il prato fiorisce |
+| Cimitero | Tempio | vanno insieme |
+| Grotta Gelata | Grotta | sotto il ghiaccio, la roccia |
+| Isola | Giungla | l'entroterra dell'isola |
+| Giungla | Palude | la giungla degrada |
+| Laboratorio | Metropoli | il laboratorio sta in città |
+| Metropoli | **Città** | è ciò che dà a Città la sua entrata |
+| Centrale | Metropoli | la centrale alimenta la metropoli |
+| Spazio | Landa Desolata | si ricade sulla landa |
+| Città | Metropoli | seconda uscita per Città |
+| Landa Desolata | Cimitero | — |
+
+Da 65 a **76 passaggi**. Verificato: zero luoghi con meno di due uscite, zero
+con meno di un'entrata.
+
+⚠️ **La Fine è l'unica esente**: è il finale, ci si arriva per salto forzato
+dall'ondata 191 e da lì non si esce. Darle un'uscita vorrebbe dire poter uscire
+dall'endgame.
+
+⚠️ I legami stanno in `LEGAMI_EXTRA` dentro `pokerogue.js`, **non** in
+`data/biomes.json`: quel file lo rigenera `tools/extract-data.mjs`
+dall'originale, e scritti lì sparirebbero alla prima rigenerazione.
+`apriLaMappa()` li fonde subito dopo il caricamento dati.
+
+⚠️ Il secondo sbocco conta anche senza la **Mappa**: la schermata di scelta
+compare solo con `game.charms.map`, ma senza di essa il gioco sorteggia fra le
+uscite — e fra due è un sorteggio, fra una era un binario.
+
+### 57.2 Si parte da uno qualunque dei primi quattro livelli
+
+Non più sempre Città: `biomiDiPartenza()` misura la distanza da Città **sul
+grafo vero, dopo le aggiunte** e prende tutto ciò che sta a tre passi o meno.
+Sono undici: Città, Metropoli, Pianura, Prato, Lago, Sobborghi, Spiaggia,
+Cantiere, Prateria Fiorita, Palude, Erba Alta.
+
+Calcolarla sul grafo vivo invece di scriverla a mano vuol dire che resta giusta
+anche se un domani i collegamenti cambiano.
+
+Provato: 40 avvii → tutti e undici i biomi escono.

@@ -113,6 +113,69 @@
   let CHART = {};              // typechart: { FIRE: {GRASS:2,...}, ... }
   let ABIL = {};               // abilita': { BLAZE: {it, attrs, ...}, ... }
   let BIOMES = {};             // biomi: { PLAINS: {it, sky, ground, pools, links}, ... }
+  /* ======================================================================
+     🔴 LA MAPPA APERTA — scelta nostra, l'originale ha la mappa che vedi in
+     `data/biomes.json` e basta.
+
+     Il grafo dei biomi dell'originale ha undici luoghi con UNA SOLA uscita e
+     due senza NESSUNA entrata (Città e La Fine). Vuol dire che a ogni cambio
+     zona, in un terzo dei casi, non si sceglie: si legge dove ti tocca
+     andare. E vuol dire che Città la vedi solo all'ondata 1, per sempre.
+     Regola nuova: ogni luogo ha almeno DUE uscite e almeno UNA entrata.
+     ⚠️ L'unica esente e' LA FINE: e' il finale, ci si arriva per salto
+     forzato dall'ondata 191 e da li' non si esce — darle un'uscita
+     vorrebbe dire poter uscire dall'endgame.
+
+     ⚠️ Questi legami stanno QUI e non in `data/biomes.json` perche' quel
+     file lo rigenera `tools/extract-data.mjs` dall'originale: scritti la',
+     sparirebbero alla prima rigenerazione.
+
+     Le undici aggiunte sono scelte per SENSO, non a caso: il laboratorio e la
+     centrale stanno in citta', il cimitero porta al tempio, l'isola alla
+     giungla, la grotta gelata alla grotta. E la Metropoli riporta alla Città,
+     che e' quello che le da' finalmente un'entrata. */
+  const LEGAMI_EXTRA = {
+    GRASS:       ["MEADOW"],        // il prato fiorisce
+    GRAVEYARD:   ["TEMPLE"],        // il cimitero e il tempio
+    ICE_CAVE:    ["CAVE"],          // sotto il ghiaccio, la roccia
+    ISLAND:      ["JUNGLE"],        // l'entroterra dell'isola
+    JUNGLE:      ["SWAMP"],         // la giungla degrada in palude
+    LABORATORY:  ["METROPOLIS"],    // il laboratorio sta in citta'
+    METROPOLIS:  ["TOWN"],          // e la citta' grande riporta a quella piccola
+    POWER_PLANT: ["METROPOLIS"],    // la centrale alimenta la metropoli
+    SPACE:       ["WASTELAND"],     // si ricade sulla landa
+    TOWN:        ["METROPOLIS"],    // dalla citta' si va anche in metropoli
+    WASTELAND:   ["GRAVEYARD"],     // dalla landa al cimitero
+  };
+  function apriLaMappa() {
+    for (const k in LEGAMI_EXTRA) {
+      if (!BIOMES[k]) continue;
+      BIOMES[k].links = (BIOMES[k].links || []).slice();
+      for (const d of LEGAMI_EXTRA[k]) {
+        if (BIOMES[d] && !BIOMES[k].links.includes(d)) BIOMES[k].links.push(d);
+      }
+    }
+  }
+
+  /* Da dove comincia una run. 🔴 Non piu' sempre Città: qualunque luogo dei
+     primi QUATTRO livelli del grafo, cioe' a tre passi o meno da Città. Sono
+     i biomi d'inizio partita, quelli con i pool leggeri — partire da un
+     Abisso all'ondata 1 sarebbe un'altra cosa.
+     La distanza si misura sul grafo VERO, dopo le aggiunte: cosi' resta
+     giusta anche se un domani i collegamenti cambiano. */
+  const PROFONDITA_PARTENZA = 3;
+  function biomiDiPartenza() {
+    const dist = { TOWN: 0 };
+    const coda = ["TOWN"];
+    while (coda.length) {
+      const x = coda.shift();
+      for (const y of (BIOMES[x] && BIOMES[x].links) || []) {
+        if (BIOMES[y] && dist[y] == null) { dist[y] = dist[x] + 1; coda.push(y); }
+      }
+    }
+    const out = Object.keys(dist).filter(k => dist[k] <= PROFONDITA_PARTENZA && k !== "END");
+    return out.length ? out : ["TOWN"];
+  }
   let FORMS = {};              // forme potenziate: { CHARIZARD: [{formKey,baseStats,...}] }
   let ICONS = {};              // mini icone: { dex: {a,x,y,w,h,sw,sh} }
   let VARIANTS = {};           // forme estetiche: { dex: [formKey,...] } (Vivillon, Unown…)
@@ -3782,7 +3845,7 @@
     game.wave++;
     // all'ondata 1 il tuo Pokemon e' ancora nella ball: lo si vede uscire
     if (game.wave === 1) { dentroLaBall.add("player"); applicaDentroLaBall(); }
-    if (!game.biome) { game.biome = "TOWN"; applyBiomeBackground(); }
+    if (!game.biome) { game.biome = rndOf(biomiDiPartenza()); applyBiomeBackground(); }
     hideTrainerPortrait();
     game.trainerTotal = 0; renderTrainerBalls();   // nascondi il vassoio
     game.trainerRoster = []; game.trainerIsRival = false; game.evilRank = null;
@@ -14879,6 +14942,7 @@
          lo si aggiunge a mano perche' Terapagos Stellare e l'Arceus Perfetto
          ce l'hanno, e ogni schermata che stampa un tipo fa `T[tipo].it`. */
       T[ASTRALE] = { it: "Astrale", color: "#dcd2ff" };
+      apriLaMappa();      // due uscite e un'entrata per ogni luogo (vedi LEGAMI_EXTRA)
       // solo le specie con sprite disponibile (esclude le forme regionali senza asset)
       SPECIES_KEYS = Object.keys(species).filter(k => !species[k].noSprite);
       loadMeta();
