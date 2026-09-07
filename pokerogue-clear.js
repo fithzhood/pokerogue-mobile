@@ -897,6 +897,15 @@
   }
 
   /* Le abilità che puoi SCEGLIERE per quella specie nella schermata starter. */
+  /* L'abilita' che una specie ha in un certo POSTO (0/1 normali, 2 nascosta).
+     Serve a sapere cosa si sblocca davvero catturando un evoluto: il dex segna
+     la radice allo stesso indice, non la specie che hai in campo. */
+  function abilitaDiIndice(k, idx) {
+    const sp = S[k];
+    if (!sp || idx == null || !sp.abilities) return null;
+    const id = idx === 2 ? sp.abilities.hidden : (sp.abilities.normal || [])[idx];
+    return (id && ABIL[id]) ? ABIL[id] : null;
+  }
   function abilitaSbloccate(k) {
     const sp = S[k], mask = abilMaskOf(k), out = [];
     const norm = sp.abilities.normal || [];
@@ -2517,6 +2526,7 @@
                      trap: null, seed: false, seedBy: null, perish: 0, recharge: false,
                      charging: null, infatuated: false, encore: null, taunt: 0,
                      torment: false, drowsy: 0, nightmare: false, ingrain: false,
+                   annuncio: null,
                      aquaring: false, saltcure: false, curse: false, lastMove: null,
                      accumulo: 0, bide: null };
       p.sleepTurns = 0;
@@ -2955,12 +2965,29 @@
 
   function entraInCampo(f, messages) {
     if (!f) return;
+    /* 🔴 IL ROTOLAMENTO SI SPEZZAVA A OGNI ONDATA (§96).
+       Segnalazione: «la streak di rotolamento deve continuare anche se un
+       incontro finisce e ne inizia un altro; viene resettata pero' se tra i
+       due incontri c'e' un ritorno nella pokeball». È la regola
+       dell'originale: il contatore vive in `summonData`, e `resetSummonData()`
+       lo chiamano solo il CAMBIO e il KO — non il passaggio da un'ondata
+       all'altra, dove il Pokemon resta in campo.
+       Da noi, invece, `nextWave` chiama `entraInCampo` sull'attivo anche
+       quando non si e' mosso da li': i volatili si azzeravano e Rotolamento
+       ripartiva da 30 ogni volta, cioe' non arrivava mai ai colpi che lo
+       rendono una mossa. Adesso il contatore attraversa l'ondata; a spezzarlo
+       restano il rientro nella ball (compreso il richiamo davanti a un
+       allenatore) e il KO. */
+    const rotolaChePassa = (!f._rientrato && f.volatile) ? f.volatile.rotola : null;
+    f._rientrato = false;
     f.volatile = { confusion: 0, flinch: false, protect: null, protectUsi: 0,
                    trap: null, seed: false, seedBy: null, perish: 0, recharge: false,
                    charging: null, infatuated: false, encore: null, taunt: 0,
                    torment: false, drowsy: 0, nightmare: false, ingrain: false,
+                   annuncio: null,
                    aquaring: false, saltcure: false, curse: false, lastMove: null,
                    accumulo: 0, bide: null };
+    if (rotolaChePassa) f.volatile.rotola = rotolaChePassa;
     f._lansat = false;
     f.fainted = false;
     /* Da quanti turni e' in campo, e cosa ha gia' usato da quando e' entrato.
@@ -2999,6 +3026,7 @@
     }
     if (ha(f, "NATURAL_CURE") && !f.fainted) { f.status = null; f.sleepTurns = 0; }
     f.toxicN = 0;              // il veleno grave riparte da capo, come nei giochi
+    f._rientrato = true;       // il rotolamento si spezza qui, e solo qui (§96)
     annullaTrasformazione(f); // chi era trasformato torna se stesso
     /* 🔴 QUI SI DISFAVA LA MEGA (§88). Rientrare nella ball toglieva la
        forma: adesso e' permanente, la si accende e spegne dalla scheda. */
@@ -5122,9 +5150,22 @@
         <span class="learn-sprite" id="learnSprite"></span>
         <div class="learn-id">
           <div class="learn-nome">${mon.name} <span class="learn-lv">Lv.${mon.level}</span></div>
+          <!-- I TIPI DI CHI IMPARA. Richiesta: «nella schermata di
+               apprendimento mosse è importante conoscere anche i tipi del
+               pkmn» — e ha ragione, perché la domanda vera è se la mossa nuova
+               prende il BONUS DI TIPO. Senza i tipi lo dovevi sapere a
+               memoria, con la scheda del Pokémon irraggiungibile da qui. -->
+          <div class="learn-tipi">${mon.types.map(t => `<span class="ticon t-${t}"></span>`).join("")}</div>
           <div class="learn-ab">${abilitaRiga}</div>
         </div>
       </div>
+      <!-- 🔴 LA SPIEGAZIONE COMPARIVA LONTANO DA CIO' CHE SPIEGA (§89).
+           I chip dell'abilita' stanno qui in cima, ma il riquadro che si apre
+           toccando la loro ⓘ era scritto SOTTO la mossa nuova, a mezzo
+           schermo di distanza: toccavi in alto e si muoveva qualcosa in basso,
+           spesso fuori dalla parte visibile. Adesso esce attaccato al chip che
+           l'ha aperto. -->
+      ${learnAperto("ab", (learnInfo || {}).id) ? snippetAbilita((learnInfo || {}).id) : ""}
       <div class="sd-stats learn-stats">
         ${bar("PS", "hp")}${bar("Att", "atk", fisica)}${bar("Dif", "def")}
         ${bar("A.Sp", "spatk", speciale)}${bar("D.Sp", "spdef")}${bar("Vel", "spd")}
@@ -5151,7 +5192,6 @@
         </div>
         <button class="chip-i ${learnAperto("nuova", moveId) ? "on" : ""}" data-i-new="1" title="cosa fa">ⓘ</button>
       </div>
-      ${learnAperto("ab", (learnInfo || {}).id) ? snippetAbilita((learnInfo || {}).id) : ""}
       ${learnAperto("nuova", moveId) ? snippetMossa(moveId) : ""}
       <div class="meta-sub">Quale mossa dimentica?</div>
       <div class="learn-lista">${btns}</div>
@@ -5930,12 +5970,18 @@
       // se se n'e' andato quello in campo, scende subito il nuovo
       if (game.active === i) setActive(i);
       else ordinaSquadra();          // e comunque in testa restano quelli in campo
+      /* ⚠️ DOPO lo scambio, non prima: se a cedere il posto era proprio
+         quello in campo, l'attivo adesso e' il nuovo arrivato, ed e' lui che
+         deve ricevere la roba. */
+      const preso = passaGliOggetti(uscito, game.player);
       renderScene();
-      chiudi(`${uscito.name} va al PC. ${mon.name} prende il suo posto!`);
+      chiudi(`${uscito.name} va al PC. ${mon.name} prende il suo posto!${preso ? "\n" + preso : ""}`);
     });
     metaEl().querySelector('[data-act="pc"]').onclick = () => {
+      // anche il nuovo arrivato lascia qui quello che teneva addosso
+      const preso = passaGliOggetti(mon, game.player);
       game.box.push(mon);
-      chiudi(`${mon.name} è stato trasferito al PC.`);
+      chiudi(`${mon.name} è stato trasferito al PC.${preso ? "\n" + preso : ""}`);
     };
   }
 
@@ -7214,6 +7260,13 @@
 
     const log = log0;
     for (const act of actions) if (act.quick) log.push(`I Rapidartigli di ${act.actor.name} scattano!`);
+    /* L'ANNUNCIO delle tre mosse a promessa: prima che chiunque agisca. */
+    for (const act of actions) {
+      const testa = MOSSE_CON_ANNUNCIO[act.move.id];
+      if (!testa || act.actor.fainted || !act.actor.volatile) continue;
+      act.actor.volatile.annuncio = act.move.id;
+      log.push(testa(act.actor));
+    }
     /* Prendinota e Rinvio riordinano la coda MENTRE la si scorre: per farlo
        devono poterla vedere, e sapere a che punto siamo. */
     game._coda = actions;
@@ -7292,6 +7345,7 @@
     tickTerrain(log);            // e anche il terreno
     for (const f of onField()) {
       f.volatile.flinch = false;
+      f.volatile.annuncio = null;   // il becco si raffredda a fine turno
       // la protezione dura un solo turno; il contatore degli usi di fila
       // si azzera solo quando NON la si e' usata (cosi' 1/3^usi funziona)
       if (!f.volatile.protect) f.volatile.protectUsi = 0;
@@ -7751,6 +7805,25 @@
       return;
     }
 
+    /* Le tre mosse a promessa la riscuotono qui: l'annuncio e' partito a
+       inizio turno, e adesso si vede se ha tenuto. Il becco arroventato ha
+       gia' fatto il suo lavoro (chi l'ha toccato si e' scottato), quindi la
+       promessa si spegne comunque. */
+    if (!mossaChiamata && MOSSE_CON_ANNUNCIO[move.id]) {
+      const preso = dannoSubito(actor, move.id === "SHELL_TRAP" ? "fisico" : "tutto");
+      actor.volatile.annuncio = null;
+      if (move.id === "FOCUS_PUNCH" && preso > 0) {
+        moveInst.pp = Math.max(0, moveInst.pp - 1);
+        messages.push(`${actor.name} perde la concentrazione e non riesce a colpire!`);
+        return;
+      }
+      if (move.id === "SHELL_TRAP" && preso <= 0) {
+        moveInst.pp = Math.max(0, moveInst.pp - 1);
+        messages.push(`La trappola di ${actor.name} non è scattata!`);
+        return;
+      }
+    }
+
     // 1. l'attore riesce ad agire? (congelato/dorme/paralisi/tentennamento/confusione)
     if (!mossaChiamata && !canAct(actor, messages)) return;
 
@@ -8066,6 +8139,10 @@
     /* 4-quinquies. «COLPISCI E POI ESCI» (vedi il riquadro su
        `CAMBIA_CHI_COLPISCE`). Va qui: serve `landed`, e serve che il danno sia
        gia' stato applicato. */
+    // effetti sulla ROBA del bersaglio (bacche bruciate/mangiate, oggetti
+    // fatti cadere o rubati): solo se la mossa e' andata a segno
+    if (landed) effettiSuOggetti(actor, foe, move, messages);
+
     if (landed && !actor.fainted && CAMBIA_CHI_COLPISCE.has(move.id)) {
       chiediCambio(actor, false, messages, `${actor.name} torna indietro!`, true);
     }
@@ -8219,6 +8296,8 @@
     PAYBACK: (a, d) => (d.volatile && d.volatile.lastMove ? 100 : 50),
     // Acrobazia: doppia se non si tiene niente
     ACROBATICS: a => (Object.keys(a.held || {}).length || Object.keys(a.berries || {}).length) ? 55 : 110,
+    // Privazione: +50% su chi ha qualcosa da far cadere (65 -> 97)
+    KNOCK_OFF: (a, d) => haOggetti(d) ? 97 : 65,
     // Pestone: doppio se la mossa precedente e' fallita
     STOMPING_TANTRUM: a => (a.volatile && a.volatile.fallita ? 150 : 75),
     // per PP rimasti (l'ultimo colpo è devastante)
@@ -8737,6 +8816,10 @@
     }
     // effetti da CONTATTO: l'abilita' del difensore colpisce l'attaccante
     if (move.contact && total > 0) {
+      /* CANNONBECCO: il becco e' arroventato finche' non parte il colpo. */
+      if (foe.volatile.annuncio === "BEAK_BLAST" && !actor.fainted) {
+        applyStatus(actor, "BURN", messages, M.BEAK_BLAST.it, true);
+      }
       const cs = findAb(foe, "contactStatus");
       if (cs && !actor.fainted && Math.random() * 100 < cs.chance) applyStatus(actor, cs.status, messages, foe.ability.it);
       /* ARRAFFALESTO: chi ti tocca ci rimette l'oggetto. */
@@ -9264,6 +9347,8 @@
       f.volatile.nightmare = false; f.volatile.saltcure = false; f.volatile.curse = false;
       f.volatile.protect = null; f.volatile.charging = null; f.volatile.recharge = false;
       f.volatile.sub = 0;
+      // chi cade smette di rotolare, di infuriarsi e di fare baraonda
+      f.volatile.rotola = null; f.volatile.furia = null; f.volatile.baraonda = null;
     }
   }
 
@@ -10082,6 +10167,25 @@
     return out;
   }
   const haOggetti = p => heldElenco(p).length > 0;
+  /* 🔴 GLI OGGETTI RESTAVANO NEL BOX (§92).
+     Segnalazione: «quando si manda al box un pkmn i suoi oggetti devono essere
+     automaticamente spostati al pokemon attivo, anche se il pokemon mandato al
+     pc non faceva parte della squadra perche' appena catturato».
+     Il PC non e' un posto da cui si torna facilmente, e gli Avanzi vinti dieci
+     ondate fa sparivano insieme a chi li teneva — senza una riga che lo
+     dicesse. Vale per tutte e due le strade: chi cede il posto E il nuovo
+     arrivato che scegli di non tenere. */
+  function passaGliOggetti(da, a, dove) {
+    if (!da || !a || da === a) return null;
+    a.held = a.held || {}; a.berries = a.berries || {};
+    const voci = heldElenco(da);
+    if (!voci.length) return null;
+    for (const v of voci) spostaOggetto(da, a, v, v.n);
+    const elenco = voci.map(v => v.nome + (v.n > 1 ? ` ×${v.n}` : "")).join(", ");
+    const riga = `${ico("zaino")} ${a.name.replace("✨", "")} prende ${elenco}.`;
+    if (dove) dove.push(riga);
+    return riga;
+  }
   const puoSpostare = () => game.party.length > 1 && game.party.some(haOggetti);
 
   /* Toglie `quanti` pezzi a `da` e li dà a `a`. Le tre famiglie di oggetti
@@ -10458,15 +10562,32 @@
     const cromNuovo = e.shiny && (meta.unlocked[radice] || 0) < 2;
     const rigaCrom = cromNuovo
       ? `<div class="cap-riga nuovo">✨ Prima livrea cromatica di ${S[radice].it}</div>` : "";
-    /* L'abilità si confronta con quelle SCEGLIIBILI (`abilitaSbloccate`), non
-       con la maschera grezza: e' quello che vedrai davvero nella schermata
-       starter, ed e' la domanda a cui si vuole rispondere. */
+    /* 🔴 SI CONFRONTAVANO DUE COSE DIVERSE (§90).
+       Segnalazione: «nel momento della cattura di un pokemon evoluto mostra
+       sia la sua abilità che l'abilità che avrebbe la sua preevo: e' quella
+       che va confrontata con quelle già in possesso».
+       Quello che si sblocca prendendo un Ivysaur non e' Ivysaur: e'
+       **Bulbasaur** — `registerCaught` chiama `registraAbilita(rootOf(...),
+       abilIndex)`, cioe' segna la RADICE, allo stesso INDICE. Ma la riga
+       mostrava l'abilita' dell'esemplare in campo e la confrontava con
+       `abilitaSbloccate(radice)`: due tabelle diverse. Quando le due specie
+       hanno abilita' diverse allo stesso posto (succede spesso: Oddish e
+       Gloom, Combee e Vespiquen) la riga diceva il falso in tutte e due le
+       direzioni — «nuova» per una che avevi gia', o «già disponibile» per
+       una che ti mancava. E si decide se spendere l'ULTIMA ball su questo.
+       Adesso: si mostrano tutte e due quando differiscono, e a essere
+       confrontata e' quella della radice, che e' quella che entra nel dex. */
     const ab = e.ability;
-    const abGiaMia = ab && abilitaSbloccate(radice).includes(ab.id);
+    const abStarter = abilitaDiIndice(radice, e.abilIndex) || ab;
+    const abGiaMia = abStarter && abilitaSbloccate(radice).includes(abStarter.id);
     const nascosta = e.abilIndex === 2;
-    const rigaAb = ab
-      ? `<div class="cap-riga ${abGiaMia ? "" : "nuovo"}">🧬 ${ab.it}${
-          nascosta ? ' <span class="cap-hidden">NASCOSTA</span>' : ""} — ${
+    const marchio = nascosta ? ' <span class="cap-hidden">NASCOSTA</span>' : "";
+    const diverse = ab && abStarter && ab.id !== abStarter.id;
+    const rigaSua = diverse
+      ? `<div class="cap-riga">🧬 ${ab.it}${marchio} — l'abilità di questo esemplare</div>` : "";
+    const rigaAb = abStarter
+      ? rigaSua + `<div class="cap-riga ${abGiaMia ? "" : "nuovo"}">🧬 ${abStarter.it}${
+          diverse ? "" : marchio} — ${diverse ? `per <b>${S[radice].it}</b>: ` : ""}${
           abGiaMia ? "già disponibile nello starter" : "<b>nuova per lo starter</b>"}</div>`
       : "";
     // Qui lo scanner è SEMPRE acceso: la lente spenta non nasconde nulla.
@@ -12983,6 +13104,15 @@
     game.phase = "MYSTERY";
     clearTimeout(game.timer);
     if (enc.setup) enc.setup(enc);
+    disegnaIncontro(enc);
+  }
+
+  /* 🔴 DISEGNO E PREPARAZIONE ERANO LA STESSA COSA (§91).
+     Servono separate: dalla schermata dell'incontro adesso si puo' andare a
+     guardare la squadra e tornare indietro, e ridisegnare NON deve rifare
+     `enc.setup` — che sorteggia il Pokemon dell'incontro, i prezzi, il
+     bottino. Tornando avresti trovato un altro incontro. */
+  function disegnaIncontro(enc) {
     const opts = enc.optionsFor ? enc.optionsFor(enc) : enc.options;
     const avail = opts.filter(o => !o.cond || o.cond());
     const btns = avail.map((o, i) =>
@@ -13003,12 +13133,27 @@
       : enc.npc
       ? `<span class="me-npc" id="meNpc"></span>`
       : `<div class="me-emoji">${enc.emoji}</div>`;
+    /* 🔴 SI DECIDEVA AL BUIO (§91).
+       Segnalazione: «negli incontri misteriosi con gli npc si deve poter
+       accedere ad informazioni come i soldi in tasca e i pokemon in squadra,
+       sono utili per prendere decisioni». Ed e' vero: meta' delle scelte
+       chiedono soldi, l'altra meta' chiede un Pokemon con certe
+       caratteristiche — e la schermata copre il campo, quindi non si vedeva
+       nemmeno la fascia con i soldi. Adesso il conto e' scritto qui, e il
+       tasto Squadra apre le schede e riporta all'incontro, esattamente come
+       fa la schermata dell'ultima ball. */
     showMetaScreen(`
       ${npc}
       <div class="meta-title" style="font-size:clamp(20px,6vw,30px)">${enc.title}</div>
       <div class="me-text">${enc.text}</div>
-      <div class="me-opts">${btns}</div>`);
+      <div class="me-borsa">₽ ${game.money} · squadra ${aliveParty().length}/${game.party.length} · ${ico("ball")}${totalBalls()}</div>
+      <div class="me-opts">${btns}</div>
+      <div class="meta-actions"><button class="meta-btn ghost" data-act="squadra">👥 Guarda la squadra</button></div>`);
     if (enc.npc) paintAtlasSprite(document.getElementById("meNpc"), `assets/trainer/${enc.npc}`, metaEl().clientHeight * 0.32, 3);
+    metaEl().querySelector('[data-act="squadra"]').onclick = () => {
+      ritornoSquadra = () => { game.phase = "MYSTERY"; disegnaIncontro(enc); };
+      renderParty("check");
+    };
     metaEl().querySelectorAll(".me-opt").forEach(b => b.onclick = () => {
       const result = avail[parseInt(b.dataset.i, 10)].run();
       // `null` = l'opzione ha avviato una lotta: la schermata l'ha gia' chiusa lei
@@ -13315,9 +13460,17 @@
           <select id="ftype" class="filter-sel">${opt("", f.type, "Tipo: tutti")}${Object.keys(CHART).map(t => opt(t, f.type, T[t].it)).join("")}</select>
           <select id="fstato" class="filter-sel">${Object.keys(STATO_IT).map(s => opt(s, f.stato, STATO_IT[s])).join("")}</select>
           <select id="fsort" class="filter-sel">${Object.keys(SORT_IT).map(s => opt(s, f.sort, "↕ " + SORT_IT[s])).join("")}</select>
-          <select id="fpassiva" class="filter-sel">${Object.keys(PASSIVA_IT).map(v => opt(v, f.passiva, PASSIVA_IT[v])).join("")}</select>
         </div>
+        <!-- 🔴 LA PASSIVA ERA UNA TENDINA FRA CINQUE (§93).
+             Richiesta: «il filtro della passiva preferirei fosse un toggle a
+             tre invece che una tendina». Ed e' la scelta giusta: gli altri
+             quattro menu restringono lungo un elenco lungo (nove generazioni,
+             diciotto tipi), la passiva ha TRE stati e basta. Una tendina per
+             tre voci costa due tocchi invece di uno, e nasconde le altre due.
+             Toccando quello acceso si spegne: nessun acceso = tutte. -->
         <div class="filter-chips">
+          ${["ok", "pronta", "no"].map(v => `<button class="chip filtro-chip${
+            f.passiva === v ? " on" : ""}" data-fp="${v}" title="passiva ${PASSIVA_IT[v]}">${PASSIVA_IT[v]}</button>`).join("")}
           <button class="chip filtro-chip${f.soloCrom ? " on" : ""}" data-fx="soloCrom"
             title="mostra solo le specie di cui hai un cromatico">✨ solo cromatici</button>
           <button class="chip filtro-chip${f.soloPkrs ? " on" : ""}" data-fx="soloPkrs"
@@ -13347,7 +13500,10 @@
     bind("ftype", "type");
     bind("fstato", "stato");
     bind("fsort", "sort");
-    bind("fpassiva", "passiva");
+    metaEl().querySelectorAll("[data-fp]").forEach(b => b.onclick = () => {
+      starterFilters.passiva = starterFilters.passiva === b.dataset.fp ? "" : b.dataset.fp;
+      renderStarterSelect();
+    });
     const q = metaEl().querySelector("#fq");
     if (q) {
       // si ridisegna quando si smette di scrivere, non a ogni tasto: con 1000
@@ -15196,6 +15352,142 @@
      segno: una Virata a vuoto non fa uscire nessuno. Sta in `resolveMove` e
      non qui, perche' `MOSSE_SPECIALI` gira comunque — anche se la mossa ha
      mancato — e da li' `landed` non si vede. */
+  /* 🔴 SEI MOSSE CHE TOCCANO GLI OGGETTI NON FACEVANO NIENTE (§94).
+     Segnalazione: «Bruciatutto non ha bruciato nessuna bacca. Controlla anche
+     mosse simili come beccata».
+     Nei dati estratti hanno tutte `attrs: []` — l'estrattore non sa tradurre
+     gli attributi che parlano di oggetti tenuti — quindi arrivavano al motore
+     come normalissimi attacchi da 60. Nell'originale (`data/moves/move.ts`):
+       · Bruciatutto  `RemoveHeldItemAttr(true)`   → brucia la BACCA, sempre
+       · Spennata / Coleomorso `StealEatBerryAttr`  → la bacca la MANGIA lui,
+                                                       e ne prende l'effetto
+       · Privazione   `RemoveHeldItemAttr(false)` + potenza ×1,5 se ha roba
+       · Furto / Supplica `StealHeldItemChanceAttr(0.3)` → la ruba, 30%
+     ⚠️ La riga `if (!berriesOnly && target.isPlayer()) return false` non e'
+     una svista dell'originale: Privazione **non** toglie niente ai Pokemon del
+     giocatore («Wild Pokemon cannot knock off Player Pokemon's held items»).
+     Bruciatutto invece vale in tutte e due le direzioni.
+     ⚠️ Bruciatutto e' `ALL_NEAR_ENEMIES`: in doppio brucia tutte e due le
+     bacche, e viene da se' — `resolveAction` gira una volta per bersaglio. */
+  /* 🔴 TRE MOSSE SI GIOCANO PRIMA DI PARTIRE (§95).
+     Segnalazione: «controllare l'effetto di cannonbecco». Non ne aveva
+     nessuno: nei dati estratti `attrs` e' vuoto, quindi arrivava al motore
+     come un attacco Volante da 120 con priorita' −3 — cioe' una mossa
+     potente che ti fa solo andare per ultimo, tutto svantaggio e nessun
+     vantaggio.
+     Nell'originale sono tre mosse con un ANNUNCIO (`MoveHeaderAttr`): una riga
+     che parte all'inizio del turno, prima che chiunque agisca, e che mette una
+     promessa sul Pokemon. Poi, quando tocca a lui (per ultimo, priorita' −3),
+     si vede se la promessa e' stata mantenuta.
+       · Cannonbecco    `BeakBlastHeaderAttr` → arroventa il becco: chi lo
+                        TOCCA nel frattempo si SCOTTA — ed e' tutto il senso
+                        della mossa, perche' e' lei ad andare per ultima.
+       · Centripugno    si concentra: se prende danno prima di colpire, fallisce.
+       · Gusciotrappola scatta solo se nel frattempo l'hanno colpito FISICO.
+     ⚠️ L'annuncio esce dopo l'ordinamento della coda ma prima che il
+     primo agisca: e' li' che sta `applyMoveHeaderAttrs` nell'originale, ed e'
+     l'unico punto in cui la promessa vale per tutti quelli che verranno. */
+  const MOSSE_CON_ANNUNCIO = {
+    BEAK_BLAST:  a => `${a.name} arroventa il becco!`,
+    FOCUS_PUNCH: a => `${a.name} si sta concentrando!`,
+    SHELL_TRAP:  a => `${a.name} prepara la trappola del guscio!`,
+  };
+
+  const BRUCIA_LA_BACCA = new Set(["INCINERATE"]);
+  const MANGIA_LA_BACCA = new Set(["PLUCK", "BUG_BITE"]);
+  const BUTTA_LOGGETTO  = new Set(["KNOCK_OFF"]);
+  const RUBA_LOGGETTO   = new Set(["THIEF", "COVET"]);
+
+  /* Toglie un pezzo di `voce` da `da` e, se `a` c'e', glielo da'.
+     ⚠️ NON chiama `salvaRun` come fa `spostaOggetto`: qui siamo a meta'
+     turno, e un salvataggio senza lo stato della lotta la cancellerebbe. */
+  function muoviOggetto(da, a, voce) {
+    if (voce.tipo === "berry") {
+      da.berries[voce.chiave]--;
+      if (da.berries[voce.chiave] <= 0) delete da.berries[voce.chiave];
+      if (da.volatile) da.volatile.bacciaFinita = voce.chiave;   // se lo ricorda Riciclo
+      if (a) { a.berries = a.berries || {}; a.berries[voce.chiave] = (a.berries[voce.chiave] || 0) + 1; }
+    } else if (voce.tipo === "typeboost") {
+      da.held.typeboost[voce.chiave]--;
+      if (da.held.typeboost[voce.chiave] <= 0) delete da.held.typeboost[voce.chiave];
+      if (!Object.keys(da.held.typeboost).length) delete da.held.typeboost;
+      if (a) { a.held = a.held || {}; a.held.typeboost = a.held.typeboost || {};
+               a.held.typeboost[voce.chiave] = (a.held.typeboost[voce.chiave] || 0) + 1; }
+    } else {
+      da.held[voce.chiave]--;
+      if (da.held[voce.chiave] <= 0) delete da.held[voce.chiave];
+      if (a) { a.held = a.held || {}; a.held[voce.chiave] = (a.held[voce.chiave] || 0) + 1; }
+    }
+    recomputeStats(da); if (a) recomputeStats(a);
+  }
+
+  /* Mangiare una bacca SUBITO, senza aspettare la sua condizione: e' quello
+     che fanno Spennata e Coleomorso (e Nettare, e Bacchevendetta). Le
+     condizioni di `checkBerries` — meta' PS, un quarto, PP a zero — qui non
+     valgono: la bacca viene mangiata comunque, e se non serve a niente, pace. */
+  function mangiaBaccaSubito(f, kind, messages) {
+    if (!f || f.fainted || !BERRY_DATA[kind]) return;
+    const stat = { LIECHI: "ATK", GANLON: "DEF", PETAYA: "SPATK", APICOT: "SPDEF", SALAC: "SPD" }[kind];
+    if (kind === "SITRUS" || kind === "ENIGMA") {
+      if (f.hp >= f.maxHp) return;
+      f.hp = Math.min(f.maxHp, f.hp + Math.max(1, Math.floor(f.maxHp / 4)));
+      stessoMomento(messages, `${f.name} ha recuperato energie!`);
+      if (messages.anim) messages.anim("COMMON_HEALTH_UP", sideOf(f));
+    } else if (kind === "LUM") {
+      if (!f.status && !(f.volatile && f.volatile.confusion > 0)) return;
+      f.status = null; f.sleepTurns = 0; if (f.volatile) f.volatile.confusion = 0;
+      stessoMomento(messages, `${f.name} si è ripreso!`);
+    } else if (kind === "LEPPA") {
+      const v = f.moves.find(m => m.pp < m.maxPp);
+      if (!v) return;
+      v.pp = Math.min(v.maxPp, v.pp + 10);
+      stessoMomento(messages, `${M[v.id].it} ha recuperato PP!`);
+    } else if (stat) {
+      applyStatStage(f, [stat], 1, messages, true);
+    } else if (kind === "LANSAT") {
+      f._lansat = true; stessoMomento(messages, `${f.name} è pronto al colpo critico!`);
+    } else if (kind === "STARF") {
+      const x = VITS.filter(v => v !== "hp")[Math.floor(Math.random() * 5)];
+      applyStatStage(f, [x.toUpperCase()], 2, messages, true);
+    }
+  }
+
+  /* Quello che una mossa fa alla ROBA del bersaglio. Si chiama solo se la
+     mossa ha colpito davvero. */
+  function effettiSuOggetti(actor, foe, move, messages) {
+    if (!foe || !actor || actor.fainted) return;
+    const bacca = () => {
+      const k = Object.keys(foe.berries || {}).find(x => foe.berries[x] > 0);
+      return k ? { tipo: "berry", chiave: k, n: foe.berries[k], nome: BERRY_DATA[k].it } : null;
+    };
+    if (BRUCIA_LA_BACCA.has(move.id)) {
+      const v = bacca(); if (!v) return;
+      muoviOggetto(foe, null, v);
+      stessoMomento(messages, `La ${v.nome} di ${foe.name} è andata bruciata!`);
+      return;
+    }
+    if (MANGIA_LA_BACCA.has(move.id)) {
+      const v = bacca(); if (!v) return;
+      muoviOggetto(foe, null, v);
+      stessoMomento(messages, `${actor.name} si mangia la ${v.nome} di ${foe.name}!`);
+      mangiaBaccaSubito(actor, v.chiave, messages);
+      return;
+    }
+    if (BUTTA_LOGGETTO.has(move.id)) {
+      if (!isEnemySide(foe)) return;      // ai tuoi non si tocca niente (vedi sopra)
+      const v = heldElenco(foe)[0]; if (!v) return;
+      muoviOggetto(foe, null, v);
+      stessoMomento(messages, `${actor.name} fa cadere ${v.nome} a ${foe.name}!`);
+      return;
+    }
+    if (RUBA_LOGGETTO.has(move.id)) {
+      if (Math.random() >= 0.3) return;
+      const v = heldElenco(foe)[0]; if (!v) return;
+      muoviOggetto(foe, actor, v);
+      stessoMomento(messages, `${actor.name} ruba ${v.nome} a ${foe.name}!`);
+    }
+  }
+
   const CAMBIA_CHI_COLPISCE = new Set(["U_TURN", "VOLT_SWITCH", "FLIP_TURN"]);
   const SPAZZA_IL_BERSAGLIO = new Set(["DRAGON_TAIL", "CIRCLE_THROW"]);
 

@@ -6341,3 +6341,115 @@ un allenatore, che è proprio uno dei casi che lui descrive. Il KO lo spezza in
 
 Verificato: due colpi all'ondata 11 → `{ROLLOUT, colpi:2}` ancora lì all'ondata 12
 con lo stesso Pokémon in campo; un cambio e ritorno → sparito.
+
+## 97. La distribuzione dei premi di fine ondata (rev 188)
+
+> «Controlla i premi di fine incontro, ho l'impressione che la loro distribuzione
+> sia diversa dall'originale. Certo, noi abbiamo introdotto nuovi oggetti ma
+> controlla lo stesso e adatta. In particolare dopo l'incontro delle decine non
+> dovrebbero capitare oggetti di cura visto che tutti i pkmn vengono curati
+> automaticamente»
+
+L'impressione era giusta, e i motivi erano **tre**, sommati. Il contenuto delle
+urne invece era già fedele: ho confrontato voce per voce i cinque tier con
+`init-modifier-pools.ts` e l'assegnazione combacia (Revitalizzante in GREAT,
+Avanzi e Conchinella in ROGUE, Multilente e Buco nero in MASTER…).
+
+### 1. La cura garantita si mangiava una scelta su tre
+
+In `showReward` una cura veniva **infilata d'ufficio** ogni volta che qualcuno era
+ferito — cioè quasi sempre, dopo una lotta. Delle tre carte ne restavano **due**
+davvero pescate dall'urna, e il premio buono usciva un terzo di volte in meno di
+quanto dicessero i pesi. Nell'originale non esiste nessuna cura garantita.
+Rimossa: adesso le tre carte sono tre carte.
+
+### 2. La scala dei tier era due volte più generosa
+
+Nell'originale (`modifier-type.ts:2807`) si tira su **1024** e i confini sono
+scritti a mano — `>255 COMMON · >60 GREAT · >12 ULTRA · >0 ROGUE · 0 MASTER`,
+cioè **768 / 195 / 48 / 12 / 1**. I nostri erano 50 / 34 / 13 / 3 / 0,5.
+
+Misurato con `__items.premi(0, 40000)`, a fortuna 0:
+
+| tier | prima | adesso | originale (atteso) |
+|---|---|---|---|
+| COMMON | 47,79% | **72,55%** | 72,65% |
+| GREAT | 34,41% | **20,93%** | 20,79% |
+| ULTRA | 13,74% | **5,14%** | 5,14% |
+| ROGUE | 3,48% | **1,26%** | 1,28% |
+| MASTER | 0,57% | **0,12%** | 0,135% |
+
+(l'atteso include già la cascata di promozione per fortuna, che resta e si applica
+sopra: è lei a rendere ricca una run fortunata, non l'urna di partenza).
+
+### 3. I curativi pesavano sempre uguale
+
+Da noi il peso era **fisso** e c'era solo un interruttore `avail`: bastava un
+Pokémon graffiato di un PS perché la Pozione entrasse nell'urna con lo stesso peso
+che avrebbe con la squadra in fin di vita. Nell'originale il peso è una
+**funzione della squadra**, e conta quanti ne hanno davvero bisogno, fino a tre:
+
+| oggetto | peso | «ne ha bisogno» vuol dire |
+|---|---|---|
+| Pozione | feriti × 3 | ≥ 10 PS in meno **e** non oltre l'87,5% |
+| Superpozione | feriti | ≥ 25 PS in meno, non oltre il 75% |
+| Iperpozione | feriti × 3 | ≥ 100 PS in meno, non oltre il 62,5% |
+| Pozione max | feriti | ≥ 100 PS in meno, non oltre il 50% |
+| Ricarica totale | (feriti + malati) / 2 | le due condizioni sopra, mediate |
+| Cura totale | malati × 6 | ha un problema di stato |
+| Revitalizzante | esausti × 9 | |
+| Revitalizzante max | esausti × 3 | |
+| Cenere magica | 1 o 0 | metà squadra a terra |
+| Etere, Elisir | a corto di PP × 3 | |
+| Etere max, Elisir max | a corto di PP | |
+
+⚠️ La soglia dei PP è precisa: una mossa conta se ne ha usati **più di metà** *e*
+gliene restano **cinque o meno**. Chi tiene una Baccamela non conta: se la mangia
+da solo.
+
+Misurato: squadra sana → **0%** di curativi; un graffio da 1 PS → **ancora 0%**
+(prima ne bastava uno); uno a metà vita → 11,7%; due gravi + un esausto + un
+malato → 42,2%. È esattamente la curva di là.
+
+### E le decine
+
+Vero alla lettera: `afterReward` manda a `showBiomeChoice`, che comincia con
+`curaSquadraDecina` — PS, stato, esausti, PP **e** cali di statistica, tutto
+rimesso a posto gratis. Una Pozione scelta un istante prima è un premio buttato.
+
+🔴 **Nell'originale il problema non esiste perché sulle decine la schermata dei
+premi non compare affatto.** In `victory-phase.ts` il `SelectModifierPhase` sta
+dentro `if (currentWaveIndex % 10)`, e al suo posto arriva il `PartyHealPhase`
+(`select-biome-phase.ts`: la scelta dei premi ricompare **solo** se una sfida ha
+disattivato la cura). La cura *è* il premio della decade.
+
+Da noi la schermata sulle decine resta — è una divergenza voluta, quelle ondate
+sono le più dure e il premio ci vuole — ma i curativi ne escono: `curaInArrivo()`
+azzera il peso di tutti e quattordici quando `game.wave % BOSS_EVERY === 0`.
+Verificato: ondata 20 → **0,00%** di curativi su 20 000 tiri.
+
+⚠️ L'**emporio** continua a venderli anche sulle decine, ed è voluto: lì spendi
+soldi tuoi per fare scorta per le ondate 11-19, non stai buttando una delle tre
+scelte.
+
+⚠️ Pezzo nuovo: `pesoDi(x)` accetta un peso che è un numero **o una funzione**.
+Va usato in tutti i punti che pescano dal `REWARD_POOL` — sono quattro
+(`rollReward`, `rollRewardTier`, `encReward`, e le somme dei pesi dentro le prime
+due). Se un giorno se ne aggiunge un quinto e legge `x.weight` diretto, tornerà a
+vedere una funzione al posto di un numero e i curativi spariranno del tutto.
+
+## 98. Quello che tiene addosso viene con lui (rev 188)
+
+> «Nella schermata di cattura si deve vedere anche quali oggetti possiede il pkmn»
+
+Gli avversari ricevono strumenti da `giveEnemyHeldItems`, e catturandolo — o
+rubandolo con la Clepto Ball — quegli strumenti diventano tuoi: a volte valgono
+più del Pokémon. Prima non lo diceva nessuno, e l'unico modo di scoprirlo era
+prenderlo e andare a guardare nella scheda.
+
+Una riga in più in `infoCattura` (quindi in tutte e due le schermate che la usano,
+cattura e furto), costruita con `heldSummary` che c'era già:
+
+```
+🎒 Tiene: Avanzi×1 Roccia di re×2 Baccacedro×1
+```
