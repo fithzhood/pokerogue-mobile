@@ -6019,3 +6019,136 @@ un'altra. Nei giochi chi è a terra sale di livello e resta a terra: `if
 Verificato: Avanzi su uno esausto → li tiene, resta KO a 0 PS. Caramella rara →
 27 → 28, resta KO a 0 PS. Pozione sullo stesso → **bloccata**, gli altri tre
 selezionabili.
+
+## 87. I quattro posti del doppio, una regola sola (rev 186)
+
+> «Nella lotta in doppio non mi lascia rimettere in gioco un pokemon dopo che uno
+> è andato ko»
+> «In linea generale vedo molti problemi nelle lotte in doppio dopo il ko di un
+> pkmn, a volte diventano lotte 1 contro 2 a volte 2 contro 1 a volte 1 contro 1.
+> Non vedo coerenza, credo ci siano problemi tra primo slot e secondo slot che
+> vengono gestiti con regole diverse»
+
+Aveva ragione su tutta la linea, ed erano **tre difetti che si sommavano** dentro
+lo stesso blocco di `afterTurn`.
+
+**1. Il posto primario si riempiva promuovendo il secondo.** Se cadeva
+`game.player`, il codice faceva `player = player2; player2 = null` — anche con
+mezza squadra viva in panchina. Due Pokémon in campo diventavano uno, e la lotta
+scivolava in **1 contro 2** senza che tu avessi perso nulla. Stessa cosa dal lato
+avversario: il secondo saliva al posto del primo e la coda dell'allenatore
+restava lì.
+
+**2. Il tuo secondo posto lo riempiva il gioco, non tu.** Per il posto primario
+c'era `promptForceSwitch`, per il secondo un `game.party.find(...)` muto. E
+quando cadevano tutti e due nello stesso turno, il rimpiazzo automatico del
+secondo veniva **subito cancellato** dalla promozione del punto 1: la scelta non
+te la chiedeva nessuno, e il Pokémon che il gioco aveva appena schierato spariva.
+È letteralmente la segnalazione «non mi lascia rimettere in gioco un pokemon».
+
+**3. L'avversario si fermava a guardare te.** Il rifornimento del secondo posto
+nemico era `if (!enemy2 && enemyQueue.length && ... && game.player2 &&
+!game.player2.fainted)`: bastava che tu restassi in uno perché l'allenatore non
+mandasse più nessuno. **2 contro 1** regalato.
+
+### Come funziona adesso
+
+I due lati seguono la stessa regola e lo stesso ordine — **prima il primario, poi
+il secondo**:
+
+- il caduto lascia il posto, non lo cede a nessuno;
+- il posto **primario** si riempie sempre: dalla coda per l'avversario, per
+  scelta tua per te;
+- il posto **secondo** si riempie con lo stesso criterio, e la promozione del
+  secondo al primo resta solo come **ultima spiaggia**, quando non c'è
+  letteralmente nessun altro (`!riservaLibera()`);
+- il doppio finisce solo quando **nessuno dei due lati** può più essere in due.
+
+⚠️ `game.enemy` e `game.player` non possono restare vuoti: mezzo motore li dà per
+scontati non nulli. È il motivo per cui il posto primario si riempie sempre per
+primo, e per cui la promozione non si può togliere del tutto.
+
+⚠️ **Se l'ondata è vinta non si rimpiazza niente.** `const vinta =
+game.enemy.fainted` dopo il rifornimento: se l'avversario è a terra e la coda è
+vuota, si va alla vittoria senza chiederti chi mandare in campo — o ti farebbe
+schierare qualcuno per una lotta che non c'è più.
+
+Pezzi nuovi: `riservaLibera()` (chi in panchina può scendere adesso),
+`rimpiazziGiocatore()` (chiede un posto alla volta e dice se ha preso in mano la
+scena), `promptForceSwitch(posto)` e `forceSwitchTo` che sa scrivere in tutti e
+due i posti. `forceSwitchTo` alla fine richiama `rimpiazziGiocatore`: se dopo il
+primo ne manca ancora uno, lo chiede subito dopo.
+
+Rete di sicurezza in più: riprendendo una partita chiusa **mentre sceglievi**,
+`riprendiLotta` ora richiama `rimpiazziGiocatore` invece di tornare ai comandi
+con un Pokémon esausto in campo.
+
+**Verificato in gioco**, lotta in doppio contro il Bullo con quattro Pokémon:
+- cadono entrambi gli avversari → entrano Starly **e** Shedinja dalla coda (prima
+  ne entrava uno solo, o nessuno);
+- cade il tuo secondo → **«Chi mandi in campo?»** con `postoDaRiempire =
+  "player2"`, il primo resta in campo, Farfetch'd entra nel posto 2;
+- cade il tuo primo con due riserve vive → `postoDaRiempire = "player"`,
+  Farfetch'd **resta** nel posto 2, si torna 2 contro 2;
+- cade il tuo primo ma l'ondata è vinta → nessuna domanda, si va al furto.
+
+## 88. Mega e Gigamax: una quarta evoluzione, non una mossa (rev 186)
+
+> «La mega evoluzione non sembra funzionare nella lotta in doppio»
+> «Vedo che la mega funziona in doppio solo se è il primo pkmn a mega evolversi.
+> Farlo mi mangia un turno, non deve succedere. Cambierei la mega e la giga
+> facendole diventare una quarta evoluzione permanente ma
+> disattivabile/riattivabile dal menù del pokemon a piacere. Guarda come la
+> gestisce pokerogue originale»
+
+**Nell'originale ha ragione lui.** Megaevolvere non è un'azione di lotta: la
+megapietra è un **oggetto tenuto**, e finché è addosso (con la Megapolsiera
+sbloccata) il Pokémon *sta* nella forma mega — dentro e fuori dalla battaglia.
+È `SpeciesFormChangeItemTrigger` in `data/pokemon-forms/form-change-triggers.ts`,
+e quel trigger ha un campo `active` che `PokemonFormChangeItemModifier.apply`
+spegne e riaccende: la forma si può disattivare. Nessun turno viene mai speso.
+
+Il nostro tasto ✨ MEGAEVOLVI in fascia comandi faceva **tre danni in uno**:
+
+1. costava il turno (`const enemyMove = enemyChooseMove(); resolveAction(...)`);
+2. scriveva sempre in `game.player`, anche quando stava scegliendo il secondo
+   posto — ecco perché «funziona solo se è il primo pkmn a mega evolversi»;
+3. risolveva un turno da **singolo**, ignorando `player2` ed `enemy2`: in doppio
+   metà del campo restava ferma.
+
+Il tasto sparisce. La forma si accende dalla **scheda del Pokémon**, vale da
+subito e resta finché non la spegni.
+
+- `formeSbloccate(p)` elenca le forme che questa run può usare (Megapolsiera →
+  mega e primal; Polsino Dynamax → gigantamax).
+- `formeRiga(p)` disegna i tasti: uno per forma se ce n'è più d'una — Charizard e
+  Mewtwo hanno Mega X **e** Mega Y, e adesso **la scegli tu** invece di
+  sorteggiarla. Se è già trasformato, il tasto diventa «↩ Torna a *nome base*».
+- `transform(p, kind, messages, formKey)` accetta la chiave: il sorteggio resta
+  solo per chi non chiede (l'asso del rivale, che scende già trasformato).
+- `nomeForma()` costruisce il nome giusto: *Mega Charizard X*, *Groudon
+  Archeorisvegliato*, *Gigamax Lapras*.
+
+**Cosa è sparito**: `revertForm` in `richiamaNellaBall` (rientrare nella ball
+toglieva la forma) e il giro `for (const p of game.party) revertForm(p)` in
+`fineBattaglia` (la forma durava una lotta sola).
+
+⚠️ **L'abilità dentro `preForm` si segna per ID, non per riferimento.** Un
+oggetto `ABIL` copiato lì dentro finirebbe serializzato nel salvataggio e
+tornerebbe su come sosia, fuori dalla tabella. `revertForm` accetta anche la
+vecchia forma per le run salvate prima.
+
+⚠️ **`evolve` comincia con `revertForm(p)`.** Riscrive statistiche, tipi, abilità
+e nome: su un Pokémon megaevoluto lascerebbe un `preForm` che parla della specie
+*vecchia*, e spegnendo la forma dopo si tornerebbe indietro all'abilità e alle
+statistiche di prima dell'evoluzione.
+
+⚠️ **Si può accendere anche a lotta in corso, ed è voluto** — è proprio quello
+che chiedeva la segnalazione («a piacere», e senza mangiare turni). Aprire la
+scheda non è mai costato niente; a costare è il cambio.
+
+**Verificato in gioco**: Aerodactyl → «✨ Mega» → Mega Aerodactyl, Att 74 → 93,
+Vel 105 → 119, Testadura → Unghiedure, PS 106/106 (la percentuale si mantiene, non
+è una cura). «↩ Torna a Aerodactyl» rimette tutto com'era, abilità compresa.
+Superata l'ondata 9 e scesa in campo all'ondata 11: **è ancora Mega Aerodactyl**.
+In fascia comandi il tasto non c'è più.
