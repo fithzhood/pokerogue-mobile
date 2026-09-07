@@ -6152,3 +6152,192 @@ Vel 105 → 119, Testadura → Unghiedure, PS 106/106 (la percentuale si mantien
 è una cura). «↩ Torna a Aerodactyl» rimette tutto com'era, abilità compresa.
 Superata l'ondata 9 e scesa in campo all'ondata 11: **è ancora Mega Aerodactyl**.
 In fascia comandi il tasto non c'è più.
+
+## 89. La schermata «quale mossa dimentica» (rev 187)
+
+> «La descrizione dell'abilità nel menù di apprendimento mosse compare nel punto
+> sbagliato e servirebbe lo Scroll in questa pagina (senza Scroll bar)»
+> «Nella schermata di apprendimento mosse è importante conoscere anche i tipi del
+> pkmn»
+
+Tre cose, tutte nella stessa schermata.
+
+**La spiegazione era lontana da ciò che spiega.** I chip dell'abilità e della
+passiva stanno in cima, dentro `.learn-head`; il riquadro che si apre toccando la
+loro ⓘ era scritto **sotto la mossa nuova**, a mezzo schermo di distanza.
+Toccavi in alto e si muoveva qualcosa in basso, spesso fuori dalla parte
+visibile. Ora esce attaccato al chip che l'ha aperto.
+
+**La pagina non scorreva.** `.learn-lista` aveva il suo `overflow-y: auto`: lo
+scorrimento se lo mangiava la lista delle quattro mosse vecchie, e tutto il resto
+— sprite, statistiche, mossa nuova, e soprattutto i riquadri di spiegazione che
+si aprono — restava schiacciato dal flex di `#meta` senza modo di raggiungerlo.
+Ora la lista è `flex: 0 0 auto`, `.snippet` non si comprime, e a scorrere è la
+pagina intera. La barra non si vede (`scrollbar-width: none` su `#meta`): su un
+telefono si scorre col dito, e qui la barra finiva sopra i tasti ⓘ di destra.
+
+**I tipi ci sono.** La domanda vera davanti a una mossa nuova è se prende il
+bonus di tipo: senza i tipi lo dovevi sapere a memoria, con la scheda del Pokémon
+irraggiungibile da lì. Le targhette stanno sotto il nome, nella stessa forma che
+hanno ovunque nel gioco.
+
+## 90. Alla cattura conta l'abilità della PREEVO (rev 187)
+
+> «Nel momento della cattura di un pokemon evoluto mostra sia la sua abilità che
+> l'abilità che avrebbe la sua preevo, è quella che va confrontata con quelle già
+> in possesso»
+
+**Si confrontavano due tabelle diverse.** Quello che si sblocca prendendo un
+Kakuna non è Kakuna: è **Weedle**. `registerCaught` chiama
+`registraAbilita(rootOf(speciesId), abilIndex)` — segna la **radice**, allo
+stesso **indice**. Ma la riga mostrava l'abilità dell'esemplare in campo e la
+confrontava con `abilitaSbloccate(radice)`.
+
+Quando le due specie hanno abilità diverse nello stesso posto — e succede spesso:
+Kakuna *Muta* vs Weedle *Polvoscudo*, Staravia *Prepotenza* vs Starly
+*Sguardofermo*, Gengar vs Gastly, Persian vs Meowth — la riga diceva il falso in
+tutte e due le direzioni: «nuova per lo starter» per una che avevi già, o «già
+disponibile» per una che ti mancava. E quella riga serve a decidere se spendere
+l'**ultima ball**.
+
+Ora `abilitaDiIndice(radice, e.abilIndex)` ricava quella vera. Se differiscono si
+vedono entrambe, e a essere confrontata è quella della radice:
+
+```
+🧬 Muta — l'abilità di questo esemplare
+🧬 Polvoscudo — per Weedle: già disponibile nello starter
+```
+
+Se coincidono resta una riga sola, come prima. Vale anche per la schermata del
+**furto**, che condivide `infoCattura`.
+
+## 91. Negli incontri si vedono soldi e squadra (rev 187)
+
+> «Negli incontri misteriosi con gli npc si deve poter accedere ad informazioni
+> come i soldi in tasca e i pokemon in squadra, sono utili per prendere decisioni»
+
+Metà delle opzioni chiede soldi, l'altra metà chiede un Pokémon con certe
+caratteristiche — e la schermata copre il campo, quindi non si vedeva nemmeno la
+fascia coi soldi. Ora c'è una riga di conto (₽, squadra viva/totale, ball) e un
+tasto **👥 Guarda la squadra** che apre le schede e riporta all'incontro, la
+stessa strada già usata dalla schermata dell'ultima ball.
+
+⚠️ `showMysteryEncounter` è stata **spezzata in due**: `showMysteryEncounter`
+prepara (`enc.setup`) e `disegnaIncontro` disegna. Serviva: ridisegnare tornando
+dalla squadra non deve rifare `setup`, che sorteggia il Pokémon dell'incontro, i
+prezzi e il bottino — tornando avresti trovato un altro incontro.
+
+## 92. Gli oggetti seguono chi va al box (rev 187)
+
+> «Quando si manda al box un pkmn i suoi oggetti devono essere automaticamente
+> spostati al pokemon attivo, anche se il pokemon mandato al pc non faceva parte
+> della squadra perché appena catturato»
+
+Il PC non è un posto da cui si torna facilmente, e gli Avanzi vinti dieci ondate
+fa sparivano insieme a chi li teneva, senza una riga che lo dicesse.
+`passaGliOggetti(da, a)` travasa tutto — strumenti, potenziatori di tipo, bacche
+— riusando `spostaOggetto`, che sa già ricalcolare le statistiche di entrambi.
+Vale per tutte e due le strade: chi cede il posto **e** il nuovo arrivato che
+scegli di non tenere.
+
+⚠️ Il travaso va fatto **dopo** lo scambio, non prima: se a cedere il posto era
+proprio quello in campo, l'attivo adesso è il nuovo arrivato, ed è lui che deve
+ricevere la roba.
+
+Verificato: «Peldisabbia va al PC. Kakuna prende il suo posto! Hitmonchan prende
+Avanzi ×2, Conchinella, Baccacedro ×3.» e «Kakuna è stato trasferito al PC.
+Hitmonchan prende Avanzi.»
+
+## 93. Il filtro della passiva è un interruttore a tre (rev 187)
+
+> «Il filtro della passiva preferirei fosse un toggle a tre invece che una tendina»
+
+Scelta giusta: gli altri quattro menu restringono lungo un elenco lungo (nove
+generazioni, diciotto tipi), la passiva ha **tre** stati e basta. Una tendina per
+tre voci costa due tocchi invece di uno e nasconde le altre due. Ora sono tre
+chip nella fila degli interruttori — ✅ sbloccata · 🍬 sbloccabile · 🔒 bloccata —
+e toccando quello acceso si spegne: nessuno acceso = tutte.
+
+## 94. Sei mosse che toccano gli oggetti non facevano niente (rev 187)
+
+> «Bruciatutto non ha bruciato nessuna bacca. Controlla anche mosse simili come
+> beccata»
+
+Nei dati estratti hanno tutte `attrs: []` — l'estrattore non sa tradurre gli
+attributi che parlano di oggetti tenuti — quindi arrivavano al motore come
+normalissimi attacchi. Dall'originale (`data/moves/move.ts`):
+
+| mossa | attributo là | cosa fa |
+|---|---|---|
+| Bruciatutto | `RemoveHeldItemAttr(true)` | brucia la **bacca**, sempre |
+| Spennata, Coleomorso | `StealEatBerryAttr` | la bacca **la mangia lui**, e ne prende l'effetto |
+| Privazione | `RemoveHeldItemAttr(false)` + `MovePowerMultiplierAttr` | fa cadere un oggetto, e picchia ×1,5 se ce n'era uno (65 → 97) |
+| Furto, Supplica | `StealHeldItemChanceAttr(0.3)` | lo **ruba**, 30% |
+
+`effettiSuOggetti(actor, foe, move, messages)` si aggancia in `resolveMove`
+**solo se `landed`** — l'aggancio generico `MOSSE_SPECIALI` non guarda se la
+mossa ha colpito, e qui serve. `mangiaBaccaSubito` applica l'effetto della bacca
+**ignorando la sua condizione**: Spennata la mangia comunque, e se non serve a
+niente, pace.
+
+⚠️ `if (!berriesOnly && target.isPlayer()) return false` non è una svista
+dell'originale: Privazione **non** toglie niente ai Pokémon del giocatore
+(Bulbapedia: «Wild Pokemon cannot knock off Player Pokemon's held items»).
+Bruciatutto invece vale in tutte e due le direzioni.
+
+⚠️ `muoviOggetto` **non** chiama `salvaRun` come fa `spostaOggetto`: qui siamo a
+metà turno, e un salvataggio senza lo stato della lotta la cancellerebbe.
+
+Verificato in doppio: Bruciatutto è `ALL_NEAR_ENEMIES` e brucia **tutte e due** le
+bacche («La Baccacedro di Kakuna è andata bruciata!» + «La Baccalici di Dwebble è
+andata bruciata!»); Spennata 35 → 59 PS mangiando la Baccacedro del nemico;
+Privazione «fa cadere Avanzi a Dwebble»; Furto 3 volte su 6.
+
+## 95. Tre mosse si giocano prima di partire (rev 187)
+
+> «Controllare l'effetto di cannonbecco»
+
+Non ne aveva nessuno: `attrs` vuoto, quindi arrivava come un attacco Volante da
+120 con priorità −3 — cioè una mossa potente che ti fa solo andare per ultimo,
+tutto svantaggio e nessun vantaggio.
+
+Nell'originale sono tre mosse con un **annuncio** (`MoveHeaderAttr`): una riga che
+parte all'inizio del turno, prima che chiunque agisca, e che mette una promessa
+sul Pokémon. Poi, quando tocca a lui (per ultimo, priorità −3), si vede se la
+promessa ha tenuto.
+
+- **Cannonbecco** arroventa il becco: chi lo **tocca** nel frattempo si **scotta**
+  — ed è tutto il senso della mossa, perché è lei ad andare per ultima.
+- **Centripugno** si concentra: se prende danno prima di colpire, fallisce.
+- **Gusciotrappola** scatta solo se nel frattempo l'hanno colpito **fisico**.
+
+⚠️ L'annuncio esce **dopo** l'ordinamento della coda ma **prima** che il primo
+agisca: è lì che sta `applyMoveHeaderAttrs` nell'originale, ed è l'unico punto in
+cui la promessa vale per tutti quelli che verranno.
+
+Verificato: «Mega Aerodactyl arroventa il becco!» → «Kakuna usa Azione!» →
+«Cannonbecco è entrata in azione! / Kakuna è scottato!» → e solo dopo parte il
+colpo.
+
+## 96. Il rotolamento non si spezza fra un'ondata e l'altra (rev 187)
+
+> «La streak di rotolamento deve continuare anche se un incontro finisce e ne
+> inizia un altro. Viene resettata però se tra i due incontri c'è un ritorno nella
+> pokeball»
+
+È la regola dell'originale: il contatore vive in `summonData`, e
+`resetSummonData()` lo chiamano solo il **cambio** e il **KO** — non il passaggio
+da un'ondata all'altra, dove il Pokémon resta in campo.
+
+Da noi `nextWave` chiama `entraInCampo` sull'attivo anche quando non si è mosso
+di lì: i volatili si azzeravano e Rotolamento ripartiva da 30 ogni volta, cioè non
+arrivava **mai** ai colpi che lo rendono una mossa (30 · 60 · 120 · 240 · 480).
+
+Ora `entraInCampo` porta avanti `volatile.rotola` a meno che il Pokémon non sia
+davvero **rientrato nella ball**: `richiamaNellaBall` alza `f._rientrato`, ed è
+l'unico posto che lo fa — quindi vale anche per il richiamo automatico davanti a
+un allenatore, che è proprio uno dei casi che lui descrive. Il KO lo spezza in
+`spegniStato`, insieme a furia e baraonda (che prima ci restavano attaccate).
+
+Verificato: due colpi all'ondata 11 → `{ROLLOUT, colpi:2}` ancora lì all'ondata 12
+con lo stesso Pokémon in campo; un cambio e ritorno → sparito.

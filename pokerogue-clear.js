@@ -1571,6 +1571,10 @@
   }
   function setActive(i) { game.active = i; game.player = game.party[i]; ordinaSquadra(); }
   function aliveParty() { return game.party.filter(p => !p.fainted); }
+  /* Chi in panchina puo' scendere in campo adesso: non esausto e non gia'
+     schierato in uno dei due posti. */
+  const riservaLibera = () =>
+    game.party.find(p => !p.fainted && p !== game.player && p !== game.player2) || null;
   function firstAliveIndex() { return game.party.findIndex(p => !p.fainted); }
   // Cura completa dell'intera squadra (dopo un boss / cambio zona).
   function healParty() {
@@ -2996,7 +3000,8 @@
     if (ha(f, "NATURAL_CURE") && !f.fainted) { f.status = null; f.sleepTurns = 0; }
     f.toxicN = 0;              // il veleno grave riparte da capo, come nei giochi
     annullaTrasformazione(f); // chi era trasformato torna se stesso
-    revertForm(f);            // mega/gigamax durano solo una battaglia
+    /* 🔴 QUI SI DISFAVA LA MEGA (§88). Rientrare nella ball toglieva la
+       forma: adesso e' permanente, la si accende e spegne dalla scheda. */
     f.stages = { atk: 0, def: 0, spatk: 0, spdef: 0, spd: 0, acc: 0, eva: 0 };
   }
 
@@ -3017,7 +3022,6 @@
     game.fangata = 0; game.doccia = 0; game.gravita = 0;
     game.distorto = 0; game.mirabil = 0; game.magica = 0; game.plasma = 0;
     for (const x of game.party.concat(onField())) { riaccendiOggetti(x); annullaTrasformazione(x); }
-    for (const p of game.party) revertForm(p);
   }
 
   /* ---------------- Avvio run + scelta starter ---------------- */
@@ -3761,14 +3765,73 @@
     if (game.hasDynamaxBand && formsFor(p, "gmax").length) return "gmax";
     return null;
   }
+  /* 🔴 LA MEGA ERA UNA MOSSA, ED E' UNA FORMA (§88).
+     Segnalazione: «la mega funziona in doppio solo se e' il primo pkmn a mega
+     evolversi. Farlo mi mangia un turno, non deve succedere. Cambierei la mega
+     e la giga facendole diventare una quarta evoluzione permanente ma
+     disattivabile/riattivabile dal menu del pokemon a piacere. Guarda come la
+     gestisce pokerogue originale».
+     Nell'originale ha ragione lui: megaevolvere non e' un'azione di lotta. La
+     megapietra e' un OGGETTO TENUTO e, finche' e' addosso (con la
+     Megapolsiera sbloccata), il Pokemon STA nella forma mega — dentro e fuori
+     dalla battaglia: `SpeciesFormChangeItemTrigger` in
+     `data/pokemon-forms/form-change-triggers.ts`. Quel trigger ha un campo
+     `active`, e `PokemonFormChangeItemModifier.apply` lo spegne e riaccende:
+     la forma si puo' disattivare. Nessun turno viene mai speso.
+     Da noi il tasto in lotta faceva tre danni in uno: costava il turno,
+     scriveva sempre in `game.player` (quindi in doppio il SECONDO posto non
+     poteva megaevolvere mai — la segnalazione) e risolveva un turno da
+     SINGOLO, ignorando gli altri due in campo. Sparisce. La forma si accende
+     dalla scheda del Pokemon, vale da subito e resta finche' non la spegni. */
+  const FORMA_ETICHETTA = { "mega": "Mega", "mega-x": "Mega X", "mega-y": "Mega Y",
+                            "primal": "Archeorisveglio", "gigantamax": "Gigamax" };
+  function formeSbloccate(p) {
+    const out = [];
+    if (!p) return out;
+    if (game.hasMegaRing) for (const f of formsFor(p, "mega")) out.push({ kind: "mega", form: f });
+    if (game.hasDynamaxBand) for (const f of formsFor(p, "gmax")) out.push({ kind: "gmax", form: f });
+    return out;
+  }
+  /* Come si chiama il Pokemon una volta presa quella forma. */
+  function nomeForma(base, formKey) {
+    const pulito = base.replace(/^(Mega |Gigamax |✨|👑 )+/, "");
+    return formKey === "mega-x" ? `Mega ${pulito} X`
+         : formKey === "mega-y" ? `Mega ${pulito} Y`
+         : formKey === "primal" ? `${pulito} Archeorisvegliato`
+         : formKey === "gigantamax" ? `Gigamax ${pulito}`
+         : `Mega ${pulito}`;
+  }
+  /* La riga della «quarta evoluzione» dentro la scheda del Pokemon.
+     ⚠️ Si puo' toccare anche a lotta in corso, ed e' voluto: e' proprio
+     quello che chiedeva la segnalazione («a piacere», e senza mangiare turni).
+     Aprire la scheda non e' mai costato niente; a costare e' il cambio. */
+  function formeRiga(p) {
+    if (p.transformed) {
+      const base = p.preForm ? p.preForm.name : "forma base";
+      return `<div class="meta-actions"><button class="meta-btn gacha" data-forma="off">↩ Torna a ${base}</button></div>`;
+    }
+    const opz = formeSbloccate(p);
+    if (!opz.length) return "";
+    return `<div class="meta-actions${opz.length > 1 ? " two-col" : ""}">${opz.map(o =>
+      `<button class="meta-btn gacha" data-forma="${o.form.formKey}" data-kind="${o.kind}">${
+        o.kind === "mega" ? "✨" : ico("dynamax")} ${FORMA_ETICHETTA[o.form.formKey] || "Mega"}</button>`).join("")}</div>`;
+  }
 
   // Applica la forma: nuove stat (mantiene la % di HP), tipi, abilità, sprite.
-  function transform(p, kind, messages) {
+  function transform(p, kind, messages, formKey) {
     const opts = formsFor(p, kind);
     if (!opts.length) return false;
-    const form = opts[Math.floor(Math.random() * opts.length)];
+    /* Charizard ha Mega X e Mega Y, e cosi' Mewtwo: quale delle due la sceglie
+       il giocatore, non il caso. Il sorteggio resta solo per chi non chiede
+       (l'asso del rivale, che scende gia' trasformato). */
+    const form = (formKey && opts.find(f => f.formKey === formKey))
+              || opts[Math.floor(Math.random() * opts.length)];
     const ratio = Math.max(0.05, p.hp / p.maxHp);
-    p.preForm = { baseStats: p.baseStats, types: p.types, ability: p.ability, name: p.name };
+    /* L'abilita' si segna per ID, non per riferimento: dentro `preForm` un
+       oggetto ABIL finirebbe copiato nel salvataggio e tornerebbe su come
+       sosia, fuori dalla tabella. */
+    p.preForm = { baseStats: p.baseStats, types: p.types,
+                  abilityId: p.ability ? p.ability.id : null, name: p.name };
     p.baseStats = Object.assign({}, form.baseStats);
     p.types = form.types.slice();
     if (form.ability && ABIL[form.ability]) p.ability = ABIL[form.ability];
@@ -3776,30 +3839,35 @@
     p.transformed = true;
     recomputeStats(p);
     p.hp = Math.max(1, Math.floor(p.maxHp * ratio));
-    const label = kind === "mega" ? "Mega" : "Gigamax";
-    p.name = `${label} ${p.preForm.name.replace(/^(Mega |Gigamax |✨|👑 )+/, "")}`;
+    p.name = nomeForma(p.preForm.name, form.formKey);
     if (p.shiny) p.name = "✨" + p.name;
     // sprite della forma: ci pensa loadFighterSprite, che legge `formKey`
     // e sa già ricadere sulla specie se la forma non ha un file suo
     p.spr = null;
-    const side = p === game.player ? "back" : "front";
+    const side = (p === game.player || p === game.player2) ? "back" : "front";
     loadFighterSprite(p, side).then(s => { p.spr = s; redrawScene(); });
     messages.push(kind === "mega"
       ? `✨ ${p.preForm.name} sta megaevolvendo… è diventato ${p.name}!`
       : `${ico("dynamax")} ${p.preForm.name} si gigamaxizza… è diventato ${p.name}!`);
     return true;
   }
-  // Ripristina la forma base a fine battaglia (come nei giochi veri).
+  // Torna alla forma base: adesso lo chiede il giocatore, non il fine lotta.
   function revertForm(p) {
     if (!p || !p.transformed || !p.preForm) return;
     const ratio = Math.max(0.05, p.hp / p.maxHp);
     p.baseStats = p.preForm.baseStats; p.types = p.preForm.types;
-    p.ability = p.preForm.ability; p.name = p.preForm.name;
+    /* Le partite salvate prima del §88 hanno l'abilita' come oggetto copiato:
+       si accetta anche quella forma, o riaprendo una run vecchia si perderebbe
+       l'abilita' tornando normali. */
+    p.ability = p.preForm.abilityId ? (ABIL[p.preForm.abilityId] || null)
+              : (p.preForm.ability || null);
+    p.name = p.preForm.name;
     p.transformed = false; p.formKey = null; p.preForm = null;
     recomputeStats(p);
     p.hp = Math.max(1, Math.floor(p.maxHp * ratio));
     p.spr = null;
-    loadFighterSprite(p, p === game.player ? "back" : "front").then(s => { p.spr = s; redrawScene(); });
+    const side = (p === game.player || p === game.player2) ? "back" : "front";
+    loadFighterSprite(p, side).then(s => { p.spr = s; redrawScene(); });
   }
 
   // Squadra "élite": mix di specie forti (BST alto), l'ultimo è un boss.
@@ -4816,6 +4884,11 @@
   }
 
   function evolve(p, toId, messages) {
+    /* ⚠️ Prima si torna normali. `evolve` riscrive statistiche, tipi,
+       abilita' e nome: su un Pokemon megaevoluto lascerebbe `preForm` che
+       parla della specie VECCHIA, e spegnendo la forma dopo si tornerebbe
+       indietro all'abilita' e alle statistiche di prima dell'evoluzione. */
+    revertForm(p);
     const from = p.name;
     const nsp = S[toId];
     p.speciesId = toId; p.dex = nsp.dex;
@@ -7487,55 +7560,78 @@
           if (game.trainerTotal) { game.trainerDefeated++; renderTrainerBalls(); }
         }
       }
-      // il secondo avversario caduto sparisce dal campo
+      /* 🔴 I QUATTRO POSTI SEGUIVANO QUATTRO REGOLE DIVERSE (§87).
+         Segnalazione: «dopo il ko a volte diventano lotte 1 contro 2, a volte
+         2 contro 1, a volte 1 contro 1; credo ci siano problemi tra primo slot
+         e secondo slot che vengono gestiti con regole diverse». Aveva ragione,
+         ed erano tre difetti che si sommavano:
+
+         1. Il posto PRIMARIO caduto veniva riempito PROMUOVENDO il secondo
+            (`player = player2; player2 = null`) anche con mezza squadra in
+            panchina: due Pokemon in campo diventavano uno, e la lotta scivolava
+            in 1 contro 2 senza che tu avessi perso niente.
+         2. Il rimpiazzo del tuo SECONDO posto era automatico — il gioco
+            sceglieva per te — mentre per il primo ti chiedeva. Ed era la
+            segnalazione «non mi lascia rimettere in gioco un pokemon dopo che
+            uno e' andato ko»: se cadevano tutti e due nello stesso turno, il
+            rimpiazzo automatico del secondo veniva subito cancellato dalla
+            promozione del punto 1, e la scelta non te la chiedeva nessuno.
+         3. L'avversario riempiva il posto vuoto solo se TU avevi ancora due
+            Pokemon in campo (`&& game.player2 && !game.player2.fainted`). Cosi'
+            bastava perdere il secondo per vedere l'allenatore fermarsi a uno:
+            2 contro 1 regalato.
+
+         Adesso i due lati seguono la stessa regola, e l'ordine e' sempre lo
+         stesso: prima il posto primario, poi il secondo.
+         ⚠️ `game.enemy` e `game.player` non possono restare vuoti (mezzo
+         motore li da' per scontati non nulli): il posto primario si riempie
+         SEMPRE, e la promozione del secondo resta — ma solo come ultima
+         spiaggia, quando non c'e' proprio nessun altro. */
+      const logD = makeLog();
+      let entrati = false;
+
+      // ---- lato avversario: prima il primario, poi il secondo -------------
       if (game.enemy2 && game.enemy2.fainted) game.enemy2 = null;
-      // il secondo alleato caduto viene rimpiazzato, se c'e' una riserva
-      if (game.player2 && game.player2.fainted) {
-        const riserva = game.party.find(p => !p.fainted && p !== game.player && p !== game.player2);
-        richiamaNellaBall(game.player2);   // esce dal campo: via gli sbalzi
-        game.player2 = riserva || null; ordinaSquadra();
-        if (game.player2) { entraInCampo(game.player2); loadFighterSprite(game.player2, "back").then(s => { game.player2.spr = s; redrawScene(); }); }
+      if (game.enemy.fainted && game.enemyQueue.length) {
+        const succ = game.enemyQueue.shift();
+        logD.push(conBall(`${game.trainerName || "L'avversario"} manda in campo ${succ.name}!`, "uscita", "enemy"));
+        deployEnemy(succ, logD); entraInCampo(succ, logD); entrati = true;
+      } else if (game.enemy.fainted && game.enemy2) {
+        game.enemy = game.enemy2; game.enemy2 = null;   // ultima spiaggia
       }
-      // se il PRIMO avversario cade ma il secondo e' vivo, la lotta continua:
-      // il secondo prende il posto primario
-      if (game.enemy && game.enemy.fainted && game.enemy2) {
-        game.enemy = game.enemy2; game.enemy2 = null;
-        renderScene();
-      }
-      // idem per l'alleato primario
-      if (game.player && game.player.fainted && game.player2) {
-        game.active = game.party.indexOf(game.player2);
-        game.player = game.player2; game.player2 = null;
-        renderScene();
-      }
-      /* 🔴 IL POSTO VUOTO SI RIEMPIE, se l'allenatore ha ancora squadra.
-         Prima la coda serviva solo il posto primario, perche' in doppio ci si
-         andava solo contro i selvatici — che una coda non ce l'hanno. Contro
-         un allenatore, invece, ridursi a uno contro due appena cade il suo
-         secondo vorrebbe dire che la lotta in doppio dura un turno. */
-      if (!game.enemy2 && game.enemyQueue.length && game.enemy && !game.enemy.fainted
-          && game.player2 && !game.player2.fainted) {
-        const log2 = makeLog();
+      if (!game.enemy2 && !game.enemy.fainted && game.enemyQueue.length) {
         const alleato = game.enemyQueue.shift();
-        log2.push(conBall(`${game.trainerName || "L'avversario"} manda in campo ${alleato.name}!`, "uscita", "enemy"));
-        deployEnemy2(alleato, log2);
-        entraInCampo(alleato, log2);
-        renderTrainerBalls();
-        renderScene();
-        game.chooser = 0; game.queued = null;
-        playEvents(log2.events, () => {
-          if (game.player.fainted) {
-            if (firstAliveIndex() < 0) return gameOver("KO");
-            return promptForceSwitch();
-          }
-          game.phase = "CHOICE"; showMainMenu();
-        });
+        logD.push(conBall(`${game.trainerName || "L'avversario"} manda in campo ${alleato.name}!`, "uscita", "enemy2"));
+        deployEnemy2(alleato, logD); entraInCampo(alleato, logD); entrati = true;
+      }
+
+      // ---- lato tuo: si libera il posto, il resto lo scegli tu -----------
+      if (game.player2 && game.player2.fainted) {
+        richiamaNellaBall(game.player2);   // esce dal campo: via gli sbalzi
+        game.player2 = null;
+      }
+      /* L'ondata e' vinta se l'avversario e' a terra e non ha piu' nessuno:
+         allora non si rimpiazza niente, si va alla vittoria. */
+      const vinta = game.enemy.fainted;
+      if (!vinta && game.player.fainted && !riservaLibera() && game.player2) {
+        game.player = game.player2; game.player2 = null; ordinaSquadra();
+      }
+      /* Il doppio finisce solo quando NESSUNO dei due lati puo' piu' essere in
+         due. Con una panchina viva il tuo secondo posto si riempie, quindi il
+         doppio resta doppio. */
+      if (!game.enemy2 && !game.player2 && (vinta || !riservaLibera())) game.double = false;
+      game.chooser = 0; game.queued = null;   // il prossimo turno riparte dal primo
+      if (entrati) renderTrainerBalls();
+      renderScene();
+      if (entrati) {
+        playEvents(logD.events, () => { if (!rimpiazziGiocatore()) { game.phase = "CHOICE"; showMainMenu(); } });
         return;
       }
-      // finita la lotta in doppio quando resta un solo avversario o nessuno
-      if (!game.enemy2 && !game.player2) game.double = false;
-      game.chooser = 0; game.queued = null;   // il prossimo turno riparte dal primo
-      renderScene();
+      if (!vinta) {
+        if (rimpiazziGiocatore()) return;
+        game.phase = "CHOICE"; showMainMenu();
+        return;
+      }
     }
     if (game.enemy.fainted) {
       if (!game.enemy._contato) {
@@ -7580,8 +7676,22 @@
     game.phase = "CHOICE"; showMainMenu();
   }
 
+  /* Quali dei TUOI posti sono da riempire, e chiederlo uno alla volta.
+     Restituisce true se ha preso in mano la scena (partita finita o una scelta
+     da fare), false se si puo' tornare al menu dei comandi. */
+  function rimpiazziGiocatore() {
+    if (firstAliveIndex() < 0) { gameOver("KO"); return true; }
+    if (game.player.fainted) { promptForceSwitch("player"); return true; }
+    if (game.double && !game.player2 && riservaLibera()) { promptForceSwitch("player2"); return true; }
+    return false;
+  }
+
   // Cambio obbligatorio dopo un KO: scegli il prossimo (nessun turno nemico gratis).
-  function promptForceSwitch() {
+  /* `posto` dice QUALE dei due posti si sta riempiendo. Senza, la scelta
+     finiva sempre nel posto primario: in doppio il secondo non si poteva
+     rimettere in campo affatto. */
+  function promptForceSwitch(posto) {
+    game.postoDaRiempire = posto || "player";
     game.phase = "FORCESWITCH";
     renderParty("force");
   }
@@ -7603,15 +7713,23 @@
     if (game.phase !== "FORCESWITCH") return;
     const target = game.party[index];
     if (!target || target.fainted) return;
-    setActive(index);
+    if (target === game.player || target === game.player2) return;   // gia' in campo
+    const posto = game.postoDaRiempire === "player2" ? "player2" : "player";
     const log = makeLog();
-    entraInCampo(game.player, log);   // anche qui le trappole mordono
-    game.player.spr = null;
+    if (posto === "player2") { game.player2 = target; ordinaSquadra(); }
+    else setActive(index);
+    const chi = posto === "player2" ? game.player2 : game.player;
+    entraInCampo(chi, log);   // anche qui le trappole mordono
+    chi.spr = null;
     // chi e' caduto non "rientra": il posto lo prende il nuovo, che esce dalla ball
-    log.push(conBall(`Vai, ${game.player.name}!`, "uscita", "player"));
-    applyOnSummon(game.player, game.enemy, log);
-    loadFighterSprite(game.player, "back").then(s => { game.player.spr = s; redrawScene(); });
-    playEvents(log.events, () => { game.phase = "CHOICE"; showMainMenu(); });
+    log.push(conBall(`Vai, ${chi.name}!`, "uscita", posto));
+    applyOnSummon(chi, game.enemy, log);
+    loadFighterSprite(chi, "back").then(s => { chi.spr = s; redrawScene(); });
+    playEvents(log.events, () => {
+      // in doppio puo' esserci ANCORA un posto vuoto: si chiede anche quello
+      if (rimpiazziGiocatore()) return;
+      game.phase = "CHOICE"; showMainMenu();
+    });
   }
 
   // Esegue una singola mossa: blocchi pre-mossa, PP, precisione, danno, effetti.
@@ -9869,9 +9987,6 @@
     const alive = aliveParty().length;
     const chi = currentChooser();
     if (!chi) { game.chooser = 0; game.queued = null; }
-    const tf = canTransform(currentChooser() || game.player);   // mega/gigamax disponibile?
-    const tfRow = tf
-      ? `<div class="back-row"><button class="btn transform-btn" data-act="transform">${tf === "mega" ? "✨ MEGAEVOLVI" : ico("dynamax") + " GIGAMAXIZZA"}</button></div>` : "";
     cmd().innerHTML = `
       <div class="prompt-line has-menu"><span class="pl-testo">Tocca a <b>${(chi || game.player).name}</b>${game.double ? ` (${game.chooser === 1 ? "2°" : "1°"})` : ""}</span><span class="hud">${alive}/${game.party.length} · ${ico("ball")}${totalBalls()} · ₽${game.money} · 🍀<b style="color:${luckColor(runLuck())}">${LUCK_RANK[runLuck()]}</b></span><span class="pl-tasti">${bottoneLente()}<button class="menu-btn" data-act="menu" aria-label="Menu">☰</button></span></div>
       <div class="grid2">
@@ -9880,21 +9995,9 @@
         <button class="btn main-team"  data-act="team">Squadra</button>
         <button class="btn main-run"   data-act="run"
           title="${motivoNoFuga() || "probabilità ~" + probabilitaFuga() + "%"}">Fuggi</button>
-      </div>${game.chooser === 1 ? `<div class="back-row"><button class="btn back" data-act="rifai">↩ Rifai la prima scelta</button></div>` : ""}${tfRow}`;
+      </div>${game.chooser === 1 ? `<div class="back-row"><button class="btn back" data-act="rifai">↩ Rifai la prima scelta</button></div>` : ""}`;
     if (game.chooser === 1) cmd().querySelector('[data-act="rifai"]').onclick = () => {
       game.chooser = 0; game.queued = null; showMainMenu();
-    };
-    if (tf) cmd().querySelector('[data-act="transform"]').onclick = () => {
-      const log = makeLog();
-      transform(game.player, tf, log);
-      renderScene();
-      // la trasformazione usa il turno: il nemico attacca
-      const enemyMove = enemyChooseMove();
-      if (!game.enemy.fainted && !game.player.fainted) resolveAction(game.enemy, game.player, enemyMove, log);
-      endOfTurnResidual(game.enemy, log);
-      endOfTurnResidual(game.player, log);
-      game.player.volatile.flinch = false; game.enemy.volatile.flinch = false;
-      playEvents(log.events, afterTurn);
     };
     cmd().querySelector('[data-act="fight"]').onclick = showMoves;
     cmd().querySelector('[data-act="ball"]').onclick  = showBallMenu;
@@ -10280,6 +10383,7 @@
       <div class="ms-mosse">${moves}</div>
       <div class="meta-sub">Statistiche</div>
       <div class="ms-stats">${stats}</div>
+      ${formeRiga(p)}
       <div class="meta-actions ${mode === "check" ? "" : "two-col"} sd-azioni">
         <button class="meta-btn ghost" data-act="back">↩ Squadra</button>
         ${mode === "check" ? "" : `<button class="meta-btn primary" data-act="go" ${puoScendere ? "" : "disabled"}>${puoScendere ? "▶ Manda in campo" : perche}</button>`}
@@ -10300,6 +10404,16 @@
     metaEl().querySelectorAll("[data-info-mv]").forEach(b => b.onclick = () => info("mv", b.dataset.infoMv));
     metaEl().querySelectorAll("[data-info-ab]").forEach(b => b.onclick = () => info("ab", b.dataset.infoAb));
     metaEl().querySelectorAll("[data-info-held]").forEach(b => b.onclick = () => info("held", parseInt(b.dataset.infoHeld, 10)));
+    /* Accendere/spegnere la quarta evoluzione: tocca solo questo Pokemon, e si
+       vede subito nella scheda, che resta aperta. */
+    metaEl().querySelectorAll("[data-forma]").forEach(b => b.onclick = () => {
+      const k = b.dataset.forma;
+      if (k === "off") revertForm(p);
+      else transform(p, b.dataset.kind, [], k);
+      salvaRun(game.phase === "CHOICE" && !!game.enemy);
+      renderScene();
+      showMonScheda(i, mode);
+    });
     metaEl().querySelector('[data-act="back"]').onclick = () => {
       schedaInfo = null; ripristinaScroll = scrollSquadra; renderParty(mode);
     };
@@ -11104,6 +11218,10 @@
     renderTrainerBalls();
     renderScene();
     game.phase = "CHOICE"; game.chooser = 0; game.queued = null;
+    /* ⚠️ Se la partita e' stata chiusa mentre sceglievi chi mandare in
+       campo, riprendendo il posto e' ancora vuoto: chiederlo di nuovo, o si
+       tornerebbe ai comandi con un Pokemon esausto in campo. */
+    if (rimpiazziGiocatore()) return;
     showMainMenu();
     return true;
   }
