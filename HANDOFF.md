@@ -6593,3 +6593,54 @@ revisione mette anche `?v=<rev>` su JS **e** CSS.
 ⚠️ È il caso peggiore possibile da diagnosticare: metà pagina nuova e metà
 vecchia, senza nessun errore. Se un giorno la clear si comporta «come due
 versioni insieme», il primo posto da guardare è questo.
+
+## 103. La clear si accorge da sola di essere vecchia (rev 192)
+
+> «Mi dà ancora rev0» — con due screenshot della Home aperta dal Museum, ore
+> 23:06, `rev 0 · da APK`. Il file era stato pubblicato alle 23:03.
+
+Il timbro del §102 era giusto: interrogando l'origine, la pagina pubblica
+conteneva già `window.PR={rev:191,clear:true}`. A mentire era la **cache**.
+
+```
+Cache-Control: max-age=600
+```
+
+GitHub Pages serve l'HTML con dieci minuti di validità, e su quello non abbiamo
+voce in capitolo: non si possono mandare intestazioni proprie. Il
+`<meta http-equiv="Cache-Control">` dentro la pagina **non conta niente** né per
+la CDN né per la cache del browser — è un vecchio equivoco, e qui si è visto
+smentito sul campo.
+
+🔴 **E il `?v=` del §102 non basta a salvare la situazione**, per un motivo che
+vale la pena avere chiaro: a leggere quel `?v=` è proprio l'HTML che non è
+arrivato. Se la pagina è vecchia, il riferimento allo script che contiene è
+vecchio, e il gioco che parte è vecchio. Il `?v=` protegge dal caso «HTML nuovo,
+JS vecchio» (che avevo visto e corretto), non da «HTML vecchio e basta».
+
+La versione normale questo problema non ce l'ha perché il **guscio** chiede il
+manifesto a ogni avvio. La clear non ha guscio: allora glielo facciamo chiedere
+lo stesso. `allineaLaClear()` legge `versione.json` (il `<base>` lo manda su
+`/pokerogue-mobile/`) e, se la revisione è diversa da quella timbrata nella
+pagina, ricarica **una volta** con la revisione in coda — un indirizzo mai visto
+è un buco nella cache, quindi quello che torna è fresco.
+
+⚠️ **Una volta sola per sessione**, segnata in `sessionStorage`. Senza quel
+freno, una clear pubblicata in ritardo rispetto al manifesto — capita, sono due
+comandi separati — si ricaricherebbe all'infinito inseguendo una revisione che
+dalla sua parte non esiste ancora.
+
+⚠️ Tutte le vie d'uscita sono **fail-safe**: `sessionStorage` inaccessibile →
+`return` senza ricaricare; `setItem` che lancia → finisce nel `catch` e non
+ricarica; fetch fallito (offline) → si gioca quello che c'è, ed è giusto così.
+
+⚠️ Solo la clear (`PR.clear`). Nell'APK e nella versione normale ci pensa già il
+guscio.
+
+Verificato contro gli endpoint veri, eseguendo la logica sulla pagina pubblicata:
+clear finta a rev 190 → ricaricherebbe a `pokerogue-clear.html?v=191`; clear a
+191 → nessuna ricarica; build non-clear → esce subito.
+
+⚠️ **Il primo aggiornamento non può auto-ripararsi**: questo controllo arriva
+*con* la rev 192, quindi chi ha in cache la 191 (o precedente) deve aspettare la
+scadenza dei dieci minuti quella volta lì. Da lì in poi si allinea da sé.
