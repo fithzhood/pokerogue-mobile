@@ -208,7 +208,19 @@ html, body {
 }
 /* il tasto per fermarla ora vive DENTRO l'overlay: la fascia comandi ci sta
    sotto. `flex: 0 0 auto` o in colonna si schiaccia e sparisce (§29). */
-#evo-overlay .evo-stop { flex: 0 0 auto; width: min(340px, 78vw); margin-top: 4vh; }
+/* I DUE TASTI dell'evoluzione, in colonna come le altre schermate di scelta.
+   ⚠️ La colonna tiene la sua altezza anche quando «Evolvi» si nasconde
+   (`visibility`, non `display`): se cedesse spazio, l'Interrompi salirebbe
+   sotto il dito proprio nell'istante in cui parte l'animazione. */
+#evo-overlay .evo-tasti {
+  flex: 0 0 auto; display: flex; flex-direction: column; gap: 10px;
+  width: min(340px, 78vw); margin-top: 4vh;
+}
+#evo-overlay .evo-tasti .btn { width: 100%; margin-top: 0; }
+#evo-overlay .evo-go {
+  background: #5b6fd6; font-size: clamp(16px, 4.6vw, 22px); padding: 12px;
+  box-shadow: 0 4px 0 rgba(0,0,0,.35), inset 0 2px 6px rgba(255,255,255,.15);
+}
 #evo-overlay .evo-sprite { flex: 0 0 auto; }
 /* La cornice dell'evoluzione: misura fissa, sprite centrato dentro. E' lei che
    impedisce a scritta e pulsanti di ballare mentre la forma alterna. */

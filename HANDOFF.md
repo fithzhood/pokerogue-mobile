@@ -6453,3 +6453,38 @@ cattura e furto), costruita con `heldSummary` che c'era già:
 ```
 🎒 Tiene: Avanzi×1 Roccia di re×2 Baccacedro×1
 ```
+
+## 99. Due tasti nella schermata di evoluzione (rev 189)
+
+> «La schermata di evoluzione con la scritta tocca per continuare confonde un po'
+> perché l'unica cosa che sembra cliccabile è il pulsante interrompi. Mettiamo
+> anche un pulsante evolvi e togli la scritta. Durante l'evoluzione il pulsante
+> interrompi rimane ma non quello evolvi che sparisce»
+
+Il difetto è tutto nell'asimmetria: c'era un **tasto vero** per rifiutare e una
+**scritta smorta** per accettare — e delle due, quella senza tasto era
+l'irreversibile. Chi guardava lo schermo vedeva un solo pulsante e quel pulsante
+diceva «Interrompi».
+
+Ora sono due tasti in colonna, ✨ **Evolvi** e ✖ **Interrompi**, e la scritta non
+c'è più. Partita l'animazione, Evolvi si nasconde e Interrompi resta: è
+esattamente quello che ha chiesto, ed è anche la logica giusta — accettare è
+un'azione sola, fermare si può fino all'ultimo lampo.
+
+🔴 **Lo sfondo non fa più partire niente.** Prima l'overlay intero era un
+bersaglio di clic (`ov.addEventListener("click", parti)`): con un tasto esplicito
+quel comportamento diventa solo un rischio, perché un tocco a vuoto avviava una
+cosa che non si disfa.
+
+⚠️ Evolvi si **nasconde**, non si toglie (`visibility`, non `display`) — ed è la
+stessa cura che aveva la vecchia scritta. L'overlay è una colonna centrata:
+togliendo il tasto dal flusso il Pokémon scenderebbe e l'Interrompi salterebbe su
+di un pezzo, proprio nell'istante in cui ci stai per mettere il dito.
+
+⚠️ La **schiusa** continua a usare `.evo-prompt` e la sua scritta: lì il tocco
+non decide niente di irreversibile, chiude solo un'animazione già finita. Se un
+giorno si tocca quel pezzo, sono due schermate diverse con due problemi diversi.
+
+Verificato: tocco sullo sfondo → non parte nulla; Evolvi → parte, il tasto sparisce
+e l'Interrompi **non si muove di un pixel**; Interrompi a metà animazione →
+Aerodactyl resta Aerodactyl; senza interruzione, ✨Electabuzz → ✨Electivire.

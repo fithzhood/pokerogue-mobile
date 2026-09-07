@@ -10590,9 +10590,19 @@
           diverse ? "" : marchio} — ${diverse ? `per <b>${S[radice].it}</b>: ` : ""}${
           abGiaMia ? "già disponibile nello starter" : "<b>nuova per lo starter</b>"}</div>`
       : "";
+    /* 🔴 QUELLO CHE TIENE ADDOSSO VIENE CON LUI (§98).
+       Richiesta: «nella schermata di cattura si deve vedere anche quali oggetti
+       possiede il pkmn». Ed è informazione che pesa sulla decisione: gli
+       avversari ricevono strumenti da `giveEnemyHeldItems`, e catturandolo (o
+       rubandolo) quegli strumenti diventano tuoi — a volte valgono più del
+       Pokémon. Prima non lo diceva nessuno, e l'unico modo di scoprirlo era
+       prenderlo e andare a guardare nella scheda. */
+    const roba = heldSummary(e);
+    const rigaHeld = roba
+      ? `<div class="cap-riga">${ico("zaino")} Tiene: <b>${roba}</b></div>` : "";
     // Qui lo scanner è SEMPRE acceso: la lente spenta non nasconde nulla.
     const chipIv = e.ivs ? badgeIV(e, true) : "";
-    return `<div class="cap-info">${rigaDex}${rigaCrom}${rigaAb}${
+    return `<div class="cap-info">${rigaDex}${rigaCrom}${rigaAb}${rigaHeld}${
       chipIv ? `<div class="cap-iv">${chipIv}</div>` : ""}</div>`;
   }
 
@@ -12139,7 +12149,7 @@
   function encReward(tier, quante) {
     const nomi = [];
     for (let i = 0; i < (quante || 1); i++) {
-      const pool = REWARD_POOL.filter(x => x.tier === tier && x.weight > 0 && (!x.avail || x.avail()));
+      const pool = REWARD_POOL.filter(x => x.tier === tier && pesoDi(x) > 0 && (!x.avail || x.avail()));
       const item = pool.length ? rndOf(pool) : REWARD_POOL.find(x => x.id === "balls");
       const pk = fillPick(item) || fillPick(REWARD_POOL.find(x => x.id === "balls"));
       pk.item.apply(bestBy("hp") || game.player, pk);
@@ -13980,6 +13990,57 @@
   const alive     = p => !p.fainted;
   const someone   = f => () => game.party.some(f);
 
+  /* 🔴 I CURATIVI PESAVANO SEMPRE UGUALE (§97).
+     Segnalazione: «controlla i premi di fine incontro, ho l'impressione che la
+     loro distribuzione sia diversa dall'originale».
+     Da noi il peso era FISSO e c'era solo un interruttore `avail`: basta un
+     Pokemon graffiato di un PS perche' la Pozione entri nell'urna con lo
+     stesso peso che avrebbe con la squadra in fin di vita. Nell'originale il
+     peso e' una FUNZIONE della squadra (`init-modifier-pools.ts`), e conta
+     quanti ne hanno davvero bisogno — fino a un massimo di tre:
+
+       Pozione       min(feriti, 3) × 3   dove «ferito» = almeno 10 PS in meno
+                                          E non oltre l'87,5% dei PS
+       Superpozione  min(feriti, 3)        ≥ 25 PS in meno, non oltre il 75%
+       Iperpozione   min(feriti, 3) × 3    ≥ 100 PS in meno, non oltre il 62,5%
+       Pozione max   min(feriti, 3)        ≥ 100 PS in meno, non oltre il 50%
+       Cura totale   min(malati, 3) × 6
+       Revitalizz.   min(esausti, 3) × 9
+       Revit. max    min(esausti, 3) × 3
+       Cenere magica 1 solo se meta' squadra e' a terra
+       Eteri/Elisir  min(a corto di PP, 3) × 3 (o ×1 per le versioni max)
+
+     La soglia dei PP e' precisa: una mossa conta se ne ha usati piu' di meta'
+     E gliene restano cinque o meno. Chi tiene una Baccamela non conta: se la
+     mangia da solo.
+     ⚠️ Cosi' l'`avail` diventa quasi sempre ridondante per i curativi
+     (peso 0 = fuori dall'urna), ma resta: serve ancora a `chooseTarget` e agli
+     incontri, che pescano in modo diverso. */
+  const quantiNe = f => Math.min(game.party.filter(f).length, 3);
+  const psMancanti = p => p.maxHp - p.hp;
+  const feritoOltre = (ps, quota) => p => !p.fainted && psMancanti(p) >= ps && p.hp / p.maxHp <= quota;
+  const malato = p => !p.fainted && p.hp > 0 && !!p.status;
+  /* A corto di PP secondo l'originale: una mossa con piu' di meta' PP spesi e
+     non piu' di cinque rimasti. */
+  const aCortoDiPp = p => !p.fainted && p.hp > 0 && !(p.berries && p.berries.LEPPA > 0)
+    && p.moves.some(m => { const usati = m.maxPp - m.pp;
+                           return usati > 0 && m.pp <= 5 && usati > Math.floor(m.maxPp / 2); });
+
+  /* 🔴 DOPO L'ONDATA DELLE DECINE I CURATIVI SONO CARTA STRACCIA (§97).
+     Segnalazione: «dopo l'incontro delle decine non dovrebbero capitare oggetti
+     di cura visto che tutti i pkmn vengono curati automaticamente». Vero alla
+     lettera: `afterReward` manda a `showBiomeChoice`, che comincia con
+     `curaSquadraDecina` — PS, stato, esausti, PP e cali di statistica, tutto
+     rimesso a posto gratis. Una Pozione scelta un istante prima e' un premio
+     buttato, e nell'originale il problema non esiste perche' sulle decine la
+     schermata dei premi **non compare affatto** (`victory-phase.ts`: il
+     `SelectModifierPhase` sta dentro `if (currentWaveIndex % 10)`, e al suo
+     posto arriva il `PartyHealPhase`).
+     Da noi la schermata sulle decine resta — e' una divergenza voluta, quelle
+     ondate sono le piu' dure e il premio ci vuole — ma i curativi ne escono. */
+  const curaInArrivo = () => game.wave > 0 && game.wave % BOSS_EVERY === 0;
+  const pesoCura = f => () => curaInArrivo() ? 0 : f();
+
   // PP Up: +1/5 dei PP base per stadio, fino a 3 stadi (come nei giochi).
   /* 🔴 UNA mossa sola, quella scelta. Prima il ciclo passava su tutte e
      quattro: PP-su e PP-max valevano il quadruplo dell'originale, dove la
@@ -14252,13 +14313,13 @@
     /* ===================== COMMON ===================== */
     { tier: "COMMON", weight: 6, id: "balls", label: "Poké Ball ×5", desc: "cattura ×1", icon: "pb", ball: true,
       target: "run", apply: () => { game.balls += 5; } },
-    { tier: "COMMON", weight: 3, id: "potion", label: "Pozione", desc: "cura 20 PS o il 10%", icon: "potion",
+    { tier: "COMMON", weight: pesoCura(() => quantiNe(feritoOltre(10, 0.875)) * 3), id: "potion", label: "Pozione", desc: "cura 20 PS o il 10%", icon: "potion",
       target: "mon", valid: canHeal, avail: someone(canHeal), apply: p => hpRestore(p, 20, 10) },
-    { tier: "COMMON", weight: 3, id: "superpotion", label: "Superpozione", desc: "cura 50 PS o il 25%", icon: "super_potion",
+    { tier: "COMMON", weight: pesoCura(() => quantiNe(feritoOltre(25, 0.75))), id: "superpotion", label: "Superpozione", desc: "cura 50 PS o il 25%", icon: "super_potion",
       target: "mon", valid: canHeal, avail: someone(canHeal), apply: p => hpRestore(p, 50, 25) },
-    { tier: "COMMON", weight: 3, id: "ether", label: "Etere", desc: "+10 PP a una mossa che scegli tu", icon: "ether",
+    { tier: "COMMON", weight: pesoCura(() => quantiNe(aCortoDiPp) * 3), id: "ether", label: "Etere", desc: "+10 PP a una mossa che scegli tu", icon: "ether",
       target: "mon", mossa: true, valid: needsPp, avail: someone(needsPp), apply: (p, pk, i) => restorePp(p, 1, 10, i) },
-    { tier: "COMMON", weight: 3, id: "maxether", label: "Etere max", desc: "PP pieni a una mossa che scegli tu", icon: "max_ether",
+    { tier: "COMMON", weight: pesoCura(() => quantiNe(aCortoDiPp)), id: "maxether", label: "Etere max", desc: "PP pieni a una mossa che scegli tu", icon: "max_ether",
       target: "mon", mossa: true, valid: needsPp, avail: someone(needsPp), apply: (p, pk, i) => restorePp(p, 1, -1, i) },
     { tier: "COMMON", weight: 2, id: "candy", label: "Caramella rara", desc: "+1 livello", icon: "rare_candy",
       target: "mon", valid: chiunque, apply: p => addLevels(p, 1) },
@@ -14281,24 +14342,24 @@
     /* ===================== GREAT ====================== */
     { tier: "GREAT", weight: 6, id: "greatballs", label: "Mega Ball ×5", desc: "cattura ×1,5", icon: "gb", ball: true,
       target: "run", apply: () => { game.greatballs += 5; } },
-    { tier: "GREAT", weight: 3, id: "hyperpotion", label: "Iperpozione", desc: "cura 200 PS o il 50%", icon: "hyper_potion",
+    { tier: "GREAT", weight: pesoCura(() => quantiNe(feritoOltre(100, 0.625)) * 3), id: "hyperpotion", label: "Iperpozione", desc: "cura 200 PS o il 50%", icon: "hyper_potion",
       target: "mon", valid: canHeal, avail: someone(canHeal), apply: p => hpRestore(p, 200, 50) },
-    { tier: "GREAT", weight: 3, id: "maxpotion", label: "Pozione max", desc: "PS pieni", icon: "max_potion",
+    { tier: "GREAT", weight: pesoCura(() => quantiNe(feritoOltre(100, 0.5))), id: "maxpotion", label: "Pozione max", desc: "PS pieni", icon: "max_potion",
       target: "mon", valid: canHeal, avail: someone(canHeal), apply: p => { p.hp = p.maxHp; } },
-    { tier: "GREAT", weight: 3, id: "fullrestore", label: "Ricarica totale", desc: "PS pieni e cura lo stato", icon: "full_restore",
+    { tier: "GREAT", weight: pesoCura(() => Math.floor((quantiNe(feritoOltre(100, 0.5)) + quantiNe(malato)) / 2)), id: "fullrestore", label: "Ricarica totale", desc: "PS pieni e cura lo stato", icon: "full_restore",
       target: "mon", valid: p => canHeal(p) || hasStatus(p), avail: someone(p => canHeal(p) || hasStatus(p)),
       apply: p => { p.hp = p.maxHp; p.status = null; } },
-    { tier: "GREAT", weight: 3, id: "fullheal", label: "Cura totale", desc: "cura lo stato", icon: "full_heal",
+    { tier: "GREAT", weight: pesoCura(() => quantiNe(malato) * 6), id: "fullheal", label: "Cura totale", desc: "cura lo stato", icon: "full_heal",
       target: "mon", valid: hasStatus, avail: someone(hasStatus), apply: p => { p.status = null; } },
-    { tier: "GREAT", weight: 3, id: "revive", label: "Revitalizzante", desc: "rianima al 50%", icon: "revive",
+    { tier: "GREAT", weight: pesoCura(() => quantiNe(isDown) * 9), id: "revive", label: "Revitalizzante", desc: "rianima al 50%", icon: "revive",
       target: "mon", valid: isDown, avail: someone(isDown), apply: p => { p.fainted = false; p.hp = Math.floor(p.maxHp / 2); } },
-    { tier: "GREAT", weight: 2, id: "maxrevive", label: "Revitalizzante max", desc: "rianima a PS pieni", icon: "max_revive",
+    { tier: "GREAT", weight: pesoCura(() => quantiNe(isDown) * 3), id: "maxrevive", label: "Revitalizzante max", desc: "rianima a PS pieni", icon: "max_revive",
       target: "mon", valid: isDown, avail: someone(isDown), apply: p => { p.fainted = false; p.hp = p.maxHp; } },
-    { tier: "GREAT", weight: 1, id: "sacredash", label: "Cenere magica", desc: "rianima TUTTA la squadra", icon: "sacred_ash",
+    { tier: "GREAT", weight: pesoCura(() => game.party.filter(isDown).length >= Math.ceil(game.party.length / 2) ? 1 : 0), id: "sacredash", label: "Cenere magica", desc: "rianima TUTTA la squadra", icon: "sacred_ash",
       target: "party", avail: someone(isDown), apply: () => { for (const q of game.party) if (q.fainted) { q.fainted = false; q.hp = q.maxHp; } } },
-    { tier: "GREAT", weight: 3, id: "elisir", label: "Elisir", desc: "+10 PP a tutte le mosse", icon: "elixir",
+    { tier: "GREAT", weight: pesoCura(() => quantiNe(aCortoDiPp) * 3), id: "elisir", label: "Elisir", desc: "+10 PP a tutte le mosse", icon: "elixir",
       target: "mon", valid: needsPp, avail: someone(needsPp), apply: p => restorePp(p, 99, 10) },
-    { tier: "GREAT", weight: 3, id: "maxelisir", label: "Elisir max", desc: "PP pieni a tutte le mosse", icon: "max_elixir",
+    { tier: "GREAT", weight: pesoCura(() => quantiNe(aCortoDiPp)), id: "maxelisir", label: "Elisir max", desc: "PP pieni a tutte le mosse", icon: "max_elixir",
       target: "mon", valid: needsPp, avail: someone(needsPp), apply: p => restorePp(p, 99, -1) },
     { tier: "GREAT", weight: 2, id: "ppup", label: "PP-su", desc: "alza i PP massimi di una mossa che scegli tu", icon: "pp_up",
       target: "mon", mossa: true, ppUp: true, valid: canPpUp, avail: someone(canPpUp), apply: (p, pk, i) => applyPpUp(p, 1, i) },
@@ -14374,7 +14435,7 @@
        ⚠️ `avail` lo fa comparire fra i premi solo quando c'e' davvero
        qualcosa da togliere: un premio che non fa niente e' peggio di un
        premio che non c'e'. All'emporio invece sta sempre sullo scaffale. */
-    { tier: "GREAT", weight: 10, id: "riequilibrante", label: "Riequilibrante",
+    { tier: "GREAT", weight: pesoCura(() => haCali(game.player) ? 10 : 0), id: "riequilibrante", label: "Riequilibrante",
       desc: "azzera i cali di statistica (i bonus restano)", icon: "riequilibrante",
       target: "run", avail: () => haCali(game.player),
       apply: () => togliCali(game.player) },
@@ -15507,8 +15568,18 @@
     chiediCambio(a, false, msg, `${a.name} lascia il campo dopo l'ultima parola!`, true);
   };
 
-  // Probabilita' del TIER (poi si pesca l'oggetto dentro al tier, coi pesi sopra)
-  const TIER_W = { COMMON: 50, GREAT: 34, ULTRA: 13, ROGUE: 3, MASTER: 0.5 };
+  /* 🔴 LA SCALA DEI TIER ERA DUE VOLTE PIU' GENEROSA (§97).
+     Nell'originale (`modifier-type.ts:2807`) si tira un numero su **1024** e i
+     confini sono scritti a mano:
+         > 255 → COMMON   > 60 → GREAT   > 12 → ULTRA   > 0 → ROGUE   0 → MASTER
+     cioe' 768 / 195 / 48 / 12 / 1. I nostri 50 / 34 / 13 / 3 / 0,5 davano
+     GREAT quasi il doppio, ULTRA quasi il triplo, ROGUE il triplo e MASTER
+     cinque volte tanto — misurato: 47,79 / 34,41 / 13,74 / 3,48 / 0,57 contro
+     il 75 / 19 / 4,7 / 1,2 / 0,1 di la'. E' proprio la sensazione della
+     segnalazione: «la loro distribuzione sembra diversa dall'originale».
+     ⚠️ La promozione per fortuna resta e si applica sopra a questi, come
+     la': e' lei a rendere ricca una run fortunata, non l'urna di partenza. */
+  const TIER_W = { COMMON: 768, GREAT: 195, ULTRA: 48, ROGUE: 12, MASTER: 1 };
   /* PROMOZIONE DI TIER PER FORTUNA — la cascata dell'originale
      (`getNewModifierTypeOption`, modifier-type.ts:2795):
 
@@ -15712,15 +15783,20 @@
   /* Genera una scelta: prima il TIER (pesato dalla fortuna), poi l'oggetto
      DENTRO il tier coi pesi dell'originale. Gli oggetti con `avail` falso
      (cure senza feriti, pietre inutili...) non entrano proprio nell'urna. */
+  /* Il peso di un premio: un numero, oppure una funzione che guarda la
+     squadra (i curativi, §97). */
+  const pesoDi = x => { const w = typeof x.weight === "function" ? x.weight() : x.weight;
+                        return (w > 0) ? w : 0; };
+
   /* Estrae un premio di un TIER IMPOSTO (serve ai premi garantiti del Rivale). */
   function rollRewardTier(tier, excludeIds) {
     for (let tries = 0; tries < 30; tries++) {
       const pool = REWARD_POOL.filter(x =>
-        x.tier === tier && x.weight > 0 && !excludeIds.includes(x.id) && (!x.avail || x.avail()));
+        x.tier === tier && pesoDi(x) > 0 && !excludeIds.includes(x.id) && (!x.avail || x.avail()));
       if (!pool.length) break;
-      let wt = pool.reduce((s, x) => s + x.weight, 0), r = Math.random() * wt;
+      let wt = pool.reduce((s, x) => s + pesoDi(x), 0), r = Math.random() * wt;
       let item = pool[pool.length - 1];
-      for (const x of pool) { r -= x.weight; if (r <= 0) { item = x; break; } }
+      for (const x of pool) { r -= pesoDi(x); if (r <= 0) { item = x; break; } }
       const pick = fillPick(item);
       if (pick) return pick;
     }
@@ -15735,11 +15811,11 @@
       for (const k in W) { r -= W[k]; if (r <= 0) { tier = k; break; } }
       tier = promuoviPerFortuna(tier);
       const pool = REWARD_POOL.filter(x =>
-        x.tier === tier && x.weight > 0 && !excludeIds.includes(x.id) && (!x.avail || x.avail()));
+        x.tier === tier && pesoDi(x) > 0 && !excludeIds.includes(x.id) && (!x.avail || x.avail()));
       if (!pool.length) continue;
-      let wt = pool.reduce((s, x) => s + x.weight, 0), r2 = Math.random() * wt;
+      let wt = pool.reduce((s, x) => s + pesoDi(x), 0), r2 = Math.random() * wt;
       let item = pool[pool.length - 1];
-      for (const x of pool) { r2 -= x.weight; if (r2 <= 0) { item = x; break; } }
+      for (const x of pool) { r2 -= pesoDi(x); if (r2 <= 0) { item = x; break; } }
       const pick = fillPick(item);
       if (pick) return pick;
     }
@@ -16286,13 +16362,15 @@
         const it = REWARD_POOL.find(r => r.id === "theft");
         picks.push({ item: it, label: `Clepto Ball ×${game.pendingTheft}`, qty: game.pendingTheft });
       }
-      // una cura garantita, ma SOLO se c'e' davvero qualcuno da curare
-      const heals = REWARD_POOL.filter(r => r.avail && r.avail() &&
-        ["potion", "superpotion", "hyperpotion", "maxpotion", "fullrestore", "fullheal", "revive"].includes(r.id));
-      if (heals.length) {
-        const g = heals[Math.floor(Math.random() * heals.length)];
-        picks.push(fillPick(g));
-      }
+      /* 🔴 LA CURA GARANTITA SI MANGIAVA UNA SCELTA SU TRE (§97).
+         Qui una cura veniva INFILATA d'ufficio ogni volta che qualcuno era
+         ferito — cioe' quasi sempre, dopo una lotta. Delle tre carte ne
+         restavano due davvero pescate dall'urna, e il premio buono usciva un
+         terzo di volte in meno di quanto dicessero i pesi. Sommato ai tier
+         troppo generosi, e' il grosso della «distribuzione diversa».
+         Nell'originale non esiste nessuna cura garantita: i curativi
+         concorrono con gli altri, col peso che cresce con quanti stanno male
+         (vedi §97 sopra `quantiNe`). Adesso le tre carte sono tre carte. */
       /* PREMI GARANTITI DEL RIVALE. Nell'originale ogni incontro col Rivale ha
          `guaranteedModifierTiers` con `allowLuckUpgrades: false`: la scelta è
          ricca per costruzione, ed è il motivo per cui il suo dialogo dice «il

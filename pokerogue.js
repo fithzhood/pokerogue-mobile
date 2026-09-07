@@ -4775,8 +4775,10 @@
     ov.id = "evo-overlay";
     ov.innerHTML = `<div class="evo-box" id="evoBox"><div class="evo-sprite" id="evoSprite"></div></div>
                     <div class="evo-testo">${vecchio} si sta evolvendo…</div>
-                    <div class="evo-prompt">tocca per continuare <span class="cont pronto">▸</span></div>
-                    <button class="btn back evo-stop">✖ Interrompi</button>`;
+                    <div class="evo-tasti">
+                      <button class="btn evo-go">✨ Evolvi</button>
+                      <button class="btn back evo-stop">✖ Interrompi</button>
+                    </div>`;
     radice.appendChild(ov);
     const el = ov.querySelector("#evoSprite");
 
@@ -4878,19 +4880,26 @@
       const parti = () => {
         if (partito || annullato) return;
         partito = true;
-        /* 🔴 La riga «tocca per continuare» si NASCONDE, non si toglie.
-           Con `remove()` spariva dal flusso: l'overlay e' una colonna
-           centrata con gli spazi, quindi tutto si riassestava — il Pokemon
-           scendeva e il tasto Interrompi saltava su di un pezzo, proprio
-           mentre ci stavi per mettere il dito.
-           `visibility: hidden` la fa sparire lasciando il suo posto. */
-        const pr = ov.querySelector(".evo-prompt");
-        if (pr) pr.style.visibility = "hidden";
+        /* 🔴 «TOCCA PER CONTINUARE» NON SI CAPIVA (§99).
+           Segnalazione: «la schermata di evoluzione con la scritta tocca per
+           continuare confonde un po' perche' l'unica cosa che sembra
+           cliccabile e' il pulsante interrompi». Vero: c'era un tasto vero
+           per rifiutare e una scritta smorta per accettare, e delle due
+           l'irreversibile era quella senza tasto. Adesso sono due tasti:
+           ✨ Evolvi e ✖ Interrompi. Lo sfondo non fa piu' partire niente —
+           un tocco a vuoto non deve avviare una cosa che non si disfa.
+           ⚠️ Il tasto Evolvi si NASCONDE, non si toglie: l'overlay e' una
+           colonna centrata: togliendolo dal flusso il Pokemon scenderebbe e
+           l'Interrompi salterebbe su di un pezzo, proprio mentre ci stai per
+           mettere il dito. `visibility: hidden` lo fa sparire lasciando il suo
+           posto, ed e' la stessa cura di prima. */
+        const go = ov.querySelector(".evo-go");
+        if (go) go.style.visibility = "hidden";
         // un respiro prima del primo lampo: non deve cominciare nello stesso
         // istante in cui alzi il dito
         tmr = setTimeout(passo, 380);
       };
-      ov.addEventListener("click", parti);
+      ov.querySelector(".evo-go").onclick = (ev) => { ev.stopPropagation(); parti(); };
     }).catch(() => { if (!annullato) { pulisci(); fine(true); } });
   }
 
