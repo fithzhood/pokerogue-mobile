@@ -13,6 +13,8 @@
        li fa leggere dal repo del gioco, che sta sullo stesso dominio.
 """
 
+import io
+import json
 import os
 import sys
 
@@ -20,18 +22,54 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 '..', 'museum', 'clear'))
 import clear_kit                                          # noqa: E402
 
-clear_kit.avvia({
-    'nome': 'PokeRogue Mobile',
-    'sorgenti': [
-        ('pokerogue.js',       'pokerogue-clear.js'),
-        ('pokerogue.css',      'pokerogue-clear.css'),
-        ('pokerogue-app.html', 'pokerogue-clear.html'),
-    ],
-    'rinomina': [],
-    'vietate': [
-        # (?![tT]) perche' NATURAL_GIFT e' una mossa vera e contiene "GIF"
-        r'(?<!strin)(?-i:gif|Gif|GIF)(?![tT])', 'easter', 'gifTocco', 'gifPronte',
-        'gifMostra', 'gifCarica', 'DecompressionStream',
-    ],
-    'copia': [],
-})
+def timbra_revisione():
+    """Scrive la revisione dentro la pagina clear.
+
+    La clear non passa dal guscio `pokerogue-boot.js`: carica il JS con un
+    <script src> normale, quindi `window.PR` non esiste e la riga in fondo alla
+    Home diceva "rev 0 - da APK". Aprendola dal Museum era l'unica cosa che si
+    vedeva scritta male.
+
+    Qui si legge `versione.json` (gia' aggiornato: make-manifest gira prima) e
+    si inietta un PR minimo PRIMA dello script del gioco. Niente `file`, quindi
+    il caricatore degli asset continua a leggere dal disco come faceva.
+    """
+    with io.open('versione.json', encoding='utf-8') as f:
+        rev = json.load(f).get('rev', 0)
+    nome = 'pokerogue-clear.html'
+    with io.open(nome, encoding='utf-8', newline='') as f:
+        html = f.read()
+    tag = '<script>window.PR={rev:%d,clear:true};</script>\n' % rev
+    ancora = '<script src="/pokerogue-clear/pokerogue-clear.js"></script>'
+    if ancora not in html:
+        print('   ! non trovo lo script della clear: revisione non timbrata')
+        return
+    html = html.replace(ancora, tag + ancora)
+    with io.open(nome, 'w', encoding='utf-8', newline='') as f:
+        f.write(html)
+    print('   revisione %d timbrata nella clear' % rev)
+
+
+# ⚠️ `clear_kit.avvia` finisce con `sys.exit()`: quello che sta scritto dopo di
+# lei non gira mai. Per fare qualcosa a generazione avvenuta bisogna prenderne
+# l'uscita al volo, e ripropagarla se e' un errore.
+try:
+    clear_kit.avvia({
+        'nome': 'PokeRogue Mobile',
+        'sorgenti': [
+            ('pokerogue.js',       'pokerogue-clear.js'),
+            ('pokerogue.css',      'pokerogue-clear.css'),
+            ('pokerogue-app.html', 'pokerogue-clear.html'),
+        ],
+        'rinomina': [],
+        'vietate': [
+            # (?![tT]) perche' NATURAL_GIFT e' una mossa vera e contiene "GIF"
+            r'(?<!strin)(?-i:gif|Gif|GIF)(?![tT])', 'easter', 'gifTocco', 'gifPronte',
+            'gifMostra', 'gifCarica', 'DecompressionStream',
+        ],
+        'copia': [],
+    })
+except SystemExit as uscita:
+    if uscita.code:
+        raise
+timbra_revisione()

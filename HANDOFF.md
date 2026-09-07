@@ -6541,3 +6541,38 @@ La descrizione del premio lo dice: «cattura ×3 · chi ci prendi vale ×3 caram
 
 Verificato: Nidoran♂ con la Rogue Ball → **+3 Caramelle**; Cottonee con la Poké
 Ball → **+1**.
+
+## 102. La clear diceva «rev 0 · da APK» (rev 191)
+
+> «Aprendo pokerogue da musei, l'app riepilogativa che abbiamo creato, mi segna
+> rev 0»
+
+Il Museum apre la **clear** (`museum-data.js` → `pokerogue-clear.html`), e la
+clear **non passa dal guscio**: carica il gioco con un `<script src>` normale,
+mentre `window.PR` lo costruisce `pokerogue-boot.js` dopo aver letto il
+manifesto. Senza `PR`, `etichettaRevisione()` cadeva sui suoi valori di ripiego —
+`rev 0`, e per giunta «da APK» su una pagina web. Due cose sbagliate su due, ed
+era l'unica riga scritta male di tutta la pagina.
+
+Ora `costruisci-clear.py` **timbra** la revisione: legge `versione.json` (già
+aggiornato, perché `make-manifest` gira prima) e inietta nella pagina generata,
+**prima** dello script del gioco:
+
+```html
+<script>window.PR={rev:190,clear:true};</script>
+```
+
+⚠️ Un `PR` **senza `file`**, di proposito: `caricaAsset` fa
+`if (!window.PR || !PR.file) return locale()`, quindi gli sprite continuano a
+leggersi da disco esattamente come prima. L'unica cosa che cambia è la riga della
+revisione, che adesso dice **«rev 190 · clear»**.
+
+⚠️ **`clear_kit.avvia` finisce con `sys.exit()`**: quello che sta scritto dopo di
+lei non gira mai — ci ho perso un giro, la funzione era in fondo al file e non
+partiva. Per fare qualcosa a generazione avvenuta bisogna prendere l'uscita al
+volo (`except SystemExit`) e ripropagarla se è un errore. Vale per ogni app che
+un giorno volesse aggiungere un passo dopo la generazione della clear.
+
+⚠️ Il timbro finisce **dopo** il guardiano delle parole proibite, che gira dentro
+`clear_kit`. Non è un problema (è un numero), ma se un giorno lì dentro finisse
+del testo, andrebbe ricontrollato a mano.

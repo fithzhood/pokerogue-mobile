@@ -11612,7 +11612,12 @@
      o quella di prima. */
   function etichettaRevisione() {
     const r = (window.PR && PR.rev) || 0;
-    const dove = (window.PR && PR.daRete) ? "da rete" : "da APK";
+    /* La CLEAR non passa dal guscio: `costruisci-clear.py` le timbra dentro un
+       `window.PR` minimo, con `clear: true`. Senza, diceva "rev 0 - da APK"
+       — due cose sbagliate su due, e aprendola dal Museum era l'unica riga
+       scritta male di tutta la pagina. */
+    const dove = (window.PR && PR.clear) ? "clear"
+      : (window.PR && PR.daRete) ? "da rete" : "da APK";
     return `rev ${r} · ${dove}`;
   }
 
