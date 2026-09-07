@@ -6576,3 +6576,20 @@ un giorno volesse aggiungere un passo dopo la generazione della clear.
 ⚠️ Il timbro finisce **dopo** il guardiano delle parole proibite, che gira dentro
 `clear_kit`. Non è un problema (è un numero), ma se un giorno lì dentro finisse
 del testo, andrebbe ricontrollato a mano.
+
+### E già che c'era: la clear non era a prova di cache
+
+Provando la pagina appena pubblicata è saltato fuori un secondo difetto, più
+insidioso del primo: **l'HTML arrivava aggiornato e il JS no.** `window.PR` diceva
+già 191, la riga in fondo diceva ancora «da APK» — perché quella riga la scrive
+`pokerogue-clear.js`, e la CDN di Pages stava ancora servendo la copia vecchia.
+
+I riferimenti della clear erano **nudi**: `<script src=".../pokerogue-clear.js">`
+senza versione. La clear era l'unica app di casa fuori da
+[[cache-proof-webapps]] — la versione normale non ne soffre perché il guscio
+versiona i file da sé (`prendi(nome, v)`). Adesso la stessa passata che timbra la
+revisione mette anche `?v=<rev>` su JS **e** CSS.
+
+⚠️ È il caso peggiore possibile da diagnosticare: metà pagina nuova e metà
+vecchia, senza nessun errore. Se un giorno la clear si comporta «come due
+versioni insieme», il primo posto da guardare è questo.

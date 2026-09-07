@@ -33,21 +33,30 @@ def timbra_revisione():
     Qui si legge `versione.json` (gia' aggiornato: make-manifest gira prima) e
     si inietta un PR minimo PRIMA dello script del gioco. Niente `file`, quindi
     il caricatore degli asset continua a leggere dal disco come faceva.
+
+    Stessa passata mette il `?v=<rev>` su JS e CSS. Senza, la clear era l'unica
+    app di casa fuori dalla regola: il guscio della versione normale versiona i
+    suoi file da solo, qui i riferimenti erano nudi e la CDN di Pages serviva il
+    gioco vecchio per ore. Visto succedere: la pagina arrivava aggiornata (PR
+    con la revisione nuova) e il JS era ancora quello di prima.
     """
     with io.open('versione.json', encoding='utf-8') as f:
         rev = json.load(f).get('rev', 0)
     nome = 'pokerogue-clear.html'
     with io.open(nome, encoding='utf-8', newline='') as f:
         html = f.read()
-    tag = '<script>window.PR={rev:%d,clear:true};</script>\n' % rev
     ancora = '<script src="/pokerogue-clear/pokerogue-clear.js"></script>'
     if ancora not in html:
         print('   ! non trovo lo script della clear: revisione non timbrata')
         return
-    html = html.replace(ancora, tag + ancora)
+    tag = '<script>window.PR={rev:%d,clear:true};</script>\n' % rev
+    html = html.replace(ancora,
+                        tag + '<script src="/pokerogue-clear/pokerogue-clear.js?v=%d"></script>' % rev)
+    html = html.replace('href="/pokerogue-clear/pokerogue-clear.css"',
+                        'href="/pokerogue-clear/pokerogue-clear.css?v=%d"' % rev)
     with io.open(nome, 'w', encoding='utf-8', newline='') as f:
         f.write(html)
-    print('   revisione %d timbrata nella clear' % rev)
+    print('   revisione %d timbrata nella clear (JS e CSS versionati)' % rev)
 
 
 # ⚠️ `clear_kit.avvia` finisce con `sys.exit()`: quello che sta scritto dopo di
