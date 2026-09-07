@@ -6760,3 +6760,38 @@ servirebbe un `addAt(i, …)` che scrive su un evento **precedente**, e `add`
 riallinea l'istantanea: farlo su un evento vecchio significherebbe portargli
 dentro uno stato futuro. Non vale il rischio in questa parte del motore, per una
 cosa che nessuno ha segnalato.
+
+## 106. La Last Ball: soglia a 50%, e solo all'ultima occasione (rev 195)
+
+> «Abbassiamo la percentuale per ottenere una last ball a 50%. Cioè se un pokemon
+> sfugge da una ball con 50% o più di chance allora droppa la last ball. Ma
+> facciamo che vale solo per la ball lanciata come ultima chance. Inoltre cambia
+> la descrizione della last ball che non è chiara»
+
+Tre correzioni al §100, e la seconda **chiude un buco che avevo lasciato aperto**.
+
+**Solo al tiro di fine ondata.** In lotta le ball si tirano quante se ne vuole:
+bastava portare un selvatico comune sopra la soglia e rilanciare finché una si
+apriva, per stampare Last Ball a volontà. Il tiro di fine ondata invece è **uno
+per ondata**, quindi il risarcimento non si può coltivare — ed è anche il posto
+dove la delusione è vera, perché lì l'occasione non torna. Ha ragione lui, e la
+versione di prima era farmabile.
+
+**Soglia a 50%.** `SOGLIA_LAST_BALL = 50`.
+
+**Descrizione.** Diceva «sul tiro di fine ondata conta i PS veri»: vero ma
+incomprensibile a chi non conosce il meccanismo (di norma il tiro di fine ondata
+tratta il bersaglio come se fosse **intero**; la Last Ball è l'unica che conta i
+PS rimasti, cioè zero). Ora dice cosa ti cambia in mano:
+
+> «solo per il tiro di fine ondata: lì il bersaglio è già a terra e si prende
+> quasi sempre»
+
+Verificato sulla schermata «Ultima ball!», con il fallimento forzato:
+- Ultra Ball a **74%** → «Era quasi fatta… fa cadere una Last Ball!», +1;
+- Poké Ball a **44%** → nessuna Last Ball, solo la riga normale;
+- Poké Ball **in lotta al 98%** → nessuna Last Ball. Il buco è chiuso.
+
+⚠️ Sparito il parametro `pct` da `risolviLancio` e dal suo chiamante: lì non
+serve più a niente, e un argomento che nessuno legge è una trappola per chi
+passerà di qui.
