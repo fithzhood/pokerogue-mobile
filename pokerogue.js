@@ -5417,8 +5417,8 @@
          quindi li ferma wasTrainer. Il boss finale non arriva nemmeno qui: a
          200 la run finisce prima, con renderRunVictory. */
       if (!wasTrainer && !game.capturedThisWave) { offerCapture(); return; }
-      // allenatore (NON il Rivale): con una Clepto Ball puoi rubargli un Pokémon
-      if (wasTrainer && !game.trainerIsRival && (game.theftballs || 0) > 0 && game.trainerRoster.length) { offerSteal(); return; }
+      // allenatore, Rivale compreso: con una Clepto Ball puoi rubargli un Pokemon
+      if (wasTrainer && (game.theftballs || 0) > 0 && game.trainerRoster.length) { offerSteal(); return; }
       openShop();
     }))); });
   }
@@ -5803,6 +5803,20 @@
   const pavimentoBall = (ball, bersaglio) =>
     (ball.legend && bersaglio && fasciaLeggendaria(bersaglio.speciesId)) ? PAVIMENTO_LEGEND : 0;
 
+  /* «Rubi a la Rivale». I nomi degli allenatori hanno l'articolo attaccato
+     («la Rivale», «il Bullo», «lo Scienziato») e la preposizione va fusa, come
+     si fa in italiano. I capipalestra hanno nomi propri («Brock») e li' resta
+     «a». Saltato all'occhio riaprendo la schermata del furto per la Rivale, che
+     prima non ci si arrivava mai. */
+  function aChi(nome) {
+    const n = String(nome || "");
+    const fuse = { "il ": "al ", "lo ": "allo ", "la ": "alla ",
+                   "i ": "ai ", "gli ": "agli ", "le ": "alle " };
+    for (const art in fuse) if (n.indexOf(art) === 0) return fuse[art] + n.slice(art.length);
+    if (n.indexOf("l'") === 0) return "all'" + n.slice(2);
+    return "a " + n;
+  }
+
   function offerSteal() {
     game.phase = "STEAL";
     clearTimeout(game.timer);
@@ -5824,7 +5838,7 @@
     }).join("");
     showMetaScreen(`
       <div class="meta-title" style="font-size:clamp(19px,5.6vw,29px)">${ico("clepto")} Furto</div>
-      <div class="me-text">Hai <b>${game.theftballs}</b> Clepto Ball. Quale Pokémon rubi a ${game.trainerName}?</div>
+      <div class="me-text">Hai <b>${game.theftballs}</b> Clepto Ball. Quale Pokémon rubi ${aChi(game.trainerName)}?</div>
       <div class="me-opts">${rows}
         <button class="me-opt" data-act="skip"><span class="me-opt-l">Lascia stare</span></button></div>`);
     metaEl().querySelectorAll(".me-opt[data-i]").forEach(b => b.onclick = () => {
@@ -10785,7 +10799,21 @@
     // dall'originale che lo blocca): tasso basso ma non impossibile.
     if (e.trainer) {
       if (!ball.theft) return `Non puoi catturare il Pokémon di un allenatore! Serve una Clepto Ball.`;
-      if (game.trainerIsRival) return `Il tuo Rivale non ti lascerà rubare nulla!`;
+      /* 🔴 IL DIVIETO SUL RIVALE CONTRADDICEVA IL §75 (§104).
+         C'era `if (game.trainerIsRival) return "Il tuo Rivale non ti lascera'
+         rubare nulla!"` — e insieme a lui, nella vittoria, un
+         `&& !game.trainerIsRival` che saltava la schermata del furto.
+         Ma il §75 («se le rubo un pokemon, nel prossimo incontro non deve
+         avercelo») e' stato costruito PER LEI: `ricordaIlFurto` guarda
+         `enemy.rival` per prima cosa, toglie la specie da `game.rivalRoster` e
+         la mette in `game.rivalRubati` perche' `buildRival` non gliela
+         riproponga; `battutaDelDerubato("rivale")` ha perfino due frasi
+         diverse a seconda di quanti gliene hai presi. Tutta quella macchina
+         non poteva scattare mai: il furto era vietato a monte.
+         Rimasta cosi' probabilmente perche' il divieto era piu' vecchio del
+         §75 e nessuno l'ha ricollegato. La richiesta di adesso — «i pkmn del
+         rivale devono essere rubabili con cleptoball» — chiede esattamente
+         quello che il §75 gia' prometteva. */
     }
     return null;
   }

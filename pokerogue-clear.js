@@ -16655,6 +16655,7 @@
       SPECIES_KEYS = Object.keys(species).filter(k => !species[k].noSprite);
       loadMeta();
       showHome();
+      allineaLaClear();   // la clear controlla di non essere rimasta indietro
       /* Arrivati qui il gioco e' su e funzionante: si dice al cane da guardia
          che questa versione e' buona. Se non lo dicessimo (perche' l'avvio e'
          morto prima), al riavvio lo strato scaricato verrebbe buttato e si
@@ -16664,6 +16665,42 @@
       cmd().innerHTML = `<div class="msgbox">Errore nel caricamento dati.<br>${err}</div>`;
       console.error(err);
     });
+  }
+
+  /* 🔴 LA CLEAR RESTAVA INDIETRO DI DIECI MINUTI (§103).
+     GitHub Pages serve l'HTML con `Cache-Control: max-age=600`, e su quello non
+     abbiamo voce in capitolo: non si possono mandare intestazioni nostre. Il
+     `<meta http-equiv>` nella pagina non conta niente per la CDN ne' per la
+     cache del browser — e' un vecchio equivoco, l'ho visto smentito qui.
+     Risultato: per DIECI MINUTI dopo ogni pubblicazione, chi apre la clear dal
+     Museum riceve la pagina di prima. E siccome e' l'HTML a essere vecchio, si
+     porta dietro anche il vecchio riferimento allo script: il `?v=<rev>` che
+     abbiamo appena messo non basta, perche' a leggerlo e' proprio la pagina che
+     non e' arrivata.
+     Il guscio della versione normale questo problema non ce l'ha: chiede lui il
+     manifesto a ogni avvio. La clear no, quindi glielo facciamo chiedere.
+
+     Si legge `versione.json` (il `<base>` lo manda su /pokerogue-mobile/), e se
+     dice una revisione diversa da quella timbrata dentro la pagina, si ricarica
+     UNA VOLTA con la revisione in coda: un indirizzo mai visto e' un buco nella
+     cache, quindi quello che torna e' fresco.
+     ⚠️ Una volta sola per sessione, segnata in `sessionStorage`. Senza quel
+     freno, una clear pubblicata in ritardo rispetto al manifesto — capita, sono
+     due comandi separati — si ricaricherebbe all'infinito inseguendo una
+     revisione che non esiste ancora dalla sua parte.
+     ⚠️ Solo la CLEAR (`PR.clear`). Nell'APK e nella versione normale ci
+     pensa gia' il guscio, e una ricarica in piu' li' sarebbe solo un lampo. */
+  function allineaLaClear() {
+    if (!window.PR || !PR.clear || !PR.rev) return;
+    try { if (sessionStorage.getItem("pr-clear-riletta") === "1") return; } catch (e) { return; }
+    fetch("versione.json?t=" + Date.now(), { cache: "no-store" })
+      .then(r => r.ok ? r.json() : null)
+      .then(m => {
+        if (!m || !m.rev || m.rev === PR.rev) return;
+        sessionStorage.setItem("pr-clear-riletta", "1");
+        location.replace(location.pathname + "?v=" + m.rev);
+      })
+      .catch(() => {});      // offline: si gioca quello che c'e', ed e' giusto
   }
 
   /* Ridisegno su resize/rotazione: ricalcola le scale degli sprite e ridipinge

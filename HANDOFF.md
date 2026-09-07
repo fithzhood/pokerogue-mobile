@@ -6644,3 +6644,59 @@ clear finta a rev 190 → ricaricherebbe a `pokerogue-clear.html?v=191`; clear a
 ⚠️ **Il primo aggiornamento non può auto-ripararsi**: questo controllo arriva
 *con* la rev 192, quindi chi ha in cache la 191 (o precedente) deve aspettare la
 scadenza dei dieci minuti quella volta lì. Da lì in poi si allinea da sé.
+
+## 104. Alla Rivale si può rubare (rev 193)
+
+> «I pkmn del rivale devono essere rubabili con cleptoball, negli incontri
+> successivi il rivale non dovrà avere più i pkmn rubati ma li avrà sostituito
+> con altri»
+
+**Era già tutto costruito, e non poteva scattare.** Il §75 — «se le rubo un
+pokemon, nel prossimo incontro non deve avercelo» — è stato scritto *per lei*:
+`ricordaIlFurto` guarda `enemy.rival` come prima cosa, toglie la specie da
+`game.rivalRoster`, la mette in `game.rivalRubati` perché `buildRival` non
+gliela riproponga mai più, e `battutaDelDerubato("rivale")` ha perfino due frasi
+diverse a seconda di quanti gliene hai presi.
+
+Ma il furto era vietato a monte, in **due** punti:
+
+```js
+if (game.trainerIsRival) return `Il tuo Rivale non ti lascerà rubare nulla!`;   // ballBlockReason
+if (wasTrainer && !game.trainerIsRival && …) { offerSteal(); return; }          // vittoriaOndata
+```
+
+Il divieto è più vecchio del §75 e nessuno l'ha ricollegato: risultato, una
+funzione intera costruita, documentata e mai raggiungibile. Tolti tutti e due.
+
+**Verificato giocando la sequenza completa dei sei incontri** (`__items.ondata`
+su 8 · 25 · 55 · 95 · 145 · 195):
+
+- ondata 25, in lotta: la Clepto Ball è l'unica ball attiva sul Pokémon della
+  Rivale (~13%), le altre restano «non utilizzabile»;
+- rubato **Acquecrespe** (Walking Wake) → `rivalRubati` lo registra e
+  `rivalRoster` passa da 6 a 5 radici;
+- ondata 55 e 95: schiera quello che le resta, **Acquecrespe non c'è più**;
+- ondata 145, dove i posti diventano sei: il buco lo riempie **Darkrai** — un
+  rimpiazzo nuovo, non quello che le hai preso;
+- ondata 195: l'asso megaevolve come sempre (Mega Darkrai, Mega Zeraora);
+- a lotta finita compare anche la schermata `offerSteal`, che è la strada che si
+  usa quasi sempre.
+
+⚠️ Se le rubi **l'asso** (`r[0]`), il posto di testa lo prende chi viene dopo,
+che eredita il +2 livelli. È giusto così: la Rivale promuove qualcun altro a
+Pokémon di punta.
+
+### E già che c'era: «rubi a la Rivale»
+
+I nomi degli allenatori hanno l'articolo attaccato («la Rivale», «il Bullo», «lo
+Scienziato») e la schermata scriveva `rubi a ${game.trainerName}`. In italiano la
+preposizione si fonde. `aChi(nome)` la fonde: **alla** Rivale, **al** Montanaro,
+**allo** Scienziato — e resta «a Brock» per i capipalestra, che hanno nomi
+propri. Saltato all'occhio proprio riaprendo quella schermata per la Rivale, dove
+prima non ci si arrivava mai.
+
+⚠️ Nota di metodo, non del gioco: nei collaudi ho creato tre Acquecrespe nel box
+cliccando `[data-act="pc"]` in un ciclo. Non è un difetto — `hideMeta()` nasconde
+`#meta` ma **non ne svuota l'HTML**, quindi un `querySelector` lo trova ancora e
+lo "clicca". Un dito no: su un elemento nascosto non arrivano eventi. Chi
+automatizza queste schermate deve controllare anche `#meta.hidden`.
