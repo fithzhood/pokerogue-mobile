@@ -6700,3 +6700,63 @@ cliccando `[data-act="pc"]` in un ciclo. Non è un difetto — `hideMeta()` nasc
 `#meta` ma **non ne svuota l'HTML**, quindi un `querySelector` lo trova ancora e
 lo "clicca". Un dito no: su un elemento nascosto non arrivano eventi. Chi
 automatizza queste schermate deve controllare anche `#meta.hidden`.
+
+## 105. Gli effetti si leggono dopo l'animazione, e uno per colpo (rev 194)
+
+> «Bruciatutto dovrebbe triggerare due volte quando si usa multilente. Inoltre
+> assicurati che gli effetti si vedano dopo le animazioni. Ad esempio le bacche
+> vengono bruciate dopo l'animazione. […] Controlla varie mosse con effetti
+> secondari e assicurati che si vedano dopo le animazioni, non prima»
+
+### Uno per colpo
+
+Nell'originale `RemoveHeldItemAttr` e i suoi fratelli sono `MoveEffectAttr`, e un
+`MoveEffectAttr` scatta **a ogni colpo** se non è marcato `firstHitOnly`. Da noi
+`effettiSuOggetti` partiva una volta sola, in fondo alla mossa: con la Multilente
+il secondo colpo non bruciava la seconda bacca, non faceva cadere il secondo
+strumento, non ritirava il dado del 30% del Furto.
+
+Ora sta nel ciclo dei colpi, accanto a `applyMoveAttrs(..., "solo-secondari")`, e
+la chiamata finale è guardata da `game._secondariGiaDati` — la stessa bandierina
+che già serviva agli effetti a percentuale.
+
+Verificato: Bruciatutto + Multilente su un Larvitar con Baccacedro **e**
+Baccaprugna → **tutte e due** bruciate, una per colpo.
+
+### Il testo prima dell'immagine
+
+`stessoMomento` **non crea un evento**: aggiunge una riga all'ultimo. E
+`nextEvent` scrive tutto il testo di un evento in una volta, **subito**, mentre
+l'animazione deve ancora partire. Va benissimo per «È superefficace!», che è lo
+stesso momento dell'annuncio; è sbagliato per una **conseguenza**, che così si
+legge prima di vederla.
+
+⚠️ Le **frecce** erano già a posto: `snapEvent` fotografa gli sbalzi e il
+fotogramma vero si applica all'impatto. A uscire in anticipo era solo il testo.
+È il motivo per cui il difetto era invisibile guardando i riquadri PS.
+
+**Come l'ho cercato, invece di leggere 131 chiamate a mano.** Una spia sulla
+proprietà `game.events` che raccoglie ogni evento **animato** con **più di una
+riga** — cioè esattamente gli eventi in cui si legge qualcosa prima dell'impatto
+— e poi una sessione di prova con mosse scelte apposta (Danzaspada, Ruggito,
+Stridio, Agilità, Frana, Corposcontro, Geloraggio, Fulmine, Semitraglia,
+Sfuriate, Elettropugno, Acido).
+
+Prima: 12 righe distinte, di cui **sei** fuori posto, tutte cambi di statistica
+(«Difesa di X è aumentato!», «Precisione di X non può scendere oltre!»…).
+Dopo: **4**, e sono tutte legittime — «È superefficace!», «Non è molto
+efficace...», «Colpo critico!», «Colpito N volte!».
+
+`applyStatStage` ora usa un `dillo()` interno: la **prima** riga è un evento
+nuovo (quindi arriva dopo l'animazione), le successive le si attaccano. Una
+Crescita che alza Attacco e Att. Speciale resta un annuncio solo, non due tocchi.
+
+⚠️ **Sbavatura nota, lasciata di proposito.** Con più colpi *e* una mossa che
+tocca gli oggetti, le righe di riepilogo («Non è molto efficace...», «Colpito 2
+volte!») finiscono attaccate all'evento della bacca invece che a quello
+dell'ultimo colpo: `stessoMomento` va sull'ultimo evento, e adesso l'ultimo è
+quello dell'oggetto. Si legge bene lo stesso. Per rimetterle al loro posto
+servirebbe un `addAt(i, …)` che scrive su un evento **precedente**, e `add`
+riallinea l'istantanea: farlo su un evento vecchio significherebbe portargli
+dentro uno stato futuro. Non vale il rischio in questa parte del motore, per una
+cosa che nessuno ha segnalato.

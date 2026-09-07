@@ -8210,9 +8210,11 @@
     /* 4-quinquies. «COLPISCI E POI ESCI» (vedi il riquadro su
        `CAMBIA_CHI_COLPISCE`). Va qui: serve `landed`, e serve che il danno sia
        gia' stato applicato. */
-    // effetti sulla ROBA del bersaglio (bacche bruciate/mangiate, oggetti
-    // fatti cadere o rubati): solo se la mossa e' andata a segno
-    if (landed) effettiSuOggetti(actor, foe, move, messages);
+    /* Effetti sulla ROBA del bersaglio (bacche bruciate/mangiate, oggetti
+       fatti cadere o rubati): solo se la mossa e' andata a segno, e solo se
+       non li ha gia' dati il ciclo dei colpi — stessa regola, e stessa
+       bandierina, degli effetti a percentuale (§105). */
+    if (landed && !game._secondariGiaDati) effettiSuOggetti(actor, foe, move, messages);
 
     if (landed && !actor.fainted && CAMBIA_CHI_COLPISCE.has(move.id)) {
       chiediCambio(actor, false, messages, `${actor.name} torna indietro!`, true);
@@ -8801,7 +8803,18 @@
          tentennamento, sbalzi con `effectChance`): i cali GARANTITI che una
          mossa si autoinfligge (Vampata −2 A.Sp) restano uno per mossa, o la
          Multilente li raddoppierebbe. */
-      if (hits > 1 && !foe.fainted) applyMoveAttrs(actor, foe, move, messages, 1, "solo-secondari");
+      if (hits > 1 && !foe.fainted) {
+        applyMoveAttrs(actor, foe, move, messages, 1, "solo-secondari");
+        /* 🔴 ANCHE GLI EFFETTI SUGLI OGGETTI SONO PER COLPO (§105).
+           Segnalazione: «Bruciatutto dovrebbe triggerare due volte quando si
+           usa multilente». Ed e' cosi' nell'originale: `RemoveHeldItemAttr` e
+           i suoi fratelli sono `MoveEffectAttr`, e un `MoveEffectAttr` scatta a
+           ogni colpo se non e' marcato `firstHitOnly`. Da noi partivano una
+           volta sola, in fondo alla mossa: con la Multilente il secondo colpo
+           non bruciava la seconda bacca, non faceva cadere il secondo
+           strumento, non ritirava il dado del 30% del Furto. */
+        effettiSuOggetti(actor, foe, move, messages);
+      }
     }
     /* Altruismo: l'alleato che ha ricevuto la mano picchia il 50% in piu', per
        questo turno solo. Si spegne appena serve, o resterebbe acceso. */
@@ -9158,14 +9171,32 @@
 
   function applyStatStage(target, stats, delta, messages, isSelf) {
     if (target.fainted) return;
+    /* 🔴 IL RISULTATO SI LEGGEVA PRIMA DI VEDERLO (§105).
+       Segnalazione: «controlla varie mosse con effetti secondari e assicurati
+       che si vedano dopo le animazioni, non prima». Spiando gli eventi ANIMATI
+       con piu' di una riga, in una sessione di prova le uniche righe fuori
+       posto erano tutte di qui: «Difesa di X e' aumentato!», «Precisione di X
+       e' diminuito!» e le loro varianti «non puo' salire oltre».
+       `stessoMomento` non crea un evento: aggiunge una riga all'ULTIMO, e
+       `nextEvent` scrive tutto il testo di un evento in una volta — subito,
+       mentre l'animazione della mossa deve ancora partire. Le FRECCE erano
+       gia' a posto (`snapEvent` fotografa gli sbalzi, e il fotogramma vero si
+       applica all'impatto): a uscire in anticipo era solo il testo.
+       ⚠️ Le righe successive restano attaccate alla prima: una Crescita che
+       alza Attacco e Att. Speciale e' un annuncio solo, non due tocchi. */
+    let primaRiga = true;
+    const dillo = (t) => {
+      if (primaRiga) { messages.push(t); primaRiga = false; }
+      else stessoMomento(messages, t);
+    };
     // Nebbia: il lato protetto non subisce cali dall'avversario
     if (!isSelf && delta < 0 && game.lati && game.lati[latoDi(target)].mist > 0) {
-      stessoMomento(messages, `La Nebbia protegge ${target.name} dai cali!`);
+      dillo(`La Nebbia protegge ${target.name} dai cali!`);
       return;
     }
     // abilita' che bloccano i cali di statistiche causati dall'avversario (Corpochiaro)
     if (!isSelf && delta < 0 && findAb(target, "protectStats")) {
-      stessoMomento(messages, `${target.ability.it} impedisce il calo a ${target.name}!`);
+      dillo(`${target.ability.it} impedisce il calo a ${target.name}!`);
       return;
     }
     let calato = false;      // e' cambiato qualcosa davvero? lo legge Agonismo
@@ -9175,9 +9206,9 @@
       const before = target.stages[k];
       target.stages[k] = Math.max(-6, Math.min(6, before + delta));
       const name = STAT_IT[k] || k;
-      if (target.stages[k] === before) { stessoMomento(messages, `${name} di ${target.name} non può ${delta > 0 ? "salire" : "scendere"} oltre!`); continue; }
+      if (target.stages[k] === before) { dillo(`${name} di ${target.name} non può ${delta > 0 ? "salire" : "scendere"} oltre!`); continue; }
       const word = delta >= 2 ? "è aumentato molto" : delta === 1 ? "è aumentato" : delta === -1 ? "è diminuito" : "è diminuito molto";
-      stessoMomento(messages, `${name} di ${target.name} ${word}!`);
+      dillo(`${name} di ${target.name} ${word}!`);
       calato = true;
     }
     /* AGONISMO e Competizione: un calo causato dall'AVVERSARIO fa saltare la
@@ -15620,16 +15651,27 @@
       const k = Object.keys(foe.berries || {}).find(x => foe.berries[x] > 0);
       return k ? { tipo: "berry", chiave: k, n: foe.berries[k], nome: BERRY_DATA[k].it } : null;
     };
+    /* 🔴 SI LEGGEVA PRIMA DI VEDERE (§105).
+       Segnalazione: «assicurati che gli effetti si vedano dopo le animazioni:
+       le bacche vengono bruciate dopo l'animazione».
+       `stessoMomento` non aggiunge un evento: aggiunge una RIGA all'ultimo, e
+       `nextEvent` scrive tutto il testo di un evento in una volta, subito,
+       mentre l'animazione deve ancora partire. Va benissimo per «E'
+       superefficace!», che e' lo stesso momento dell'annuncio della mossa; e'
+       sbagliato per una CONSEGUENZA, che cosi' si legge prima di vederla — la
+       bacca risultava bruciata mentre la fiammata era ancora per aria.
+       `messages.push` invece crea un evento nuovo, che arriva dopo. */
     if (BRUCIA_LA_BACCA.has(move.id)) {
       const v = bacca(); if (!v) return;
       muoviOggetto(foe, null, v);
-      stessoMomento(messages, `La ${v.nome} di ${foe.name} è andata bruciata!`);
+      messages.push(`La ${v.nome} di ${foe.name} è andata bruciata!`);
       return;
     }
     if (MANGIA_LA_BACCA.has(move.id)) {
       const v = bacca(); if (!v) return;
       muoviOggetto(foe, null, v);
-      stessoMomento(messages, `${actor.name} si mangia la ${v.nome} di ${foe.name}!`);
+      messages.push(`${actor.name} si mangia la ${v.nome} di ${foe.name}!`);
+      // l'effetto della bacca e' lo stesso momento del mangiarla: quello si'
       mangiaBaccaSubito(actor, v.chiave, messages);
       return;
     }
@@ -15637,14 +15679,14 @@
       if (!isEnemySide(foe)) return;      // ai tuoi non si tocca niente (vedi sopra)
       const v = heldElenco(foe)[0]; if (!v) return;
       muoviOggetto(foe, null, v);
-      stessoMomento(messages, `${actor.name} fa cadere ${v.nome} a ${foe.name}!`);
+      messages.push(`${actor.name} fa cadere ${v.nome} a ${foe.name}!`);
       return;
     }
     if (RUBA_LOGGETTO.has(move.id)) {
       if (Math.random() >= 0.3) return;
       const v = heldElenco(foe)[0]; if (!v) return;
       muoviOggetto(foe, actor, v);
-      stessoMomento(messages, `${actor.name} ruba ${v.nome} a ${foe.name}!`);
+      messages.push(`${actor.name} ruba ${v.nome} a ${foe.name}!`);
     }
   }
 
