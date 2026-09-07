@@ -6018,9 +6018,21 @@
      come una figurina.
      ⚠️ La schiusa normale scende da 3 a 2: leggermente meno di prima, ma
      tutto il resto sale moltissimo. */
-  function caramelleDa(shiny, shinyVar, daUovoOBoss) {
+  /* 🔴 LA ROGUE BALL NON AVEVA NIENTE DI ROGUELIKE (§101).
+     Richiesta: «la rogue ball dovrebbe avere anche qualche effetto roguelike;
+     facciamo che il pkmn catturato da piu' caramelle». Aveva ragione: era una
+     Ultra Ball col nome piu' bello — stesso gesto, stesso risultato, solo un
+     moltiplicatore di cattura piu' alto. Adesso quello che ci prendi vale
+     TRIPLO in caramelle, cioe' paga sulla meta-progressione: e' esattamente il
+     mestiere di un oggetto «rogue», dare un vantaggio che resta dopo la run.
+     ⚠️ Si moltiplica con tutto il resto: un cromatico epico preso con la
+     Rogue Ball fa 20 × 3 = 60 caramelle. E' voluto — sono tre cose rare che
+     capitano insieme. */
+  const BONUS_CARAMELLE_ROGUE = 3;
+  function caramelleDa(shiny, shinyVar, daUovoOBoss, ball) {
     const bonusCrom = shiny ? 5 * Math.pow(2, shinyVar || 0) : 1;
-    return bonusCrom * (daUovoOBoss ? 2 : 1);
+    const bonusRogue = ball === "rogueballs" ? BONUS_CARAMELLE_ROGUE : 1;
+    return bonusCrom * (daUovoOBoss ? 2 : 1) * bonusRogue;
   }
   function daiCaramelle(speciesId, quante, messages, coda) {
     meta.candy = meta.candy || {};
@@ -6034,7 +6046,7 @@
   // Registra una specie catturata nel meta: starter sbloccato, caramella, IV migliori.
   /* ⚠️ `variant` qui è la FORMA (Unown-B, Rotom Lavaggio…), `shinyVar` è la
      LIVREA cromatica. Due cose diverse con nomi vicini: attenzione. */
-  function registerCaught(speciesId, shiny, ivs, messages, variant, abilIndex, nature, shinyVar, gender, boss) {
+  function registerCaught(speciesId, shiny, ivs, messages, variant, abilIndex, nature, shinyVar, gender, boss, ball) {
     if (variant && registerForm(S[speciesId].dex, variant) && messages) {
       const tot = collectableForms(speciesId);
       const got = Object.keys(meta.formsSeen[S[speciesId].dex]).length;
@@ -6080,7 +6092,7 @@
         if (sv > 0) messages.push(`💠 Livrea ${CROM_IT[sv]} di ${S[root].it}: come starter ora vale ${sv + 1} punti di fortuna`);
       }
     }
-    daiCaramelle(speciesId, caramelleDa(shiny, shinyVar, boss), messages);
+    daiCaramelle(speciesId, caramelleDa(shiny, shinyVar, boss, ball), messages);
     if (recordIVs(speciesId, ivs)) stessoMomento(messages, `📈 Nuovi IV migliori per ${S[speciesId].it}!`);
     /* L'abilità che AVEVA questo esemplare si sblocca per la specie: da qui in
        poi la puoi scegliere quando lo schieri come starter. La nascosta capita
@@ -6140,13 +6152,17 @@
     if (!ball || (game[ballKey] || 0) <= 0) return;
     game[ballKey]--;
     const enemy = game.enemy;
+    /* La percentuale si legge PRIMA del tiro, con gli stessi argomenti: serve
+       a sapere se il fuggitivo deve lasciare una Last Ball (§100). */
+    const pct = ball.mult >= 255 ? 100
+      : captureChancePct(enemy, multBall(ball, enemy), psPerBall(ball, enemy), pavimentoBall(ball, enemy));
     const esito = ball.mult >= 255
       ? { preso: true, scosse: 1, critica: true }
       : rollCaptureDettaglio(enemy, multBall(ball, enemy), psPerBall(ball, enemy), pavimentoBall(ball, enemy));
     // stessa animazione del lancio in battaglia (§ dondolio)
     game.phase = "MESSAGE";
     cmd().innerHTML = `<div class="msgbox"><div class="log-line">Lanci una ${ball.it} su ${enemy.name}…</div></div>`;
-    animaBall(ballKey, esito, () => risolviUltimaBall(enemy, esito.preso));
+    animaBall(ballKey, esito, () => risolviUltimaBall(enemy, esito.preso, pct, ballKey));
   }
 
   /* 🔴 IL LEGGENDARIO CHE TI SFUGGE LASCIA UNA LEGEND BALL.
@@ -6163,7 +6179,25 @@
     stessoMomento(messages, `Fra le tracce di ${enemy.name} trovi una Legend Ball!`);
   }
 
-  function risolviUltimaBall(enemy, caught) {
+  /* 🔴 QUELLO CHE TI SFUGGE DA UNA BALL QUASI CERTA (§100).
+     Richiesta: «la last ball facciamola anche droppare dai pkmn che fuggono da
+     una ball che aveva 75% o piu' di catturarli».
+     E' il gemello del drop della Legend Ball (§ sopra): il momento amaro non e'
+     perdere un tiro difficile — quello te l'aspettavi — ma perdere quello che
+     era praticamente fatto. Tre volte su quattro l'avevi, e resti a mani vuote.
+     La Last Ball e' il risarcimento giusto perche' e' l'unica che al tiro di
+     fine ondata conta i PS VERI: la volta dopo quel Pokemon lo prendi.
+     ⚠️ Solo SELVATICI. Alla squadra di un allenatore non si «sfugge»: li'
+     la Clepto Ball fallita e' gia' il suo rischio, e premiarla vorrebbe dire
+     pagare un furto andato male. Stessa regola di `dropLegendBall`. */
+  const SOGLIA_LAST_BALL = 75;
+  function dropLastBall(enemy, pct, messages) {
+    if (!enemy || enemy.trainer || !(pct >= SOGLIA_LAST_BALL)) return;
+    game.lastballs = (game.lastballs || 0) + 1;
+    stessoMomento(messages, `Era quasi fatta… nel divincolarsi ${enemy.name} fa cadere una Last Ball!`);
+  }
+
+  function risolviUltimaBall(enemy, caught, pct, ballKey) {
     const messages = [];
     if (caught) {
       const mon = makeFighter(enemy.speciesId, enemy.level, { shiny: enemy.shiny, shinyVar: enemy.shinyVar, ivs: enemy.ivs, variant: enemy.variant, abilIndex: enemy.abilIndex, gender: enemy.gender });
@@ -6171,10 +6205,11 @@
       ereditaPs(mon, enemy);        // i PS che aveva quando la ball si e' chiusa
       accogliPokemon(mon, messages, "Preso!");
       // meta-progressione: starter sbloccato + caramella + IV migliori
-      registerCaught(enemy.speciesId, enemy.shiny, enemy.ivs, messages, enemy.variant, enemy.abilIndex, enemy.nature, enemy.shinyVar, enemy.gender, enemy.boss);
+      registerCaught(enemy.speciesId, enemy.shiny, enemy.ivs, messages, enemy.variant, enemy.abilIndex, enemy.nature, enemy.shinyVar, enemy.gender, enemy.boss, ballKey);
     } else {
       messages.push(`Oh no! ${enemy.name} si è liberato!`);
       dropLegendBall(enemy, messages);
+      dropLastBall(enemy, pct, messages);
     }
     queueMessages(messages, () => chiediPostoInSquadra(finitaLaCattura));
   }
@@ -10804,15 +10839,17 @@
     const enemy = game.enemy;
     /* Il tiro si fa ORA, ma prima di raccontarlo si mostra l'animazione: la
        ball deve dondolare esattamente le volte che ha retto davvero. */
+    const pct = ball.mult >= 255 ? 100
+      : captureChancePct(enemy, multBall(ball, enemy), null, pavimentoBall(ball, enemy));
     const esito = ball.mult >= 255
       ? { preso: true, scosse: 1, critica: true }
       : rollCaptureDettaglio(enemy, multBall(ball, enemy), null, pavimentoBall(ball, enemy));
     game.phase = "MESSAGE";                    // niente comandi durante il lancio
     cmd().innerHTML = `<div class="msgbox"><div class="log-line">Lanci una ${ball.it} su ${enemy.name}…</div></div>`;
-    animaBall(ballKey, esito, () => risolviLancio(ballKey, ball, enemy, esito.preso));
+    animaBall(ballKey, esito, () => risolviLancio(ballKey, ball, enemy, esito.preso, pct));
   }
 
-  function risolviLancio(ballKey, ball, enemy, caught) {
+  function risolviLancio(ballKey, ball, enemy, caught, pct) {
     const log = makeLog();
 
     if (caught) {
@@ -10821,7 +10858,7 @@
       ereditaPs(mon, enemy);        // i PS che aveva quando la ball si e' chiusa
       const stolen = !!enemy.trainer;
       accogliPokemon(mon, log, stolen ? `${ico("clepto")} Rubato!` : "Preso!");
-      registerCaught(enemy.speciesId, enemy.shiny, enemy.ivs, log, enemy.variant, enemy.abilIndex, enemy.nature, enemy.shinyVar, enemy.gender, enemy.boss);
+      registerCaught(enemy.speciesId, enemy.shiny, enemy.ivs, log, enemy.variant, enemy.abilIndex, enemy.nature, enemy.shinyVar, enemy.gender, enemy.boss, ballKey);
       enemy.fainted = true; spegniStato(enemy);                        // esce dal campo
       game.capturedThisWave = true;                // niente seconda offerta a fine lotta
       if (stolen) {
@@ -10850,6 +10887,7 @@
 
     // fallita: il nemico agisce (il lancio è costato il turno)
     log.push(`Oh no! ${enemy.name} è sfuggito!`);
+    dropLastBall(enemy, pct, log);
     const enemyMove = enemyChooseMove();
     if (!enemy.fainted && !game.player.fainted) resolveAction(enemy, game.player, enemyMove, log);
     endOfTurnResidual(enemy, log);
@@ -14525,7 +14563,7 @@
       } },
 
     /* ===================== ROGUE ====================== */
-    { tier: "ROGUE", weight: 6, id: "rogueballs", label: "Rogue Ball ×5", desc: "cattura ×3", icon: "rb", ball: true,
+    { tier: "ROGUE", weight: 6, id: "rogueballs", label: "Rogue Ball ×5", desc: "cattura ×3 · chi ci prendi vale ×3 caramelle", icon: "rb", ball: true,
       target: "run", apply: () => { game.rogueballs = (game.rogueballs || 0) + 5; } },
     /* Tre e non cinque: e' una ball da tenere per l'occasione, non da spendere. */
     { tier: "ROGUE", weight: 4, id: "legendballs", label: "Legend Ball ×3", desc: "cattura ×2, ma i leggendari come i comuni", icon: "lb", ball: true,

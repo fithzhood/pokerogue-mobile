@@ -6488,3 +6488,56 @@ giorno si tocca quel pezzo, sono due schermate diverse con due problemi diversi.
 Verificato: tocco sullo sfondo → non parte nulla; Evolvi → parte, il tasto sparisce
 e l'Interrompi **non si muove di un pixel**; Interrompi a metà animazione →
 Aerodactyl resta Aerodactyl; senza interruzione, ✨Electabuzz → ✨Electivire.
+
+## 100. Chi ti sfugge da una ball quasi certa lascia una Last Ball (rev 190)
+
+> «La last ball facciamola anche droppare dai pkmn che fuggono da una ball che
+> aveva 75% o più di catturarli»
+
+È il gemello del drop della Legend Ball (§ sopra `dropLegendBall`). Il momento
+amaro non è perdere un tiro difficile — quello te l'aspettavi — ma perdere quello
+che era **praticamente fatto**: tre volte su quattro l'avevi, e resti a mani
+vuote. La Last Ball è il risarcimento giusto proprio perché è l'unica che al tiro
+di fine ondata conta i **PS veri**: la volta dopo quel Pokémon lo prendi.
+
+La percentuale si legge **prima** del tiro, con gli stessi argomenti che usa
+`rollCaptureDettaglio` (`multBall`, `psPerBall`/`null`, `pavimentoBall`), e si
+passa al risolutore. Vale per tutte e due le strade: il lancio **in lotta**
+(`risolviLancio`) e il tiro di **fine ondata** (`risolviUltimaBall`).
+
+⚠️ Solo **selvatici**. Alla squadra di un allenatore non si «sfugge»: lì la
+Clepto Ball fallita è già il suo rischio, e premiarla vorrebbe dire pagare un
+furto andato male. Stessa regola di `dropLegendBall`, e i due drop sono
+indipendenti — un leggendario che ti sfugge da un tiro quasi certo li lascia
+entrambi.
+
+Verificato: Poké Ball a **92%** su Nidoran♂, fallita → «Era quasi fatta… nel
+divincolarsi Nidoran♂ fa cadere una Last Ball!», `lastballs` 0 → 1. Controllo
+negativo con Ultra Ball al **70%**, fallita → nessuna Last Ball e solo la riga
+normale. (Il fallimento è stato forzato sostituendo `Math.random` per il solo
+istante del tiro: il conto della percentuale non ne usa, quindi la prova è
+pulita.)
+
+## 101. La Rogue Ball paga in caramelle (rev 190)
+
+> «E la rogue ball dovrebbe avere anche qualche effetto roguelike. Facciamo che
+> il pkmn catturato dà più caramelle»
+
+Aveva ragione: era una Ultra Ball col nome più bello — stesso gesto, stesso
+risultato, solo un moltiplicatore di cattura più alto. Ora quello che ci prendi
+vale **×3 in caramelle**, cioè paga sulla **meta-progressione**: è esattamente il
+mestiere di un oggetto «rogue», dare un vantaggio che resta dopo la run.
+
+`caramelleDa(shiny, shinyVar, daUovoOBoss, ball)` prende un quarto argomento, e
+`registerCaught` un undicesimo (`ball`), passato dalle due strade che sanno con
+cosa hai tirato — il lancio in lotta e il tiro di fine ondata. Le altre due
+(furto con Clepto Ball, Pokémon regalato da un incontro) non passano niente e
+restano com'erano.
+
+⚠️ Si moltiplica con tutto il resto: un cromatico epico preso con la Rogue Ball
+fa 20 × 3 = **60** caramelle. È voluto — sono tre cose rare che capitano insieme.
+
+La descrizione del premio lo dice: «cattura ×3 · chi ci prendi vale ×3 caramelle».
+
+Verificato: Nidoran♂ con la Rogue Ball → **+3 Caramelle**; Cottonee con la Poké
+Ball → **+1**.
