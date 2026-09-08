@@ -2227,6 +2227,17 @@
          leggeva «L'Attacco di X sale!» con la freccia verde gia' accesa. */
       pstg: p ? { ...p.stages } : null, estg: e ? { ...e.stages } : null,
       p2stg: p2 ? { ...p2.stages } : null, e2stg: e2 ? { ...e2.stages } : null,
+      /* 🔴 ANCHE LA BARRA DEGLI OGGETTI VA FOTOGRAFATA (§107).
+         Segnalazione: «bruciatutto sta bruciando bacche che non compaiono nella
+         lista degli oggetti dell'avversario… anzi, credo che l'icona sia stata
+         tolta prima che l'animazione finisse, e a me e' sembrato che la bacca
+         non ci fosse mai stata». Diagnosi sua, ed e' esatta.
+         Il §105 aveva spostato il TESTO dopo l'animazione, ma
+         `renderHeldBar` leggeva l'oggetto VIVO: la bacca spariva dalla barra
+         nell'istante in cui il motore la toglieva, cioe' mentre la fiammata
+         era ancora per aria. Le stesse frecce degli sbalzi avevano gia' avuto
+         questo trattamento (`pstg`), e per gli oggetti mancava. */
+      pheld: heldIcons(p), eheld: heldIcons(e),
     };
     if (ball) ev.ball = ball;
     // il colpo si "consuma": solo il 1° evento dopo scuote. Vale per tutti e
@@ -2252,7 +2263,8 @@
   const CAMPI_SNAP = ["php", "pmax", "pst", "pfaint", "ehp", "emax", "est", "efaint",
                       "p2hp", "p2max", "p2st", "p2faint", "e2hp", "e2max", "e2st", "e2faint",
                       "pmon", "emon", "p2mon", "e2mon",
-                      "pstg", "estg", "p2stg", "e2stg"];
+                      "pstg", "estg", "p2stg", "e2stg",
+                      "pheld", "eheld"];
   function riallinea(e) {
     if (!e.pre) { e.pre = {}; for (const k of CAMPI_SNAP) e.pre[k] = e[k]; }
     const s = snapEvent("");
@@ -2581,13 +2593,31 @@
   /* Una casella della mappa. `cls` aggiunge stati (ora / scelta / oltre /
      spenta), `tap` la rende toccabile. Il colore e' quello del bioma: cielo
      sopra, terra sotto, come lo sfondo che si vedra' arrivandoci. */
+  /* 🔴 «SPAZIO» ERA NERO SU NERO (§107).
+     Segnalazione: «perche' dopo grotta gelata non e' indicato il luogo
+     successivo?… ah no, la tappa dopo e' lo spazio ma e' scritto nero su nero
+     e non si leggeva». Il CSS diceva a chiare lettere l'assunto: «il testo e'
+     scuro perche' i cieli dei biomi sono chiari». Non tutti: Spazio e'
+     #383058 su #181028, l'Abisso e La Fine poco meglio. Su quelli il nome
+     spariva del tutto, e una tappa invisibile sembra una tappa che non c'e'.
+     Adesso il colore del testo lo decide la LUMINANZA del fondo, casella per
+     casella: chiaro sopra i biomi scuri, scuro sopra quelli chiari. */
+  function luminanza(hex) {
+    const h = String(hex || "").replace("#", "");
+    if (h.length < 6) return 1;
+    const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+    return (0.299 * r + 0.587 * g + 0.114 * b) / 255;   // luma percettiva
+  }
   function nodoZona(k, id, cls, tap) {
     const b = BIOMES[k] || { sky: "#555", ground: "#333" };
+    // il fondo e' una sfumatura: conta la media dei due capi
+    const chiaro = (luminanza(b.sky) + luminanza(b.ground)) / 2 < 0.45;
+    const inchiostro = chiaro ? "#f4f6fb" : "#0c1018";
     const tag = tap ? "button" : "div";
     const visto = (game.zoneViste || []).includes(k) ? ' <i class="zn-visto" title="ci sei gia\' passato"></i>' : "";
     const qui = k === game.biome ? '<span class="zn-qui">sei qui</span>' : "";
     return `<${tag} class="zn ${cls || ""}" id="${id}" data-z="${k}"
-        style="background:linear-gradient(${b.sky}, ${b.ground});"${tap ? ` data-tap="${k}"` : ""}>
+        style="background:linear-gradient(${b.sky}, ${b.ground});color:${inchiostro};"${tap ? ` data-tap="${k}"` : ""}>
       <span class="zn-nome">${nomeZona(k)}${visto}</span>${qui}</${tag}>`;
   }
 
@@ -6153,17 +6183,13 @@
     if (!ball || (game[ballKey] || 0) <= 0) return;
     game[ballKey]--;
     const enemy = game.enemy;
-    /* La percentuale si legge PRIMA del tiro, con gli stessi argomenti: serve
-       a sapere se il fuggitivo deve lasciare una Last Ball (§100). */
-    const pct = ball.mult >= 255 ? 100
-      : captureChancePct(enemy, multBall(ball, enemy), psPerBall(ball, enemy), pavimentoBall(ball, enemy));
     const esito = ball.mult >= 255
       ? { preso: true, scosse: 1, critica: true }
       : rollCaptureDettaglio(enemy, multBall(ball, enemy), psPerBall(ball, enemy), pavimentoBall(ball, enemy));
     // stessa animazione del lancio in battaglia (§ dondolio)
     game.phase = "MESSAGE";
     cmd().innerHTML = `<div class="msgbox"><div class="log-line">Lanci una ${ball.it} su ${enemy.name}…</div></div>`;
-    animaBall(ballKey, esito, () => risolviUltimaBall(enemy, esito.preso, pct, ballKey));
+    animaBall(ballKey, esito, () => risolviUltimaBall(enemy, esito.preso, ballKey));
   }
 
   /* 🔴 IL LEGGENDARIO CHE TI SFUGGE LASCIA UNA LEGEND BALL.
@@ -6180,31 +6206,33 @@
     stessoMomento(messages, `Fra le tracce di ${enemy.name} trovi una Legend Ball!`);
   }
 
-  /* 🔴 QUELLO CHE TI SFUGGE DA UNA BALL QUASI CERTA (§100).
-     Richiesta: «la last ball facciamola anche droppare dai pkmn che fuggono da
-     una ball che aveva 75% o piu' di catturarli».
-     E' il gemello del drop della Legend Ball (§ sopra): il momento amaro non e'
-     perdere un tiro difficile — quello te l'aspettavi — ma perdere quello che
-     era praticamente fatto. Tre volte su quattro l'avevi, e resti a mani vuote.
-     La Last Ball e' il risarcimento giusto perche' e' l'unica che al tiro di
-     fine ondata conta i PS VERI: la volta dopo quel Pokemon lo prendi.
-     ⚠️ Solo SELVATICI. Alla squadra di un allenatore non si «sfugge»: li'
-     la Clepto Ball fallita e' gia' il suo rischio, e premiarla vorrebbe dire
-     pagare un furto andato male. Stessa regola di `dropLegendBall`.
-     ⚠️ E solo al TIRO DI FINE ONDATA, non in lotta (§106). In lotta le ball
-     si tirano quante se ne vuole: bastava portare un selvatico comune al 50% e
-     rilanciare finche' una si apriva per stampare Last Ball. Il tiro di fine
-     ondata invece e' UNO per ondata, quindi il risarcimento non si puo'
-     coltivare — ed e' anche il posto dove la delusione e' vera, perche' li'
-     l'occasione non torna. Richiesta del proprietario, e ha ragione lui. */
-  const SOGLIA_LAST_BALL = 50;
-  function dropLastBall(enemy, pct, messages) {
-    if (!enemy || enemy.trainer || !(pct >= SOGLIA_LAST_BALL)) return;
-    game.lastballs = (game.lastballs || 0) + 1;
-    stessoMomento(messages, `Era quasi fatta… nel divincolarsi ${enemy.name} fa cadere una Last Ball!`);
+  /* 🔴 LA LAST BALL DIVENTA UNA CONSOLAZIONE A CONTATORE (§108).
+     Richiesta: «invece di ottenerla fallendo con una certa percentuale di
+     cattura mettiamola come pity dopo 10 catture fallite (solo pero' nella
+     fase di ultima chance). E facciamola incrementale: dopo i primi 10
+     fallimenti una sola last ball, dopo 20 se ne avranno 2 e cosi' via».
+     Sostituisce in pieno la soglia percentuale del §100/§106: quella premiava
+     la sfortuna GROSSA (perdere un tiro che era quasi fatto) e lasciava a mani
+     vuote chi le sbagliava tutte per poco. Un contatore invece garantisce che
+     una serie nera finisca, e la garanzia e' proprio il mestiere di un pity.
+     ⚠️ Contano solo i fallimenti del TIRO DI FINE ONDATA, che e' uno per
+     ondata: cosi' il contatore misura le occasioni vere e non si puo'
+     accelerare tirando ball in lotta. E' la stessa ragione per cui il §106
+     aveva gia' ristretto il drop a quella fase.
+     ⚠️ Incrementale sul TRAGUARDO, non sul totale: alla decima delusione
+     ne arriva 1, alla ventesima 2, alla trentesima 3. */
+  const PASSO_PITY_LAST_BALL = 10;
+  function contaCatturaFallita(enemy, messages) {
+    game.cattureFallite = (game.cattureFallite || 0) + 1;
+    if (game.cattureFallite % PASSO_PITY_LAST_BALL !== 0) return;
+    const quante = game.cattureFallite / PASSO_PITY_LAST_BALL;
+    game.lastballs = (game.lastballs || 0) + quante;
+    messages.push(quante === 1
+      ? `Dieci occasioni mancate… ti sei guadagnato una Last Ball!`
+      : `${game.cattureFallite} occasioni mancate… ti sei guadagnato ${quante} Last Ball!`);
   }
 
-  function risolviUltimaBall(enemy, caught, pct, ballKey) {
+  function risolviUltimaBall(enemy, caught, ballKey) {
     const messages = [];
     if (caught) {
       const mon = makeFighter(enemy.speciesId, enemy.level, { shiny: enemy.shiny, shinyVar: enemy.shinyVar, ivs: enemy.ivs, variant: enemy.variant, abilIndex: enemy.abilIndex, gender: enemy.gender });
@@ -6216,7 +6244,7 @@
     } else {
       messages.push(`Oh no! ${enemy.name} si è liberato!`);
       dropLegendBall(enemy, messages);
-      dropLastBall(enemy, pct, messages);
+      contaCatturaFallita(enemy, messages);
     }
     queueMessages(messages, () => chiediPostoInSquadra(finitaLaCattura));
   }
@@ -10051,9 +10079,9 @@
     if (gm) gm.classList.toggle("double", !!game.double);
     slot2("#enemy2", ".battler-slot.enemy2", E2, spriteCfg(ENEMY_SPRITE, E2), e2Ov, e2SprOv);
     slot2("#player2", ".battler-slot.ally2", P2, spriteCfg(PLAYER_SPRITE, P2), p2Ov, p2SprOv);
-    // barre degli oggetti tenuti (giocatore e avversario)
-    renderHeldBar("#held-ally", P);
-    renderHeldBar("#held-enemy", E);
+    // barre degli oggetti tenuti (giocatore e avversario): dal fotogramma, se c'e'
+    renderHeldBar("#held-ally", P, frame && "pheld" in frame ? frame.pheld : null);
+    renderHeldBar("#held-enemy", E, frame && "eheld" in frame ? frame.eheld : null);
     // chi e' dentro la ball resta invisibile anche dopo il ridisegno
     applicaDentroLaBall();
     const wi = $("#wave-indicator");
@@ -11266,7 +11294,7 @@
   const CAMPI_RUN = ["balls", "greatballs", "ultraballs", "rogueballs", "theftballs", "masterballs", "legendballs", "lastballs",
     "pendingTheft", "money", "stones", "charms", "tempBoost", "tempBoostN", "shopMarkup", "lati", "cuccagna",
     "cicloOffset", "encSeen", "encTiersSeen", "leagueIdx", "evilIdx", "finalBossIdx",
-    "rivalFemale", "rivalRoster", "rivalRubati", "evilRubati", "gymRoster",
+    "rivalFemale", "rivalRoster", "rivalRubati", "evilRubati", "gymRoster", "cattureFallite",
     "hasMegaRing", "hasDynamaxBand",
     "active", "biome", "zoneViste", "starterSpecies"];
 
@@ -14300,10 +14328,12 @@
   }
 
   /* Disegna la barra degli oggetti tenuti di un combattente. */
-  function renderHeldBar(sel, f) {
+  function renderHeldBar(sel, f, foto) {
     const el = document.querySelector(sel);
     if (!el) return;
-    const lista = heldIcons(f);
+    // `foto` e' l'elenco fotografato nell'evento: durante un'animazione e'
+    // quello di PRIMA, cosi' l'icona sparisce all'impatto e non un attimo prima
+    const lista = foto || heldIcons(f);
     el.innerHTML = lista.map(o =>
       `<div class="hi" style="background-image:url('${itemIcon(o.icon)}')">${o.n > 1 ? `<span>${o.n}</span>` : ""}</div>`).join("");
   }
@@ -16568,14 +16598,27 @@
       grantItem(pk,
         () => {
           game.money -= g.price;
-          /* ⚠️ Questo ramo azzerava `pendingLearns` (serve per le caramelle
-             comprate) e con esso buttava via anche il racconto della cura, che
-             all'emporio e' proprio il caso piu' comune: si compra una Pozione e
-             non si vedeva succedere niente. Ora si mette da parte prima. */
-          const cure = (game.pendingLearns || []).filter(x => x.cura).map(x => x.cura);
-          game.pendingLearns = [];
+          /* 🔴 L'EMPORIO BUTTAVA VIA LE MOSSE DA IMPARARE (§107).
+             Segnalazione: «ho usato un fungo memoria dall'emporio, mi ha fatto
+             scegliere pokemon e mossa ma non ha fatto nulla».
+             `insegnaTm` ha due strade: se il Pokemon ha meno di quattro mosse
+             gliela mette subito, se ne ha quattro mette in coda una
+             SOSTITUZIONE in `game.pendingLearns` — ed e' la schermata «quale
+             mossa dimentica?» che poi la chiude. Questo ramo pero' faceva
+             `game.pendingLearns = []`: teneva solo le voci di cura e buttava
+             via tutto il resto. Quindi il Fungo (e lo Strano fungo, e ogni MT)
+             comprato all'emporio spariva nel nulla appena il bersaglio aveva
+             gia' quattro mosse — cioe' quasi sempre.
+             Il ramo dei PREMI faceva gia' la cosa giusta (`processLearns`), che
+             sa gestire da sola tutte e tre le voci: cure, annunci di solo testo
+             e mosse da sostituire. Qui non serviva un trattamento speciale,
+             serviva la stessa chiamata. */
           renderScene();
-          if (cure.length) { hideMeta(); suonaCure(cure, () => showReward(picks)); return; }
+          if ((game.pendingLearns || []).length) {
+            hideMeta();
+            processLearns(() => showReward(picks));
+            return;
+          }
           showReward(picks);
         },
         () => showReward(picks));

@@ -6882,3 +6882,61 @@ arriva 1, alla ventesima 2, alla trentesima 3.
 Verificato: a 9 fallimenti + 1 → «Dieci occasioni mancate… ti sei guadagnato una
 Last Ball!», totale 1. A 19 + 1 → «20 occasioni mancate… ti sei guadagnato 2 Last
 Ball!», totale 3.
+
+## 109. Passoindietro, la forma alla cattura, gli strumenti X (rev 197)
+
+### Passoindietro e Fuggifuggi non facevano niente
+
+> «Controlla l'abilità passoindietro»
+
+Nei dati estratti hanno `attrs: []`, come tutte quelle che l'estrattore non sa
+tradurre: erano due **descrizioni senza motore**. Nell'originale sono
+`PostDamageForceSwitchAbAttr` — se un colpo porta i PS da **sopra** metà a metà o
+meno, e il Pokémon resta in piedi, lascia il campo.
+
+⚠️ Il **salto della soglia** è tutto: chi è già sotto metà non se ne va a ogni
+colpo, o non si combatterebbe più. Per questo `doDamage` si segna `psPrima` in
+cima, prima del ciclo dei colpi.
+
+⚠️ Il ricambio si controlla **prima** di chiamare `chiediCambio`: senza, quella
+scriverebbe «ma non c'è nessuno che possa sostituirlo» a ogni colpo. Nell'originale
+l'abilità semplicemente non scatta.
+
+Verificato: Spheal a 32/55 (sopra metà), colpito sotto metà → «Passoindietro:
+Spheal si sfila dalla lotta!» → «Spheal lascia il campo!» → «Tocca a Staryu!».
+
+### La forma, nella schermata di cattura
+
+> «Nella schermata di cattura deve anche comparire l'informazione sulla variante
+> di pokemon mai catturata come le forme di vivillon se mi mancano o no»
+
+Le livree di Vivillon sono venti, i gusti di Alcremie dieci, e si collezionano a
+parte dal dex (`meta.formsSeen`). La riga «già nel dex» parla della **specie** e
+non diceva niente della **forma**: davanti a un Vivillon non sapevi se quella
+livrea ce l'avevi — ed è l'unica cosa che conta, su un Pokémon che si prende solo
+per la livrea.
+
+Ora, quando l'esemplare ha una forma **e** la specie ne ha più d'una da
+collezionare:
+
+```
+🦋 Bianco — forma mai vista (0/5 di Floette)
+```
+
+Vale anche per la schermata del furto, che condivide `infoCattura`.
+
+### Gli strumenti X erano invisibili
+
+> «Non c'è nessuna indicazione visiva che gli oggetti x funzionino o siano attivi»
+
+Vero: `tempBoost` vale +20% **per pezzo** su tutta la squadra e dura **cinque
+ondate**, ma non compariva da nessuna parte — né quanto, né per quanto ancora. Un
+potenziamento che non si vede non si può usare per decidere, e a qualche ondata
+dall'acquisto non ti ricordi nemmeno di averlo comprato.
+
+Ora una riga di chip sotto i quattro comandi, e solo quando c'è qualcosa da dire:
+`Dif +20% 2◆ · D.Sp +20% 3◆ · Att +20% 4◆`, dove il rombo conta le ondate che
+restano.
+
+⚠️ Sta nella **fascia comandi** e non sul riquadro PS di un Pokémon perché il
+bonus vale per la squadra, non per chi è in campo.
