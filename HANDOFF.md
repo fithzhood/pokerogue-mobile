@@ -6940,3 +6940,28 @@ restano.
 
 ⚠️ Sta nella **fascia comandi** e non sul riquadro PS di un Pokémon perché il
 bonus vale per la squadra, non per chi è in campo.
+
+### ⚠️ Il guardiano della clear e la parola «Fuggifuggi»
+
+Pubblicando la 197 la clear **non è stata scritta**: il guardiano ha trovato una
+parola proibita in `pokerogue-clear.js`. Era un falso positivo, e vale la pena
+saperlo perché ricapiterà.
+
+**«Fuggifuggi» contiene «gif»**: fug‑**gif**‑uggi. Bastava nominare l'abilità in
+un commento. La regola ha già due ritagli per lo stesso motivo — `(?<!strin)` per
+`JSON.stringify`, `(?![tT])` per `NATURAL_GIFT`, che è una mossa vera — e adesso
+ne ha un terzo:
+
+```python
+r'(?<!strin)(?<![fF]ug)(?<!FUG)(?-i:gif|Gif|GIF)(?![tT])'
+```
+
+Provato su tutti i casi: *Fuggifuggi*, *FUGGIFUGGI*, *fuggifuggi*,
+*NATURAL_GIFT*, *JSON.stringify* passano; *gifTocco*, *gifMostra*, *Gif* e una
+GIF scritta per esteso vengono ancora bloccate.
+
+⚠️ Il guardiano ha fatto **esattamente il suo mestiere**: ha rifiutato di
+scrivere e ha detto quale file e quale parola. Il file vecchio è rimasto al suo
+posto, quindi non è mai uscita una clear sbagliata. Quando blocca, la domanda da
+farsi è «è una parola vera?» — se sì si aggiunge un ritaglio, se no si cambia il
+codice.

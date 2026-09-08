@@ -8705,6 +8705,8 @@
       return true;
     }
 
+    // PS del bersaglio PRIMA di tutti i colpi: li legge Passoindietro (§109)
+    const psPrima = foe.hp;
     // Multilente: un colpo in piu' (a danno ridotto, come nell'originale)
     const lens = (actor.held && actor.held.multilens) || 0;
     const hits = (multi ? rollMultiHit(multi.mode, actor) : 1) + lens;
@@ -8871,6 +8873,30 @@
     if (immune && total === 0) { stessoMomento(messages, `Non ha effetto su ${foe.name}...`); return false; }
     // memoria per Contrattacco/Specchiovelo/Metalscoppio/Ritorsione e Pazienza
     segnaDannoSubito(foe, actor, move, total);
+
+    /* 🔴 PASSOINDIETRO E FUGGIFUGGI NON FACEVANO NIENTE (§109).
+       Segnalazione: «controlla l'abilita' passoindietro». Nei dati estratti
+       hanno `attrs: []` come tutte quelle che l'estrattore non sa tradurre,
+       quindi erano due descrizioni senza motore: il Pokemon restava li'.
+       Nell'originale sono `PostDamageForceSwitchAbAttr`: se un colpo porta i PS
+       da SOPRA meta' a meta' o meno, e il Pokemon resta in piedi, lascia il
+       campo. Il salto della soglia e' tutto: chi era gia' sotto meta' non se ne
+       va a ogni colpo, o non si combatterebbe piu'.
+       ⚠️ Si controlla che ci sia davvero un ricambio PRIMA di chiamare
+       `chiediCambio`, che se non c'e' scriverebbe «ma non c'e' nessuno che
+       possa sostituirlo»: nell'originale l'abilita' semplicemente non scatta,
+       e quella riga di troppo sarebbe rumore su ogni colpo. */
+    if (!foe.fainted && total > 0 && (ha(foe, "EMERGENCY_EXIT") || ha(foe, "WIMP_OUT"))
+        && psPrima > foe.maxHp / 2 && foe.hp <= foe.maxHp / 2) {
+      const ricambio = isEnemySide(foe)
+        ? !!(game.enemyQueue && game.enemyQueue.length)
+        : game.party.some(x => !x.fainted && x !== game.player && x !== game.player2);
+      if (ricambio) {
+        chiediCambio(foe, false, messages,
+          `${nomeAb(foe, ha(foe, "EMERGENCY_EXIT") ? "EMERGENCY_EXIT" : "WIMP_OUT")}: ${foe.name} si sfila dalla lotta!`,
+          true);
+      }
+    }
 
     /* Il danno e' stato applicato: l'istantanea dell'evento della mossa va
        riallineata, cosi' la barra cala su QUELLA schermata (alla fine della
@@ -10184,6 +10210,30 @@
   const serveSecondoComando = () =>
     game.double && game.chooser === 0 && game.player2 && !game.player2.fainted;
 
+  /* 🔴 GLI STRUMENTI X ERANO INVISIBILI (§109).
+     Segnalazione: «non c'e' nessuna indicazione visiva che gli oggetti x
+     funzionino o siano attivi». Ed era vero: `tempBoost` vale +20% per pezzo
+     su TUTTA la squadra e dura cinque ondate, ma non compariva da nessuna
+     parte — ne' quanto, ne' per quanto ancora. Un potenziamento che non si
+     vede non si puo' nemmeno usare per decidere, e a ondate di distanza
+     dall'acquisto non ti ricordi nemmeno di averlo.
+     ⚠️ Vale per la SQUADRA, non per chi e' in campo: per questo sta nella
+     fascia comandi e non sul riquadro PS di un Pokemon. */
+  const X_SIGLA = { atk: "Att", def: "Dif", spatk: "A.Sp", spdef: "D.Sp",
+                    spd: "Vel", acc: "Prec", crit: "Critico" };
+  function rigaStrumentiX() {
+    const chips = [];
+    for (const k in (game.tempBoost || {})) {
+      const onde = game.tempBoost[k];
+      if (!(onde > 0)) continue;
+      const n = (game.tempBoostN || {})[k] || 1;
+      const quanto = k === "crit" ? "" : k === "acc" ? ` +${n}` : ` +${20 * n}%`;
+      chips.push(`<span class="xchip" title="strumento X: dura ancora ${onde} ondate">${
+        X_SIGLA[k] || k}${quanto} <b>${onde}◆</b></span>`);
+    }
+    return chips.length ? `<div class="x-attivi">${chips.join("")}</div>` : "";
+  }
+
   function showMainMenu() {
     /* Il salvataggio della LOTTA si scrive qui: e' l'unico punto fermo di una
        battaglia — nessuna animazione in corso, nessuna azione a meta'. In
@@ -10203,7 +10253,7 @@
         <button class="btn main-team"  data-act="team">Squadra</button>
         <button class="btn main-run"   data-act="run"
           title="${motivoNoFuga() || "probabilità ~" + probabilitaFuga() + "%"}">Fuggi</button>
-      </div>${game.chooser === 1 ? `<div class="back-row"><button class="btn back" data-act="rifai">↩ Rifai la prima scelta</button></div>` : ""}`;
+      </div>${rigaStrumentiX()}${game.chooser === 1 ? `<div class="back-row"><button class="btn back" data-act="rifai">↩ Rifai la prima scelta</button></div>` : ""}`;
     if (game.chooser === 1) cmd().querySelector('[data-act="rifai"]').onclick = () => {
       game.chooser = 0; game.queued = null; showMainMenu();
     };
@@ -10720,12 +10770,30 @@
        rubandolo) quegli strumenti diventano tuoi — a volte valgono più del
        Pokémon. Prima non lo diceva nessuno, e l'unico modo di scoprirlo era
        prenderlo e andare a guardare nella scheda. */
+    /* 🔴 LE FORME NON LE DICEVA NESSUNO (§109).
+       Richiesta: «nella schermata di cattura deve anche comparire
+       l'informazione sulla variante di pokemon mai catturata, come le forme di
+       vivillon, se mi mancano o no». Le livree di Vivillon sono venti, i gusti
+       di Alcremie dieci, e si collezionano a parte dal dex
+       (`meta.formsSeen`): la riga «gia' nel dex» parlava della specie e non
+       diceva niente della forma, quindi davanti a un Vivillon non sapevi se
+       quella livrea lì ce l'avevi o no — ed e' l'unica cosa che conta, su un
+       Pokemon che si prende solo per la livrea. */
+    const sp = S[e.speciesId] || {};
+    const totForme = collectableForms(e.speciesId);
+    const vistePerDex = (meta.formsSeen || {})[sp.dex] || {};
+    const rigaForma = (e.variant && totForme > 1)
+      ? `<div class="cap-riga ${vistePerDex[e.variant] ? "" : "nuovo"}">🦋 ${
+          formNameOf(e.speciesId, e.variant)} — ${
+          vistePerDex[e.variant] ? "già vista" : "<b>forma mai vista</b>"} (${
+          Object.keys(vistePerDex).length}/${totForme} di ${sp.it})</div>`
+      : "";
     const roba = heldSummary(e);
     const rigaHeld = roba
       ? `<div class="cap-riga">${ico("zaino")} Tiene: <b>${roba}</b></div>` : "";
     // Qui lo scanner è SEMPRE acceso: la lente spenta non nasconde nulla.
     const chipIv = e.ivs ? badgeIV(e, true) : "";
-    return `<div class="cap-info">${rigaDex}${rigaCrom}${rigaAb}${rigaHeld}${
+    return `<div class="cap-info">${rigaDex}${rigaCrom}${rigaForma}${rigaAb}${rigaHeld}${
       chipIv ? `<div class="cap-iv">${chipIv}</div>` : ""}</div>`;
   }
 

@@ -72,8 +72,14 @@ try:
         ],
         'rinomina': [],
         'vietate': [
-            # (?![tT]) perche' NATURAL_GIFT e' una mossa vera e contiene "GIF"
-            r'(?<!strin)(?-i:gif|Gif|GIF)(?![tT])', 'easter', 'gifTocco', 'gifPronte',
+            # Tre ritagli, tutti per parole VERE che contengono "gif":
+            #   (?<!strin)   -> JSON.stringify
+            #   (?![tT])     -> NATURAL_GIFT, che e' una mossa
+            #   (?<![fF]ug)  -> Fuggifuggi, che e' un'abilita': fug-GIF-uggi.
+            #                   Scoperto pubblicando: il guardiano ha bloccato la
+            #                   clear per un commento che nominava l'abilita'.
+            r'(?<!strin)(?<![fF]ug)(?<!FUG)(?-i:gif|Gif|GIF)(?![tT])',
+            'easter', 'gifTocco', 'gifPronte',
             'gifMostra', 'gifCarica', 'DecompressionStream',
         ],
         'copia': [],
