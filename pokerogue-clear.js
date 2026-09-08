@@ -1263,9 +1263,37 @@
      contro i Terastallizzati, che noi non abbiamo. Quindi qui: chi ce l'ha non
      viene mai colpito in super efficacia, e nemmeno resiste a qualcosa. */
   const ASTRALE = "STELLAR";
-  function typeMultiplier(moveType, defenderTypes) {
+  /* 🔴 LIOFILIZZAZIONE E' SUPEREFFICACE SULL'ACQUA (§110).
+     E' l'unica eccezione scritta a mano alla tabella dei tipi, in tutti i
+     giochi: Ghiaccio contro Acqua vale 0,5, tranne per lei che vale 2. Da noi
+     era una mossa Ghiaccio qualunque, cioe' andava male proprio contro il tipo
+     per cui la si sceglie. */
+  /* Potenza che dipende da come stanno le cose adesso. Restituisce la potenza
+     PIENA, non un moltiplicatore. */
+  const sbalziPositivi = f => Object.values(f.stages).filter(v => v > 0).reduce((t, v) => t + v, 0);
+  const POTENZA_CONDIZIONATA = {
+    // VEICOLAFORZA e TRACOTANZA: 20, piu' 20 per ogni stadio positivo
+    STORED_POWER: (a) => 20 + 20 * sbalziPositivi(a),
+    POWER_TRIP:   (a) => 20 + 20 * sbalziPositivi(a),
+    // MANIEREFORTI e SVEGLIOPACCA: doppie su chi sta come dicono loro
+    SMELLING_SALTS: (_a, d) => d.status === "PARALYSIS" ? 140 : 70,
+    WAKE_UP_SLAP:   (_a, d) => d.status === "SLEEP" ? 140 : 70,
+    // FACCIATA: doppia se chi la usa sta male
+    FACADE: (a) => ["BURN", "POISON", "TOXIC", "PARALYSIS"].includes(a.status) ? 140 : 70,
+  };
+
+  function typeMultiplier(moveType, defenderTypes, moveId) {
     if (defenderTypes.includes(ASTRALE)) return 1;
     if (moveType === ASTRALE) return 1;
+    if (moveId === "FREEZE_DRY" && defenderTypes.includes("WATER")) {
+      let m = 2;
+      for (const dt of defenderTypes) {
+        if (dt === "WATER") continue;
+        const r = (CHART[moveType] || {})[dt];
+        if (r !== undefined) m *= r;
+      }
+      return m;
+    }
     let mult = 1;
     const row = CHART[moveType] || {};
     for (const dt of defenderTypes) {
@@ -1298,7 +1326,7 @@
     /* ELETTRIZZA: per questo turno, qualunque cosa lanci diventa Elettro. */
     if (attacker.volatile && attacker.volatile.elettro && move.type !== "ELECTRIC")
       move = Object.assign({}, move, { type: "ELECTRIC" });
-    let eff = typeMultiplier(move.type, defender.types);
+    let eff = typeMultiplier(move.type, defender.types, move.id);
     /* Preveggenza, Segugio, Miracolvista: il bersaglio non ha piu' l'immunita'
        ai tipi indicati (Spettro contro Normale/Lotta, Buio contro Psico). */
     if (eff === 0 && defender.volatile && (defender.volatile.smascherato || []).includes(move.type)) eff = 1;
@@ -1331,8 +1359,33 @@
        gonfiati). I propri se li tiene. */
     const ignoraLoro = ha(attacker, "UNAWARE");
     const ignoraMiei = ha(defender, "UNAWARE");
-    const atkStage = ignoraMiei ? 0 : (isPhysical ? attacker.stages.atk : attacker.stages.spatk);
-    const defStage = ignoraLoro ? 0 : (isPhysical ? defender.stages.def : defender.stages.spdef);
+    /* 🔴 LE MOSSE CHE CAMBIANO LE CARTE IN TAVOLA (§110).
+       Quattro mosse non usano le statistiche che ti aspetteresti, e nei dati
+       estratti hanno `attrs: []`: arrivavano al motore come attacchi normali,
+       cioe' con la formula sbagliata.
+         · Schiacciacorpo  `DefAtkAttr`      → attacca con la propria DIFESA
+         · Psicoshock       `DefDefAttr`      → speciale, ma picchia sulla Difesa
+         · Spadamistica     `DefDefAttr`        FISICA del bersaglio
+         · Ripicca          `TargetAtkUserAtkAttr` → usa l'ATTACCO DI CHI HA
+                                                    DAVANTI, non il proprio
+       Sono mosse da manuale (un Corviknight vive di Schiacciacorpo), e usarle
+       con la formula normale non e' un dettaglio: cambia il danno di un fattore
+       due su chi e' costruito per loro. */
+    const conLaDifesa = move.id === "BODY_PRESS";
+    const suLaDifesa  = move.id === "PSYSHOCK" || move.id === "SECRET_SWORD";
+    const conIlSuoAtk = move.id === "FOUL_PLAY";
+    /* 🔴 E TRE CHE FANNO FINTA CHE NON TI SIA POTENZIATO.
+       `IgnoreOpponentStatStagesAttr`: gli sbalzi del bersaglio non contano,
+       come fa Imprudenza ma per una mossa sola. */
+    const ignoraSbalzi = move.id === "SACRED_SWORD" || move.id === "DARKEST_LARIAT"
+                      || move.id === "CHIP_AWAY" || move.id === "NIHIL_LIGHT";
+    const chiAttacca = conIlSuoAtk ? defender : attacker;
+    const atkStage = ignoraMiei ? 0
+      : conLaDifesa ? chiAttacca.stages.def
+      : (isPhysical ? chiAttacca.stages.atk : chiAttacca.stages.spatk);
+    const defStage = (ignoraLoro || ignoraSbalzi) ? 0
+      : suLaDifesa ? defender.stages.def
+      : (isPhysical ? defender.stages.def : defender.stages.spdef);
     // abilita': moltiplicatori di statistica (es. Grancampione ATK x2, Corposcelto)
     const atkAb = abStatMult(attacker, isPhysical ? "ATK" : "SPATK");
     // Evolcondensa: +50% alle difese se la specie puo' ancora evolvere
@@ -1345,11 +1398,13 @@
     const pelledura = (isPhysical && defender.status && ha(defender, "MARVEL_SCALE")) ? 1.5 : 1;
     const defAb = abStatMult(defender, isPhysical ? "DEF" : "SPDEF") * evio * foltopelo * pelledura;
     const grinta = (isPhysical && attacker.status && ha(attacker, "GUTS")) ? 1.5 : 1;
-    const atk = (isPhysical ? attacker.stats.atk : attacker.stats.spatk) * stageMult(atkStage) * atkAb * grinta
+    const statAtt = conLaDifesa ? "def" : (isPhysical ? "atk" : "spatk");
+    const atk = chiAttacca.stats[statAtt] * stageMult(atkStage) * atkAb * grinta
               * tempStatMult(attacker, isPhysical ? "atk" : "spatk");
     /* MIRABILZONA: Difesa e Difesa Speciale si scambiano — la STATISTICA, non
        gli stadi, come nell'originale. */
-    const statDif = game.mirabil > 0 ? (isPhysical ? "spdef" : "def") : (isPhysical ? "def" : "spdef");
+    const statDif = suLaDifesa ? "def"
+      : game.mirabil > 0 ? (isPhysical ? "spdef" : "def") : (isPhysical ? "def" : "spdef");
     const def = defender.stats[statDif] * stageMult(crit ? Math.min(0, defStage) : defStage) * defAb
               * tempStatMult(defender, isPhysical ? "def" : "spdef");
 
@@ -1374,6 +1429,14 @@
         ? power * Math.pow(2, con.n - 1)
         : power * con.n;
     }
+    /* 🔴 POTENZE CHE DIPENDONO DALLA SITUAZIONE (§110).
+       Diverse da quelle di `POTENZA_VARIABILE`: quella tabella la legge solo
+       chi ha potenza −1 nei dati, e queste cinque la potenza ce l'hanno
+       scritta — quindi non ci passavano mai. Vanno applicate QUI, dove `power`
+       e' ancora vivo: mettendole piu' in basso (ci sono cascato) si moltiplica
+       un numero che il danno ha gia' usato, e non cambia niente. */
+    const cond = POTENZA_CONDIZIONATA[move.id];
+    if (cond && opts.potenza == null) power = cond(attacker, defender);
     const lowHp = findAb(attacker, "lowHpTypeBoost");
     if (lowHp && move.type === lowHp.moveType && attacker.hp <= attacker.maxHp / 3) power *= lowHp.mult;
     const tb = findAb(attacker, "typeBoost");
@@ -1417,8 +1480,14 @@
     // CECCHINO: il brutto colpo vale 2,25 invece di 1,5
     const critMult = crit ? (ha(attacker, "SNIPER") ? 2.25 : 1.5) : 1;
     const rand = 0.85 + Math.random() * 0.15;    // varianza 85-100%
-    // la scottatura dimezza il fisico — ma non a chi ha DENTISTRETTI
-    const burn = (isPhysical && attacker.status === "BURN" && !ha(attacker, "GUTS")) ? 0.5 : 1;
+    /* FACCIATA (§110): raddoppia se chi la usa e' scottato, avvelenato o
+       paralizzato, e la scottatura non le dimezza il danno. Nei dati aveva solo
+       `attrs: []`, quindi era un attacco da 70 e basta — mentre e' proprio la
+       mossa che rende utile stare male. */
+    const facciata = move.id === "FACADE"
+      && ["BURN", "POISON", "TOXIC", "PARALYSIS"].includes(attacker.status);
+    // la scottatura dimezza il fisico — ma non a chi ha DENTISTRETTI (ne' a Facciata)
+    const burn = (isPhysical && attacker.status === "BURN" && !ha(attacker, "GUTS") && !facciata) ? 0.5 : 1;
     // abilita' del difensore: riduce il danno di certi tipi (Grassottello, Antifuoco)
     let abMult = 1;
     for (const a of abAttrs(defender)) if (a.kind === "typeDamageMult" && a.moveType === move.type) abMult *= a.mult;
@@ -7267,7 +7336,7 @@
   function quantoLePrende(chi, da) {
     const mosse = (da.moves || []).map(m => M[m.id]).filter(m => m && m.category !== "STATUS");
     if (!mosse.length) return 1;
-    return Math.max(...mosse.map(m => typeMultiplier(m.type, chi.types)));
+    return Math.max(...mosse.map(m => typeMultiplier(m.type, chi.types, m.id)));
   }
   function aiCambioMigliore(e) {
     if (!e || e.fainted || !game.enemyQueue || !game.enemyQueue.length) return null;
@@ -8122,6 +8191,15 @@
         * abStatMult(actor, "ACC") * lente / abStatMult(foe, "EVA");
       if (Math.random() * 100 >= chance) {
         stessoMomento(messages, `${actor.name} ha mancato il bersaglio!`);
+        /* CALCIOSALTO e CALCINVOLO (§110): mancando ci si schianta a terra e si
+           perde meta' dei propri PS massimi. Senza questo erano due mosse da
+           100 e 130 senza nessun rischio, cioe' due mosse sbagliate. */
+        if ((move.id === "JUMP_KICK" || move.id === "HIGH_JUMP_KICK") && !actor.fainted) {
+          const male = Math.max(1, Math.floor(actor.maxHp / 2));
+          actor.hp = Math.max(0, actor.hp - male); actor._justHit = true;
+          messages.push(`${actor.name} si schianta a terra e perde ${male} PS!`);
+          if (actor.hp <= 0) { actor.fainted = true; spegniStato(actor); messages.push(`${actor.name} è esausto!`); }
+        }
         /* Un colpo a vuoto SPEZZA il vincolo: la furia si placa (e chi si placa
            resta confuso), il rotolamento riparte da trenta. E' la regola dei
            giochi ed e' `frenzyMissFunc` nell'originale. */
@@ -8236,6 +8314,7 @@
        non li ha gia' dati il ciclo dei colpi — stessa regola, e stessa
        bandierina, degli effetti a percentuale (§105). */
     if (landed && !game._secondariGiaDati) effettiSuOggetti(actor, foe, move, messages);
+    if (landed) effettiDiMossa(actor, foe, move, messages);
 
     if (landed && !actor.fainted && CAMBIA_CHI_COLPISCE.has(move.id)) {
       chiediCambio(actor, false, messages, `${actor.name} torna indietro!`, true);
@@ -8497,6 +8576,8 @@
     }
     /* FORZA INTERIORE: non tentenna mai. */
     if (actor.volatile.flinch && ha(actor, "INNER_FOCUS")) actor.volatile.flinch = false;
+    // CUORDECISO (§110): il tentennamento gli fa saltare la Velocita' di uno
+    if (actor.volatile.flinch && ha(actor, "STEADFAST")) applyStatStage(actor, ["SPD"], 1, messages, true);
     if (actor.volatile.flinch) { messages.push(`${actor.name} ha tentennato!`); return false; }
     // SBADIGLIO: al secondo turno si addormenta
     if (actor.volatile.drowsy > 0 && --actor.volatile.drowsy <= 0) {
@@ -8547,7 +8628,7 @@
      è andato a segno (serve a decidere se applicare gli effetti). */
   function dannoSenzaPotenza(actor, foe, move, messages) {
     // l'immunità di tipo vale anche per il danno fisso
-    if (typeMultiplier(move.type, foe.types) === 0) {
+    if (typeMultiplier(move.type, foe.types, move.id) === 0) {
       stessoMomento(messages, `Non ha effetto su ${foe.name}...`);
       return false;
     }
@@ -8697,7 +8778,7 @@
     }
 
     if (attrs.some(a => a.kind === "ohko")) {
-      if (typeMultiplier(move.type, foe.types) === 0) { messages.push(`Non ha effetto su ${foe.name}...`); return false; }
+      if (typeMultiplier(move.type, foe.types, move.id) === 0) { messages.push(`Non ha effetto su ${foe.name}...`); return false; }
       if (foe.boss) { messages.push(`Gli scudi del boss annullano il colpo!`); return true; }
       if (ha(foe, "STURDY")) { messages.push(`${nomeAb(foe, "STURDY")}: il colpo da KO non funziona su ${foe.name}!`); return false; }
       foe.hp = 0; foe._justHit = true; foe.fainted = true; spegniStato(foe);
@@ -8871,6 +8952,19 @@
     if (actor.held && actor.held.gripclaw && total > 0 && move.contact
         && Math.random() < 0.1 * actor.held.gripclaw) rubaOggetto(actor, foe, messages, "I Presartigli", "rubano");
     if (immune && total === 0) { stessoMomento(messages, `Non ha effetto su ${foe.name}...`); return false; }
+    /* 🔴 LE ABILITA' CHE RISPONDONO AL COLPO (§110). Sette, tutte con
+       `attrs: []` nei dati e tutte con lo stesso aggancio: hai preso un colpo,
+       e succede qualcosa. Nell'originale sono `PostDefendStatStageChangeAbAttr`
+       e parenti. */
+    if (!foe.fainted && total > 0) {
+      if (ha(foe, "STAMINA")) applyStatStage(foe, ["DEF"], 1, messages, true);
+      if (ha(foe, "WATER_COMPACTION") && move.type === "WATER") applyStatStage(foe, ["DEF"], 2, messages, true);
+      if (ha(foe, "JUSTIFIED") && move.type === "DARK") applyStatStage(foe, ["ATK"], 1, messages, true);
+      if (ha(foe, "STEAM_ENGINE") && (move.type === "FIRE" || move.type === "WATER")) applyStatStage(foe, ["SPD"], 6, messages, true);
+      if (ha(foe, "COTTON_DOWN") && !actor.fainted) applyStatStage(actor, ["SPD"], -1, messages, false);
+      // GRANCOLLERA: un brutto colpo manda l'Attacco al massimo
+      if (anyCrit && ha(foe, "ANGER_POINT")) applyStatStage(foe, ["ATK"], 12, messages, true);
+    }
     // memoria per Contrattacco/Specchiovelo/Metalscoppio/Ritorsione e Pazienza
     segnaDannoSubito(foe, actor, move, total);
 
@@ -8950,6 +9044,15 @@
       /* CANNONBECCO: il becco e' arroventato finche' non parte il colpo. */
       if (foe.volatile.annuncio === "BEAK_BLAST" && !actor.fainted) {
         applyStatus(actor, "BURN", messages, M.BEAK_BLAST.it, true);
+      }
+      /* VELENTOCCO (§110): chi tocca rischia il veleno. E' dell'ATTACCANTE,
+         non del difensore: sta qui perche' qui si sa che c'e' stato contatto. */
+      if (ha(actor, "POISON_TOUCH") && !foe.fainted && Math.random() < 0.3) {
+        applyStatus(foe, "POISON", messages, nomeAb(actor, "POISON_TOUCH"), true);
+      }
+      /* VISCOSITA' / BOCCOLIDORO (§110): chi ti tocca rallenta. */
+      if ((ha(foe, "GOOEY") || ha(foe, "TANGLING_HAIR")) && !actor.fainted) {
+        applyStatStage(actor, ["SPD"], -1, messages, false);
       }
       const cs = findAb(foe, "contactStatus");
       if (cs && !actor.fainted && Math.random() * 100 < cs.chance) applyStatus(actor, cs.status, messages, foe.ability.it);
@@ -9231,6 +9334,11 @@
        applica all'impatto): a uscire in anticipo era solo il testo.
        ⚠️ Le righe successive restano attaccate alla prima: una Crescita che
        alza Attacco e Att. Speciale e' un annuncio solo, non due tocchi. */
+    /* INVERSIONE (§110): quello che sale scende e viceversa. E' l'abilita' che
+       ribalta un'intera strategia — con lei una Danzaspada ti indebolisce e un
+       Ruggito ti potenzia — e da noi non faceva niente. Si capovolge PRIMA di
+       tutto il resto, cosi' anche i messaggi e Agonismo leggono il verso vero. */
+    if (ha(target, "CONTRARY")) delta = -delta;
     let primaRiga = true;
     const dillo = (t) => {
       if (primaRiga) { messages.push(t); primaRiga = false; }
@@ -11112,7 +11220,7 @@
       const chi = currentChooser() || game.player;
       return nemici.every(f => statoImmune(mv, chi, f)) ? 0 : null;
     }
-    const m = Math.max(...nemici.map(f => typeMultiplier(mv.type, f.types)));
+    const m = Math.max(...nemici.map(f => typeMultiplier(mv.type, f.types, mv.id)));
     if (m === 1) return null;
     return m;
   }
@@ -15769,6 +15877,45 @@
       const v = heldElenco(foe)[0]; if (!v) return;
       muoviOggetto(foe, actor, v);
       messages.push(`${actor.name} ruba ${v.nome} a ${foe.name}!`);
+    }
+  }
+
+  /* 🔴 ALTRE MOSSE CON `attrs: []` (§110). Stessa storia di Bruciatutto:
+     l'estrattore non traduce questi attributi, e le mosse arrivavano al motore
+     come attacchi qualunque.
+       · Pulifumo      `ResetStatsAttr`      → azzera gli sbalzi del bersaglio
+       · Scricchiagelo `ResetStatsAttr(true)`→ li azzera a TUTTI in campo
+       · Maniereforti  cura la paralisi · Svegliopacca sveglia · Canto Effimero
+         toglie la scottatura (`HealStatusEffectAttr`)
+       · Giornopaga    `MoneyAttr`           → soldi veri a fine lotta */
+  function effettiDiMossa(actor, foe, move, messages) {
+    if (!foe || !actor) return;
+    const azzera = (f) => {
+      if (!f || f.fainted || !Object.values(f.stages).some(v => v)) return false;
+      f.stages = { atk: 0, def: 0, spatk: 0, spdef: 0, spd: 0, acc: 0, eva: 0 };
+      return true;
+    };
+    if (move.id === "CLEAR_SMOG") {
+      if (azzera(foe)) messages.push(`Gli sbalzi di ${foe.name} sono stati azzerati!`);
+      return;
+    }
+    if (move.id === "FREEZY_FROST") {
+      const tocchi = onField().filter(azzera);
+      if (tocchi.length) messages.push("Tutti gli sbalzi di statistica sono stati azzerati!");
+      return;
+    }
+    const cura = { SMELLING_SALTS: "PARALYSIS", WAKE_UP_SLAP: "SLEEP", SPARKLING_ARIA: "BURN" }[move.id];
+    if (cura && foe.status === cura && !foe.fainted) {
+      foe.status = null; foe.sleepTurns = 0;
+      messages.push(`${foe.name} si è ripreso!`);
+      return;
+    }
+    /* GIORNOPAGA: nell'originale i soldi arrivano a fine lotta, e valgono
+       `livello × 5` per ogni colpo andato a segno. */
+    if (move.id === "PAY_DAY") {
+      const gettito = Math.max(1, actor.level * 5) * Math.max(1, game._colpiMessi || 1);
+      game.money += gettito;
+      messages.push(`₽ Monete sparse ovunque: +${gettito}!`);
     }
   }
 

@@ -7027,3 +7027,62 @@ Cuordeciso.
 lavoro, e adesso è scritta. Le prossime candidate ovvie, per quanto si incontrano:
 Traccia, Sosia, Mutatipo/Libero, Magispecchio, Illusione, Download, Altalena,
 Abillegame, le «Pelle-» che cambiano tipo alle Normali, e le quattro Nefaste.
+
+## 111. Le mosse mute, tutte (rev 199)
+
+> «Sistemarle tutte»
+
+Le mosse passano da **67 a 6**, e i sei che restano non sono «non fatti»: sono
+**non applicabili**, e la differenza conta.
+
+### Come sono raggruppate
+
+Non per nome, per **quello che fanno** — è l'unico modo di scriverne venti senza
+scrivere venti volte lo stesso codice.
+
+- **Formula e tipo** (in `computeDamage`): Schiacciatuffo conta come Lotta *e*
+  Volante (verificato: 153 su un Erba/Buio contro i 57 di Spaccaroccia, cioè il
+  ×4 contro il ×2); Raggio Protonico e Fotodistruzione attaccano con la
+  statistica migliore; Idrovapore col sole **raddoppia** invece di smorzarsi.
+- **Potenza che dipende dalla situazione** (`POTENZA_CONDIZIONATA`): Pugno
+  Furibondo cresce coi colpi presi (verificato 19 → 74 con tre), Coro raddoppia
+  se qualcun altro l'ha già cantato nel turno, Irregolaser una volta su tre,
+  Vastenergia sul Campo Psico, Incrofiamma/Incroturbine se l'altra è già partita.
+- **Chi si nasconde si può colpire**: `RAGGIUNGE_CHI_SI_NASCONDE` e
+  `DOPPIO_SU_CHI_SI_NASCONDE`. Prima il turno di Volo era un riparo perfetto
+  contro tutto — Raffica e Surf compresi.
+- **Priorità dal terreno**: Erboscivolata passa per prima sul Campo Erboso.
+- **Condizioni per partire**: Sincrumore fallisce senza un tipo in comune
+  (verificato: «Non ha effetto…» fra Golem e Girafarig), Poltergeist fallisce se
+  il bersaglio non tiene niente.
+- **Effetti al colpo** (`effettiDiMossa`): Ammaliavoce e Fiamminvidia puniscono
+  chi si è appena potenziato; Ultima Fiamma e Doppiolampo tolgono un tipo a chi
+  le usa (verificato: «non è più di tipo Fuoco!»); Lama Milleflutti e Rocciascure
+  seminano il campo; Artigli Fatali tira fra tre mali; Inquietantesimo porta via
+  3 PP; Pungiglione dà +3 Attacco su un KO; Pirolancio investe il compagno;
+  Ombrafurto **ruba i potenziamenti** (verificato); Sbrilluccibufera cura la
+  squadra; Sbalorditesta e Raggio d'Acciaio costano metà PS (verificato: −57 su
+  115); Fintoattacco buca le protezioni; Abbattimento riporta a terra;
+  Scatenatoro sfonda gli schermi; Forzasegreta cambia effetto col terreno;
+  Sferapolline cura l'alleato; Ira monta a ogni colpo incassato.
+- **Marchi a tempo**: Psicorumore (non ci si cura), Colpo Infernale (niente mosse
+  sonore), Bomba Sciroppata (Velocità giù per tre turni), Spadoncarica (le
+  prendi doppie fino al tuo turno), Morsostretto (nessuno dei due esce).
+
+⚠️ Ogni marchio ha bisogno del suo **consumatore**, ed è lì che si sbaglia: il
+volatile da solo non fa niente. Psicorumore vive nel `case "heal"`, Colpo
+Infernale in `mossaVietata`, Morsostretto in `chiediCambio`, Abbattimento dentro
+`isGrounded`, Spadoncarica in `computeDamage`, Bomba Sciroppata nella coda del
+turno.
+
+### I sei che restano, e perché
+
+| mossa | cosa le serve |
+|---|---|
+| Fiammapatto, Erbapatto, Acquapatto | i **patti combinati**: due alleati devono usarne due diverse nello stesso turno, e la seconda aspetta la prima |
+| Multiattacco, Tecnobotto | il **tipo viene dall'oggetto tenuto** (Memoria, Disco) — oggetti che da noi non esistono, quindi restano Normale ed è corretto |
+| Alta Cucina | serve **Torre di Comando**: Tatsugiri dentro la bocca di Dondozo |
+
+Non sono difetti nascosti: sono tre meccaniche mancanti, e finché mancano quelle
+sei mosse non possono funzionare. Sono scritte qui perché il giorno che si
+aggiunge una di quelle meccaniche si sappia cosa ne dipende.
