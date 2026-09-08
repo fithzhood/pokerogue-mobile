@@ -6190,8 +6190,14 @@
      fine ondata conta i PS VERI: la volta dopo quel Pokemon lo prendi.
      ⚠️ Solo SELVATICI. Alla squadra di un allenatore non si «sfugge»: li'
      la Clepto Ball fallita e' gia' il suo rischio, e premiarla vorrebbe dire
-     pagare un furto andato male. Stessa regola di `dropLegendBall`. */
-  const SOGLIA_LAST_BALL = 75;
+     pagare un furto andato male. Stessa regola di `dropLegendBall`.
+     ⚠️ E solo al TIRO DI FINE ONDATA, non in lotta (§106). In lotta le ball
+     si tirano quante se ne vuole: bastava portare un selvatico comune al 50% e
+     rilanciare finche' una si apriva per stampare Last Ball. Il tiro di fine
+     ondata invece e' UNO per ondata, quindi il risarcimento non si puo'
+     coltivare — ed e' anche il posto dove la delusione e' vera, perche' li'
+     l'occasione non torna. Richiesta del proprietario, e ha ragione lui. */
+  const SOGLIA_LAST_BALL = 50;
   function dropLastBall(enemy, pct, messages) {
     if (!enemy || enemy.trainer || !(pct >= SOGLIA_LAST_BALL)) return;
     game.lastballs = (game.lastballs || 0) + 1;
@@ -10885,17 +10891,15 @@
     const enemy = game.enemy;
     /* Il tiro si fa ORA, ma prima di raccontarlo si mostra l'animazione: la
        ball deve dondolare esattamente le volte che ha retto davvero. */
-    const pct = ball.mult >= 255 ? 100
-      : captureChancePct(enemy, multBall(ball, enemy), null, pavimentoBall(ball, enemy));
     const esito = ball.mult >= 255
       ? { preso: true, scosse: 1, critica: true }
       : rollCaptureDettaglio(enemy, multBall(ball, enemy), null, pavimentoBall(ball, enemy));
     game.phase = "MESSAGE";                    // niente comandi durante il lancio
     cmd().innerHTML = `<div class="msgbox"><div class="log-line">Lanci una ${ball.it} su ${enemy.name}…</div></div>`;
-    animaBall(ballKey, esito, () => risolviLancio(ballKey, ball, enemy, esito.preso, pct));
+    animaBall(ballKey, esito, () => risolviLancio(ballKey, ball, enemy, esito.preso));
   }
 
-  function risolviLancio(ballKey, ball, enemy, caught, pct) {
+  function risolviLancio(ballKey, ball, enemy, caught) {
     const log = makeLog();
 
     if (caught) {
@@ -10933,7 +10937,6 @@
 
     // fallita: il nemico agisce (il lancio è costato il turno)
     log.push(`Oh no! ${enemy.name} è sfuggito!`);
-    dropLastBall(enemy, pct, log);
     const enemyMove = enemyChooseMove();
     if (!enemy.fainted && !game.player.fainted) resolveAction(enemy, game.player, enemyMove, log);
     endOfTurnResidual(enemy, log);
@@ -14613,7 +14616,7 @@
     /* Tre e non cinque: e' una ball da tenere per l'occasione, non da spendere. */
     { tier: "ROGUE", weight: 4, id: "legendballs", label: "Legend Ball ×3", desc: "cattura ×2, ma i leggendari come i comuni", icon: "lb", ball: true,
       target: "run", apply: () => { game.legendballs = (game.legendballs || 0) + 3; } },
-    { tier: "ULTRA", weight: 5, id: "lastballs", label: "Last Ball ×3", desc: "sul tiro di fine ondata conta i PS veri", icon: "xb", ball: true,
+    { tier: "ULTRA", weight: 5, id: "lastballs", label: "Last Ball ×3", desc: "solo per il tiro di fine ondata: lì il bersaglio è già a terra e si prende quasi sempre", icon: "xb", ball: true,
       target: "run", apply: () => { game.lastballs = (game.lastballs || 0) + 3; } },
     { tier: "ROGUE", weight: 3, id: "leftovers", label: "Avanzi", desc: "held: rigenera 1/16 a fine turno", icon: "leftovers",
       target: "mon", valid: chiunque, apply: p => addHeld(p, "leftovers") },

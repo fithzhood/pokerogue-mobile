@@ -6795,3 +6795,90 @@ Verificato sulla schermata «Ultima ball!», con il fallimento forzato:
 ⚠️ Sparito il parametro `pct` da `risolviLancio` e dal suo chiamante: lì non
 serve più a niente, e un argomento che nessuno legge è una trappola per chi
 passerà di qui.
+
+## 107. Tre difetti trovati giocando (rev 196)
+
+### Il Fungo comprato all'emporio non faceva niente
+
+> «Ho usato un fungo memoria dall'emporio, mi ha fatto scegliere pokemon e mossa
+> ma non ha fatto nulla»
+
+`insegnaTm` ha due strade: se il Pokémon ha **meno di quattro** mosse gliela mette
+subito; se ne ha quattro mette in coda una sostituzione in `game.pendingLearns`,
+ed è la schermata «quale mossa dimentica?» a chiuderla. Il ramo dell'**emporio**
+faceva `game.pendingLearns = []`: teneva solo le voci di cura e buttava via tutto
+il resto. Quindi il Fungo — e lo Strano fungo, e ogni MT — comprato all'emporio
+spariva nel nulla appena il bersaglio aveva già quattro mosse, cioè **quasi
+sempre**. Ed erano soldi spesi.
+
+Il ramo dei **premi** faceva già la cosa giusta: `processLearns`, che sa gestire
+da sola tutte e tre le voci (cure, annunci di solo testo, mosse da sostituire).
+Qui non serviva un trattamento speciale, serviva la stessa chiamata.
+
+Verificato: Fungo comprato a ₽5400 su un Nidoran♂ con quattro mosse piene →
+si apre «Vuole imparare Doppiocalcio», scelto Fulmisguardo da dimenticare →
+`[PECK, POISON_STING, DOUBLE_KICK, FOCUS_ENERGY]`.
+
+### La bacca spariva prima che l'animazione finisse
+
+> «Bruciatutto sta bruciando bacche che non compaiono nella lista degli oggetti
+> dell'avversario… anzi credo che quello che sia successo è che lo sprite della
+> bacca sia stato eliminato prima che l'animazione fosse conclusa e a me è
+> sembrato che la bacca non ci fosse mai stata. Non avevamo già sistemato questa
+> cosa?»
+
+**Diagnosi sua, ed era esatta.** Il §105 aveva spostato il *testo* dopo
+l'animazione, ma `renderHeldBar` leggeva l'oggetto **vivo**: l'icona spariva
+nell'istante in cui il motore toglieva la bacca, cioè mentre la fiammata era
+ancora per aria. Le frecce degli sbalzi avevano già avuto questo trattamento
+(`pstg` in `snapEvent`); per gli oggetti mancava.
+
+Ora `snapEvent` fotografa anche `pheld`/`eheld` (e stanno in `CAMPI_SNAP`, così
+`riallinea` li aggiorna), e `renderHeldBar(sel, f, foto)` disegna la foto quando
+c'è. Verificato campionando la barra ogni 120 ms: **1 icona** per tutto l'evento
+«Golem usa Bruciatutto!», **0** esattamente sull'evento «La Baccacedro è andata
+bruciata!».
+
+⚠️ La regola generale, ormai la terza volta che si presenta: **tutto ciò che si
+vede in scena deve stare nell'istantanea.** PS, stato, sbalzi e adesso gli
+oggetti. Se un giorno si aggiunge un altro indicatore alla scena, va aggiunto
+anche a `snapEvent` e a `CAMPI_SNAP`, o mostrerà il futuro.
+
+### «Spazio» era nero su nero
+
+> «Perché dopo grotta gelata non è indicato il luogo successivo? […] Ah, no, la
+> tappa dopo è lo spazio ma è scritto nero su nero e non si leggeva»
+
+Il CSS diceva a chiare lettere l'assunto: «il testo è scuro perché i cieli dei
+biomi sono chiari». Non tutti: Spazio è `#383058` su `#181028`, e Grotta, Abisso
+e La Fine non stanno molto meglio. Su quelli il nome spariva, **e una tappa
+invisibile sembra una tappa che non c'è** — infatti ha creduto a un difetto della
+mappa.
+
+Ora il colore del testo lo decide la **luminanza** del fondo, casella per casella
+(media dei due capi della sfumatura, soglia 0,45). Verificato: Spazio e Grotta
+passano a `rgb(244,246,251)`, Prateria/Grotta Gelata/Rovine restano
+`rgb(12,16,24)`.
+
+## 108. La Last Ball diventa un pity a contatore (rev 196)
+
+> «Cambiamo ancora la last ball. Invece di ottenerla fallendo con una certa
+> percentuale di cattura mettiamola come pity dopo 10 catture fallite (catture
+> solo però nella fase di ultima chance). E facciamola incrementale: dopo i primi
+> 10 fallimenti una sola last ball, dopo 20 se ne avranno 2 e così via»
+
+Sostituisce in pieno la soglia percentuale del §100/§106. Quella premiava la
+sfortuna **grossa** — perdere un tiro che era quasi fatto — e lasciava a mani
+vuote chi le sbagliava tutte per poco. Un contatore invece **garantisce che una
+serie nera finisca**, e la garanzia è proprio il mestiere di un pity.
+
+`game.cattureFallite` (in `CAMPI_RUN`) conta solo i fallimenti del **tiro di fine
+ondata**, che è uno per ondata: così il contatore misura le occasioni vere e non
+si può accelerare tirando ball in lotta.
+
+⚠️ Incrementale sul **traguardo**, non sul totale: alla decima delusione ne
+arriva 1, alla ventesima 2, alla trentesima 3.
+
+Verificato: a 9 fallimenti + 1 → «Dieci occasioni mancate… ti sei guadagnato una
+Last Ball!», totale 1. A 19 + 1 → «20 occasioni mancate… ti sei guadagnato 2 Last
+Ball!», totale 3.
