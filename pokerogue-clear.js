@@ -614,6 +614,7 @@
   function isGrounded(f) {
     if (!f) return false;
     if (game.gravita > 0) return true;          // la gravita' inchioda tutti a terra
+    if (f.volatile && f.volatile.aterra) return true;   // ABBATTIMENTO
     if (f.volatile && f.volatile.levita > 0) return false;
     if (f.types.includes("FLYING")) return false;
     if (abAttrs(f).some(a => a.kind === "typeImmunity" && a.moveType === "GROUND")) return false;
@@ -1278,8 +1279,24 @@
     // MANIEREFORTI e SVEGLIOPACCA: doppie su chi sta come dicono loro
     SMELLING_SALTS: (_a, d) => d.status === "PARALYSIS" ? 140 : 70,
     WAKE_UP_SLAP:   (_a, d) => d.status === "SLEEP" ? 140 : 70,
+    /* INCROFIAMMA e INCROTURBINE: doppie se l'altra e' gia' partita in questo
+       turno. Sono la coppia di Reshiram e Zekrom, e in doppio sono il motivo
+       per cui si schierano insieme. */
+    FUSION_FLARE: () => (game.ultimaMossa === "FUSION_BOLT" ? 200 : 100),
+    FUSION_BOLT:  () => (game.ultimaMossa === "FUSION_FLARE" ? 200 : 100),
     // FACCIATA: doppia se chi la usa sta male
     FACADE: (a) => ["BURN", "POISON", "TOXIC", "PARALYSIS"].includes(a.status) ? 140 : 70,
+    /* PUGNO FURIBONDO: 50, piu' 50 per ogni volta che gliele hanno date da
+       quando e' in campo (tetto 350, come la'). Il contatore lo tiene
+       `volatile.colpiPresi`, che si azzera rientrando nella ball. */
+    RAGE_FIST: (a) => Math.min(350, 50 + 50 * ((a.volatile && a.volatile.colpiPresi) || 0)),
+    /* CORO: doppio se qualcun altro l'ha gia' cantato in questo turno. */
+    ROUND: () => (game._coroFatto ? 120 : 60),
+    /* IRREGOLASER: una volta su tre parte davvero forte. Il messaggio lo
+       aggiunge `effettiDiMossa`, che sa se e' scattata. */
+    FICKLE_BEAM: (a) => { a._irregolaser = Math.random() < 0.3; return a._irregolaser ? 160 : 80; },
+    /* VASTENERGIA: +50% sul Campo Psico (chi la usa deve toccare terra). */
+    EXPANDING_FORCE: (a) => (terrainKind() === "PSYCHIC" && isGrounded(a)) ? 120 : 80,
   };
 
   function typeMultiplier(moveType, defenderTypes, moveId) {
@@ -1327,6 +1344,9 @@
     if (attacker.volatile && attacker.volatile.elettro && move.type !== "ELECTRIC")
       move = Object.assign({}, move, { type: "ELECTRIC" });
     let eff = typeMultiplier(move.type, defender.types, move.id);
+    /* SCHIACCIATUFFO (§111): conta come Lotta E Volante insieme, cioe' i due
+       moltiplicatori si moltiplicano. E' l'unica mossa a doppio tipo. */
+    if (move.id === "FLYING_PRESS") eff *= typeMultiplier("FLYING", defender.types);
     /* Preveggenza, Segugio, Miracolvista: il bersaglio non ha piu' l'immunita'
        ai tipi indicati (Spettro contro Normale/Lotta, Buio contro Psico). */
     if (eff === 0 && defender.volatile && (defender.volatile.smascherato || []).includes(move.type)) eff = 1;
@@ -1371,6 +1391,19 @@
        Sono mosse da manuale (un Corviknight vive di Schiacciacorpo), e usarle
        con la formula normale non e' un dettaglio: cambia il danno di un fattore
        due su chi e' costruito per loro. */
+    /* 🔴 CHI VOLA O SI TUFFA NON ERA RAGGIUNGIBILE (§111).
+       `HitsTagAttr` e `HitsTagForDoubleDamageAttr`: alcune mosse arrivano
+       addosso a chi sta a mezz'aria o sott'acqua, e diverse fanno il DOPPIO.
+       Senza, Raffica e Surf erano mosse qualunque e il turno di Volo era un
+       riparo perfetto contro tutto. */
+    const nascosto = defender.volatile && defender.volatile.charging
+                     && defender.volatile.charging.semiInvuln;
+    const doppioSuNascosto = nascosto && DOPPIO_SU_CHI_SI_NASCONDE.has(move.id);
+    /* RAGGIO PROTONICO e FOTODISTRUZIONE (§111): sono speciali sulla carta ma
+       diventano FISICHE se chi le usa ha l'Attacco piu' alto dell'Att. Speciale.
+       `PhotonGeyserCategoryAttr`. */
+    const conLaMigliore = (move.id === "PHOTON_GEYSER" || move.id === "LIGHT_THAT_BURNS_THE_SKY")
+                          && attacker.stats.atk > attacker.stats.spatk;
     const conLaDifesa = move.id === "BODY_PRESS";
     const suLaDifesa  = move.id === "PSYSHOCK" || move.id === "SECRET_SWORD";
     const conIlSuoAtk = move.id === "FOUL_PLAY";
@@ -1398,7 +1431,7 @@
     const pelledura = (isPhysical && defender.status && ha(defender, "MARVEL_SCALE")) ? 1.5 : 1;
     const defAb = abStatMult(defender, isPhysical ? "DEF" : "SPDEF") * evio * foltopelo * pelledura;
     const grinta = (isPhysical && attacker.status && ha(attacker, "GUTS")) ? 1.5 : 1;
-    const statAtt = conLaDifesa ? "def" : (isPhysical ? "atk" : "spatk");
+    const statAtt = conLaDifesa ? "def" : conLaMigliore ? "atk" : (isPhysical ? "atk" : "spatk");
     const atk = chiAttacca.stats[statAtt] * stageMult(atkStage) * atkAb * grinta
               * tempStatMult(attacker, isPhysical ? "atk" : "spatk");
     /* MIRABILZONA: Difesa e Difesa Speciale si scambiano — la STATISTICA, non
@@ -1437,6 +1470,14 @@
        un numero che il danno ha gia' usato, e non cambia niente. */
     const cond = POTENZA_CONDIZIONATA[move.id];
     if (cond && opts.potenza == null) power = cond(attacker, defender);
+    if (doppioSuNascosto) power *= 2;
+    // SPADONCARICA: fino al suo turno, chi l'ha usata le prende doppie
+    if (defender.volatile && defender.volatile.spadoncarica) power *= 2;
+    /* IDROVAPORE: col sole non si smorza, RADDOPPIA. E' scritta a mano anche
+       nell'originale (`OverrideWeatherMultiplierAttr`), perche' va contro la
+       regola generale del meteo. */
+    const idrovapore = move.id === "HYDRO_STEAM" && weatherKind() === "SUN";
+    if (idrovapore) power *= 3;      // annulla lo 0,5 del sole e aggiunge x1,5
     const lowHp = findAb(attacker, "lowHpTypeBoost");
     if (lowHp && move.type === lowHp.moveType && attacker.hp <= attacker.maxHp / 3) power *= lowHp.mult;
     const tb = findAb(attacker, "typeBoost");
@@ -2607,7 +2648,9 @@
                      trap: null, seed: false, seedBy: null, perish: 0, recharge: false,
                      charging: null, infatuated: false, encore: null, taunt: 0,
                      torment: false, drowsy: 0, nightmare: false, ingrain: false,
-                   annuncio: null,
+                   annuncio: null, colpiPresi: 0, saliOra: false, aterra: false,
+                   sciroppo: 0, nonCura: 0, nienteSonore: 0, spadoncarica: false,
+                   morsostretto: false, ira: false,
                      aquaring: false, saltcure: false, curse: false, lastMove: null,
                      accumulo: 0, bide: null };
       p.sleepTurns = 0;
@@ -3083,7 +3126,9 @@
                    trap: null, seed: false, seedBy: null, perish: 0, recharge: false,
                    charging: null, infatuated: false, encore: null, taunt: 0,
                    torment: false, drowsy: 0, nightmare: false, ingrain: false,
-                   annuncio: null,
+                   annuncio: null, colpiPresi: 0, saliOra: false, aterra: false,
+                   sciroppo: 0, nonCura: 0, nienteSonore: 0, spadoncarica: false,
+                   morsostretto: false, ira: false,
                    aquaring: false, saltcure: false, curse: false, lastMove: null,
                    accumulo: 0, bide: null };
     if (rotolaChePassa) f.volatile.rotola = rotolaChePassa;
@@ -7311,6 +7356,8 @@
     if (!vittima.dannoSubitoTurno) vittima.dannoSubitoTurno = dannoSubitoVuoto();
     const d = vittima.dannoSubitoTurno;
     d[move.category === "SPECIAL" ? "speciale" : "fisico"] += quanto;
+    // PUGNO FURIBONDO conta quante volte gliele hanno date da quando e' in campo
+    if (vittima.volatile) vittima.volatile.colpiPresi = (vittima.volatile.colpiPresi || 0) + 1;
     d.da = attaccante;
     // PAZIENZA: mentre accumula, tutto quello che incassa fa massa
     if (vittima.volatile && vittima.volatile.bide) vittima.volatile.bide.danno += quanto;
@@ -7409,7 +7456,10 @@
     actions.sort((a, b) => {
       if (a.quick !== b.quick) return a.quick ? -1 : 1;
       /* BURLA: le mosse di STATO scattano prima. */
-      const bonus = (act) => (ha(act.actor, "PRANKSTER") && M[act.move.id].category === "STATUS") ? 1 : 0;
+      /* ERBOSCIVOLATA (§111): sul Campo Erboso passa per prima. E' l'unica
+         mossa che si compra la priorita' col terreno. */
+      const bonus = (act) => ((ha(act.actor, "PRANKSTER") && M[act.move.id].category === "STATUS") ? 1 : 0)
+        + ((act.move.id === "GRASSY_GLIDE" && terrainKind() === "GRASSY" && isGrounded(act.actor)) ? 1 : 0);
       const pa = (M[a.move.id].priority || 0) + bonus(a);
       const pb = (M[b.move.id].priority || 0) + bonus(b);
       if (pa !== pb) return pb - pa;
@@ -7459,6 +7509,7 @@
       game._colpoLargo = false;
     }
     game._coda = null;
+    game._coroFatto = false;      // il Coro vale doppio solo dentro lo stesso turno
 
     /* CAMBI FORZATI. Si eseguono QUI: dopo le mosse del turno e PRIMA dei danni
        residui — e' lo stesso punto dell'originale, che li mette in coda con
@@ -7507,6 +7558,15 @@
     for (const f of onField()) {
       f.volatile.flinch = false;
       f.volatile.annuncio = null;   // il becco si raffredda a fine turno
+      f.volatile.saliOra = false;   // «si e' potenziato ADESSO» vale un turno
+      f.volatile.spadoncarica = false;
+      /* BOMBA SCIROPPATA: tre turni di Velocita' che scende. */
+      if (f.volatile.sciroppo > 0) {
+        f.volatile.sciroppo--;
+        applyStatStage(f, ["SPD"], -1, messages, false);
+      }
+      if (f.volatile.nonCura > 0) f.volatile.nonCura--;
+      if (f.volatile.nienteSonore > 0) f.volatile.nienteSonore--;
       // la protezione dura un solo turno; il contatore degli usi di fila
       // si azzera solo quando NON la si e' usata (cosi' 1/3^usi funziona)
       if (!f.volatile.protect) f.volatile.protectUsi = 0;
@@ -8044,8 +8104,27 @@
     // secondo turno: il Pokemon riappare e colpisce
     if (actor.volatile.charging) actor.volatile.charging = null;
 
+    /* POLTERGEIST (§111): usa contro di te quello che tieni, quindi se non
+       tieni niente non c'e' niente da usare. Senza il controllo era un attacco
+       Spettro da 110 senza condizioni. */
+    if (move.id === "POLTERGEIST" && !haOggetti(foe)) {
+      moveInst.pp = Math.max(0, moveInst.pp - 1);
+      messages.push(`${actor.name} usa ${move.it}!`);
+      stessoMomento(messages, `Ma ${foe.name} non ha nessuno strumento!`);
+      return;
+    }
+    /* SINCRUMORE (§111): l'onda passa solo fra simili. Se non avete un tipo
+       in comune non succede niente — e senza questo era un attacco Psico da
+       120 senza condizioni, cioe' una delle mosse piu' forti del gioco. */
+    if (move.id === "SYNCHRONOISE" && !actor.types.some(t => foe.types.includes(t))) {
+      moveInst.pp = Math.max(0, moveInst.pp - 1);
+      messages.push(`${actor.name} usa ${move.it}!`);
+      stessoMomento(messages, `Non ha effetto su ${foe.name}…`);
+      return;
+    }
     // 1-quater. il bersaglio e' IN VOLO / SOTT'ACQUA / SOTTOTERRA: non lo prendi
-    if (foe.volatile.charging && foe.volatile.charging.semiInvuln && foe !== actor && paraBile(move)) {
+    if (foe.volatile.charging && foe.volatile.charging.semiInvuln && foe !== actor && paraBile(move)
+        && !RAGGIUNGE_CHI_SI_NASCONDE.has(move.id)) {
       moveInst.pp = Math.max(0, moveInst.pp - 1);
       messages.push(`${actor.name} usa ${move.it}!`);
       messages.push(`Ma ${foe.name} è irraggiungibile!`);
@@ -8194,7 +8273,7 @@
         /* CALCIOSALTO e CALCINVOLO (§110): mancando ci si schianta a terra e si
            perde meta' dei propri PS massimi. Senza questo erano due mosse da
            100 e 130 senza nessun rischio, cioe' due mosse sbagliate. */
-        if ((move.id === "JUMP_KICK" || move.id === "HIGH_JUMP_KICK") && !actor.fainted) {
+        if (["JUMP_KICK", "HIGH_JUMP_KICK", "SUPERCELL_SLAM"].includes(move.id) && !actor.fainted) {
           const male = Math.max(1, Math.floor(actor.maxHp / 2));
           actor.hp = Math.max(0, actor.hp - male); actor._justHit = true;
           messages.push(`${actor.name} si schianta a terra e perde ${male} PS!`);
@@ -8957,6 +9036,8 @@
        e succede qualcosa. Nell'originale sono `PostDefendStatStageChangeAbAttr`
        e parenti. */
     if (!foe.fainted && total > 0) {
+      // IRA (§111): chi l'ha usata monta in collera a ogni colpo incassato
+      if (foe.volatile && foe.volatile.ira) applyStatStage(foe, ["ATK"], 1, messages, true);
       if (ha(foe, "STAMINA")) applyStatStage(foe, ["DEF"], 1, messages, true);
       if (ha(foe, "WATER_COMPACTION") && move.type === "WATER") applyStatStage(foe, ["DEF"], 2, messages, true);
       if (ha(foe, "JUSTIFIED") && move.type === "DARK") applyStatStage(foe, ["ATK"], 1, messages, true);
@@ -9214,6 +9295,12 @@
             if (amico && !amico.fainted) chi.push(amico);
           }
           for (const t of chi) {
+            /* PSICORUMORE (§111): per due turni non ci si cura. Va qui, dove
+               passano tutte le mosse di cura. */
+            if (t.volatile && t.volatile.nonCura > 0) {
+              messages.push(`${t.name} non riesce a curarsi!`);
+              continue;
+            }
             const guarisce = move.id === "JUNGLE_HEALING" && t.status;
             if (t.hp < t.maxHp) {
               t.hp = Math.min(t.maxHp, t.hp + Math.max(1, Math.floor(t.maxHp * a.ratio)));
@@ -9364,6 +9451,8 @@
       if (target.stages[k] === before) { dillo(`${name} di ${target.name} non può ${delta > 0 ? "salire" : "scendere"} oltre!`); continue; }
       const word = delta >= 2 ? "è aumentato molto" : delta === 1 ? "è aumentato" : delta === -1 ? "è diminuito" : "è diminuito molto";
       dillo(`${name} di ${target.name} ${word}!`);
+      // Ammaliavoce e Fiamminvidia puniscono chi si e' appena potenziato
+      if (delta > 0 && target.volatile) target.volatile.saliOra = true;
       calato = true;
     }
     /* AGONISMO e Competizione: un calo causato dall'AVVERSARIO fa saltare la
@@ -9461,6 +9550,8 @@
     const v = actor.volatile;
     if (v.taunt > 0 && move.category === "STATUS")
       return `${actor.name} è provocato e non può usare ${move.it}!`;
+    if (v.nienteSonore > 0 && move.sonora)
+      return `${actor.name} non riesce a emettere suoni!`;
     if (v.torment && v.lastMove === moveInst.id)
       return `${actor.name} è tormentato e non può ripetere ${move.it}!`;
     if (v.encore && v.encore.turni > 0 && v.encore.id !== moveInst.id)
@@ -15623,7 +15714,7 @@
   function chiediCambio(chi, stadi, msg, testo, daSolo) {
     if (!chi || chi.fainted) { stessoMomento(msg, "Ma non ha funzionato!"); return false; }
     if (game.lati && lato(chi).nocambio > 0) { stessoMomento(msg, "Un vincolo fatato lo tiene in campo!"); return false; }
-    if (chi.volatile.trap || chi.volatile.ingrain) { stessoMomento(msg, `${chi.name} non riesce a lasciare il campo!`); return false; }
+    if (chi.volatile.trap || chi.volatile.ingrain || chi.volatile.morsostretto) { stessoMomento(msg, `${chi.name} non riesce a lasciare il campo!`); return false; }
     /* Il ricambio si controlla ADESSO. Senza, si annunciava «X viene spazzato
        via!» e un attimo dopo «ma non c'e' nessuno che lo sostituisca»: due
        righe che si smentiscono.
@@ -15904,12 +15995,160 @@
       if (tocchi.length) messages.push("Tutti gli sbalzi di statistica sono stati azzerati!");
       return;
     }
-    const cura = { SMELLING_SALTS: "PARALYSIS", WAKE_UP_SLAP: "SLEEP", SPARKLING_ARIA: "BURN" }[move.id];
+    const cura = { SMELLING_SALTS: "PARALYSIS", WAKE_UP_SLAP: "SLEEP",
+                   SPARKLING_ARIA: "BURN", FUSION_FLARE: "FREEZE" }[move.id];
     if (cura && foe.status === cura && !foe.fainted) {
       foe.status = null; foe.sleepTurns = 0;
       messages.push(`${foe.name} si è ripreso!`);
       return;
     }
+    /* 🔴 ALTRE VENTI MOSSE MUTE (§111). Stesso metodo di prima: la voce
+       dell'originale ha `.attr(...)`, i nostri dati no, e il motore non le
+       nominava. Sono raggruppate per quello che fanno, non per nome. */
+    // chi si e' appena potenziato la paga
+    if ((move.id === "ALLURING_VOICE" || move.id === "BURNING_JEALOUSY")
+        && foe.volatile && foe.volatile.saliOra && !foe.fainted) {
+      if (move.id === "ALLURING_VOICE") applyConfuse(foe, messages, true);
+      else applyStatus(foe, "BURN", messages, null, true);
+      return;
+    }
+    // ULTIMA FIAMMA e DOPPIOLAMPO: chi le usa PERDE quel tipo
+    const perdeIlTipo = { BURN_UP: "FIRE", DOUBLE_SHOCK: "ELECTRIC" }[move.id];
+    if (perdeIlTipo && actor.types.includes(perdeIlTipo)) {
+      actor.types = actor.types.filter(t => t !== perdeIlTipo);
+      if (!actor.types.length) actor.types = ["NORMAL"];
+      messages.push(`${actor.name} brucia tutto: non è più di tipo ${(T[perdeIlTipo] || {}).it || perdeIlTipo}!`);
+      return;
+    }
+    // LAMA MILLEFLUTTI e ROCCIASCURE: seminano il campo avversario colpendo
+    if (move.id === "CEASELESS_EDGE" || move.id === "STONE_AXE") {
+      const L = latoDiFronte(actor);
+      if (move.id === "CEASELESS_EDGE") { if (L.spikes < 3) { L.spikes++; messages.push("Le schegge si conficcano nel terreno!"); } }
+      else if (!L.stealthrock) { L.stealthrock = 1; messages.push("Pietre aguzze fluttuano attorno alla squadra avversaria!"); }
+      return;
+    }
+    // ARTIGLI FATALI: uno dei tre mali, a caso
+    if (move.id === "DIRE_CLAW" && !foe.fainted && Math.random() < 0.5) {
+      applyStatus(foe, ["POISON", "PARALYSIS", "SLEEP"][Math.floor(Math.random() * 3)], messages, null, true);
+      return;
+    }
+    // INQUIETANTESIMO: porta via 3 PP all'ultima mossa usata dal bersaglio
+    if (move.id === "EERIE_SPELL" && !foe.fainted) {
+      const ult = foe.volatile && foe.volatile.lastMove;
+      const mi = ult && foe.moves.find(x => x.id === ult);
+      if (mi && mi.pp > 0) { mi.pp = Math.max(0, mi.pp - 3); messages.push(`${M[ult].it} di ${foe.name} perde 3 PP!`); }
+      return;
+    }
+    // PUNGIGLIONE: se il bersaglio cade, l'Attacco vola
+    if (move.id === "FELL_STINGER" && foe.fainted) {
+      applyStatStage(actor, ["ATK"], 3, messages, true);
+      return;
+    }
+    // SFERAPOLLINE: puntata su un amico, lo cura invece di colpirlo
+    if (move.id === "POLLEN_PUFF" && !isEnemySide(foe) === !isEnemySide(actor) && foe !== actor) {
+      if (foe.hp < foe.maxHp && !foe.fainted) {
+        foe.hp = Math.min(foe.maxHp, foe.hp + Math.max(1, Math.floor(foe.maxHp / 2)));
+        messages.push(`${foe.name} ha recuperato energie!`);
+        if (messages.anim) messages.anim("COMMON_HEALTH_UP", sideOf(foe));
+      }
+      return;
+    }
+    // PIROLANCIO: le fiamme investono anche il compagno del bersaglio
+    if (move.id === "FLAME_BURST") {
+      const vicino = compagnoDi(foe);
+      if (vicino && !vicino.fainted) {
+        const male = Math.max(1, Math.floor(vicino.maxHp / 16));
+        vicino.hp = Math.max(0, vicino.hp - male); vicino._justHit = true;
+        messages.push(`Le fiamme investono anche ${vicino.name}: −${male} PS!`);
+        if (vicino.hp <= 0) { vicino.fainted = true; spegniStato(vicino); messages.push(`${vicino.name} è esausto!`); }
+      }
+      return;
+    }
+    // OMBRAFURTO: gli sbalzi POSITIVI del bersaglio passano a chi colpisce
+    if (move.id === "SPECTRAL_THIEF" && !foe.fainted) {
+      let presi = 0;
+      for (const k in foe.stages) {
+        if (foe.stages[k] > 0) { actor.stages[k] = Math.min(6, actor.stages[k] + foe.stages[k]); foe.stages[k] = 0; presi++; }
+      }
+      if (presi) messages.push(`${actor.name} ruba i potenziamenti di ${foe.name}!`);
+      return;
+    }
+    // SBRILLUCCIBUFERA: cura lo stato a TUTTA la squadra di chi la usa
+    if (move.id === "SPARKLY_SWIRL") {
+      const squadra = isEnemySide(actor) ? [] : game.party;
+      const curati = squadra.filter(p => p.status && !p.fainted);
+      for (const p of curati) { p.status = null; p.sleepTurns = 0; }
+      if (curati.length) messages.push("Un turbine profumato porta via ogni problema di stato!");
+      return;
+    }
+    // SBALORDITESTA e RAGGIO D'ACCIAIO: costano meta' dei propri PS massimi
+    if (move.id === "MIND_BLOWN" || move.id === "STEEL_BEAM") {
+      const male = Math.max(1, Math.floor(actor.maxHp / 2));
+      actor.hp = Math.max(0, actor.hp - male); actor._justHit = true;
+      messages.push(`${actor.name} ci mette tutto: −${male} PS!`);
+      if (actor.hp <= 0) { actor.fainted = true; spegniStato(actor); messages.push(`${actor.name} è esausto!`); }
+      return;
+    }
+    // SCATENATORO: la carica spazza via schermi e barriere di chi hai davanti
+    if (move.id === "RAGING_BULL") {
+      const L = latoDiFronte(actor);
+      if (L.reflect || L.lightscreen || L.auroravelo) {
+        L.reflect = 0; L.lightscreen = 0; L.auroravelo = 0;
+        messages.push("La carica sfonda schermi e barriere!");
+      }
+      return;
+    }
+    // FORZASEGRETA: l'effetto dipende da dove si combatte
+    if (move.id === "SECRET_POWER" && !foe.fainted && Math.random() < 0.3) {
+      const t = terrainKind();
+      if (t === "ELECTRIC") applyStatus(foe, "PARALYSIS", messages, null, true);
+      else if (t === "GRASSY") applyStatus(foe, "SLEEP", messages, null, true);
+      else if (t === "MISTY") applyStatStage(foe, ["SPATK"], -1, messages, false);
+      else if (t === "PSYCHIC") applyStatStage(foe, ["SPD"], -1, messages, false);
+      else applyStatus(foe, "PARALYSIS", messages, null, true);
+      return;
+    }
+    // FINTOATTACCO: buca le protezioni, anche quelle di squadra
+    if (move.id === "FEINT" && foe.volatile) {
+      foe.volatile.protect = null;
+      const L = lato(foe);
+      L.wideguard = 0; L.quickguard = 0; L.craftyshield = 0; L.matblock = 0;
+      return;
+    }
+    // ABBATTIMENTO: chi vola torna a terra
+    if (move.id === "SMACK_DOWN" && !foe.fainted && foe.volatile) {
+      foe.volatile.aterra = true;
+      foe.volatile.levita = 0;
+      messages.push(`${foe.name} viene sbattuto a terra!`);
+      return;
+    }
+    // volatili a tempo che il bersaglio si porta dietro
+    const marchi = { PSYCHIC_NOISE: ["nonCura", 2, "non riuscirà a curarsi"],
+                     THROAT_CHOP:  ["nienteSonore", 2, "non riuscirà a usare mosse sonore"],
+                     SYRUP_BOMB:   ["sciroppo", 3, "è tutto appiccicoso"] };
+    if (marchi[move.id] && !foe.fainted && foe.volatile) {
+      const [campo, turni, testo] = marchi[move.id];
+      foe.volatile[campo] = turni;
+      messages.push(`${foe.name} ${testo}!`);
+      return;
+    }
+    // SPADONCARICA: chi la usa incassa il doppio fino al suo prossimo turno
+    if (move.id === "GLAIVE_RUSH" && actor.volatile) { actor.volatile.spadoncarica = true; return; }
+    // MORSOSTRETTO: nessuno dei due lascia il campo
+    if (move.id === "JAW_LOCK" && !foe.fainted) {
+      if (actor.volatile) actor.volatile.morsostretto = true;
+      if (foe.volatile) foe.volatile.morsostretto = true;
+      messages.push(`${actor.name} e ${foe.name} restano avvinghiati!`);
+      return;
+    }
+    // IRREGOLASER: quando parte forte, si vede
+    if (move.id === "FICKLE_BEAM" && actor._irregolaser) {
+      actor._irregolaser = false;
+      stessoMomento(messages, `${actor.name} ci mette tutta l'energia!`);
+    }
+    if (move.id === "ROUND") game._coroFatto = true;
+    // IRA: da qui in poi, ogni colpo preso alza l'Attacco
+    if (move.id === "RAGE" && actor.volatile) actor.volatile.ira = true;
     /* GIORNOPAGA: nell'originale i soldi arrivano a fine lotta, e valgono
        `livello × 5` per ogni colpo andato a segno. */
     if (move.id === "PAY_DAY") {
@@ -15918,6 +16157,18 @@
       messages.push(`₽ Monete sparse ovunque: +${gettito}!`);
     }
   }
+
+  /* Mosse che raggiungono chi sta a mezz'aria/sott'acqua, e quelle che ci
+     fanno il doppio. Dai flag `HitsTagAttr`/`HitsTagForDoubleDamageAttr`. */
+  const RAGGIUNGE_CHI_SI_NASCONDE = new Set([
+    "GUST", "TWISTER", "THUNDER", "HURRICANE", "SKY_UPPERCUT", "SMACK_DOWN",
+    "THOUSAND_ARROWS", "SURF", "WHIRLPOOL", "EARTHQUAKE", "MAGNITUDE", "FISSURE",
+    "SUPERCELL_SLAM", "FLYING_PRESS", "HEAT_CRASH", "HEAVY_SLAM", "MALICIOUS_MOONSAULT",
+  ]);
+  const DOPPIO_SU_CHI_SI_NASCONDE = new Set([
+    "GUST", "TWISTER", "SURF", "WHIRLPOOL", "EARTHQUAKE", "MAGNITUDE",
+    "SUPERCELL_SLAM", "FLYING_PRESS", "HEAT_CRASH", "HEAVY_SLAM", "MALICIOUS_MOONSAULT",
+  ]);
 
   const CAMBIA_CHI_COLPISCE = new Set(["U_TURN", "VOLT_SWITCH", "FLIP_TURN"]);
   const SPAZZA_IL_BERSAGLIO = new Set(["DRAGON_TAIL", "CIRCLE_THROW"]);

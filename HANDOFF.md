@@ -7086,3 +7086,96 @@ turno.
 Non sono difetti nascosti: sono tre meccaniche mancanti, e finché mancano quelle
 sei mosse non possono funzionare. Sono scritte qui perché il giorno che si
 aggiunge una di quelle meccaniche si sappia cosa ne dipende.
+
+## 112–115. Le abilità mute, tutte (rev 200)
+
+> «Sistemarle tutte»
+
+Le abilità passano da **140 a 17**, e come per le mosse i diciassette che restano
+non sono «non fatti»: sono **non applicabili**.
+
+Sono state scritte in cinque passate, raggruppate per **aggancio** — cioè per il
+punto del motore in cui vivono. È l'unica organizzazione che regge su questi
+numeri: per nome sarebbero centoventitré casi separati.
+
+### §112 — Quelle che toccano il danno
+
+- **Le sette «Pelle-»** (`tipoEffettivo`): trasformano le mosse Normali in un
+  altro tipo e le potenziano del 20%. Verificato: Iperraggio da 73 a 115 con
+  Pellegelo su un bersaglio d'Erba — cambia tipo, guadagna il ×2 e perde il
+  bonus di tipo, esattamente come deve.
+- **Le quattro Nefaste** (`scontoNefasto`): −25% di una statistica a **tutti gli
+  altri** in campo, alleati compresi.
+- **Auratetra, Aurafolletto** (valgono per tutti), **Spiritoferreo, Batteria,
+  Fonte Energetica** (il compagno che ti potenzia).
+- **Ponderazione, Bruciaimpeto, Velenimpeto, Sorveglianza, Cerebroforza**:
+  Sorveglianza verificata, 71 → 141 su chi è appena entrato.
+- **Geloscaglie** (57 → 28, verificato), **Amicoscudo**, **Teraguscio**.
+- 🔴 **Magidifesa**: passa solo il superefficace. Verificato: Iperraggio **0**,
+  Lanciafiamme 57. Senza di lei Shedinja — 1 PS e nient'altro — non ha senso.
+- **Spietatezza** (sempre critico sull'avvelenato), **Abillegame** (multicolpo
+  sempre a cinque), **Amorefiliale** (un colpo in più).
+
+### §112 — Quelle che rispondono al colpo, all'attacco e al KO
+
+Iraguscio, Furore, Convertivolt, Energia Eolica, Cambiacolore, Mantossina,
+Ultimotocco, Corpofunesto, Spargispora, **Mummia / Odore Tenace / Anima Errante**
+(si prendono o si scambiano l'abilità toccando), Catena Tossica, Tanfo, Malia
+Tossica, **Melma** (chi ti drena ci rimette), **Distacco** (colpisce senza
+toccare, quindi niente effetti da contatto), Scoppio, Espellinterno, Cuoreanima.
+
+### §113 — Entrando in campo e a fine turno
+
+Download, **Traccia** (verificata: «Traccia: Farfetch'd copia Aiutofuoco!», e
+l'abilità cambia davvero), Sosia, Coprotagonismo, Stranofarmaco, Ospitalità,
+Annullabarriere, Pastelvelo, Lentoinizio, Premonizione, Flusso Delta,
+Zeroformazione; e a fine turno Copripioggia, Sogniamari, Altalena, Mielincetta.
+
+### §114 — Immunità, priorità, blocchi
+
+Sonno Assoluto, i tre Veli, Antiproiettile, Corpo Aureo, Vento Propizio,
+Regalità/Corposgargiante/Codarmatura (niente mosse di priorità),
+Aliraffica/Primacura/Colpolesto/Rallentatore/Micoforza (spostano il turno),
+Mutatipo e Libero, Trappoarena/Pedinombra/Magnetismo, Ventose/Cane da Guardia,
+Antifurto, Guancegonfie, Riparo/Antimeteo.
+
+⚠️ **Le abilità che intrappolano bloccano solo il cambio VOLONTARIO.** Virata e i
+cambi forzati passano lo stesso, come nei giochi: per questo il controllo sta in
+`playerSwitch` e non in `chiediCambio`. L'avevo messo nel posto sbagliato alla
+prima stesura.
+
+### §115 — Il resto
+
+Metalpesante/Metalleggero (il peso lo leggono Colpo Basso e Laccioerboso),
+**Polvoscudo** (niente effetti aggiuntivi), Splendicute, **Magispecchio** (le
+mosse di stato rimbalzano), **Blindospecchio** (i cali tornano al mittente),
+**Scrocco** (copia i potenziamenti altrui), Maturazione, **Pigrone** (un turno sì
+e uno no — è il difetto che tiene a bada Slaking), **Vigorilla**, Forza Chimica e
+Ricezione, Corrosione, Aromavelo, Mimetismo, Paleoattivazione e Carica Quark,
+Elicopinna e Volontà di Ferro, Ruminante, Raccattapalle, **Sincrodanza**.
+
+⚠️ Due trappole trovate scrivendo:
+- **`pesoDi` esisteva già** — è il peso di un premio nell'urna (§97). La funzione
+  nuova si chiama `pesoReale`. Un nome riusato in un file da 16 000 righe non dà
+  errore finché non lo dà, e allora è a runtime.
+- **Sincrodanza e Magispecchio possono rimbalzarsi a vicenda all'infinito.**
+  Servono i due semafori `_staBallando` e la chiamata con `mossaChiamata: true`.
+
+### I diciassette che restano
+
+| famiglia | chi |
+|---|---|
+| **cambio di forma** | Fantasmanto, Gelofaccia, Banco, Scudosoglia, Stato Zen, Supercambio, Regalfiore, Previsioni, Pancialterna, Teramorfosi, Accendilotta, Multitipo, Sistema Primevo, Inghiottimissile |
+| **identità finta** | Illusione |
+| **due Pokémon in uno** | Torre di Comando |
+| **spegne tutte le altre** | Gas Reagente |
+
+Le prime quattordici hanno bisogno di un motore di **forme in battaglia** che non
+abbiamo: la nostra `transform` cambia forma una volta (mega/gigamax) e non sa
+tornare indietro a metà lotta. Gas Reagente vorrebbe che `ha()` — la funzione più
+chiamata del file — consultasse il campo a ogni invocazione: si può fare, ma va
+fatto con un memo, non ingenuamente.
+
+**Lo strumento resta**: `python tools/audit-attrs.py` rifà il conto delle mosse
+quando serve, e lo stesso confronto vale per le abilità cambiando il file
+sorgente dell'originale.
