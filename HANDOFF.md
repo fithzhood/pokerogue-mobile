@@ -6965,3 +6965,65 @@ scrivere e ha detto quale file e quale parola. Il file vecchio è rimasto al suo
 posto, quindi non è mai uscita una clear sbagliata. Quando blocca, la domanda da
 farsi è «è una parola vera?» — se sì si aggiunge un ritaglio, se no si cambia il
 codice.
+
+## 110. Il censimento delle cose mute (rev 198)
+
+> «Controlla se ci sono altre cose con attrs vuoti»
+
+Cannonbecco, Bruciatutto e Passoindietro non erano casi isolati: erano la punta
+di una lista. L'ho **misurata** invece di indovinarla, e lo strumento è rimasto
+nel progetto — `tools/audit-attrs.py`, si rilancia quando serve.
+
+**Come si riconosce una cosa muta.** «`attrs` vuoti» da solo non basta: Azione ha
+`attrs: []` ed è giusto così, il danno è il comportamento di serie. Il segnale è
+il confronto con l'originale: la mossa **là** ha almeno un `.attr(...)` che conta,
+**qui** non ha attributi, e il nostro motore non la nomina mai (né fra virgolette
+né come chiave nuda — le gestiamo a mano in tabelle tipo `POTENZA_VARIABILE` o
+`MOSSE_SPECIALI`).
+
+| | prima | dopo questo giro |
+|---|---|---|
+| mosse con `attrs` vuoti | 503 | 503 |
+| …di cui con un effetto vero non tradotto | **67** | **47** |
+| abilità mai nominate dal motore | **140** | **129** |
+
+### Cosa è stato acceso
+
+**Formule sbagliate** (le più gravi: non un effetto mancante, un *calcolo*
+sbagliato):
+- **Schiacciacorpo** attacca con la propria **Difesa** — verificato: alzando la
+  Difesa da 50 a 200 il danno va da 44 a 173; alzando l'Attacco resta 44.
+- **Psicoshock** e **Spadamistica**: speciali, ma picchiano sulla Difesa
+  **fisica** — 25 → 7 alzando la Difesa del bersaglio, invariato alzandone la
+  Speciale.
+- **Ripicca** usa l'**Attacco di chi ha davanti** — 36 → 142 alzando l'attacco
+  *suo*, invariato alzando il mio.
+- **Spadasolenne**, **Braccioteso**, **Insidia**, **Tabula Laser** ignorano gli
+  sbalzi del bersaglio.
+
+**Potenze che dipendono dalla situazione** — ⚠️ e qui c'è una trappola in cui
+sono cascato: `POTENZA_VARIABILE` la legge **solo** chi ha potenza −1 nei dati, e
+queste cinque la potenza ce l'hanno scritta, quindi non ci passavano mai. Vanno
+in `POTENZA_CONDIZIONATA`, applicata **dentro** `computeDamage` dove `power` è
+ancora vivo: la prima stesura moltiplicava un numero che il danno aveva già usato,
+e non cambiava niente (il collaudo l'ha beccata subito, 26 → 27 invece di 26 → 52).
+- **Veicolaforza** e **Tracotanza**: 20 + 20 per stadio positivo (7 → 50 con tre).
+- **Facciata**: doppia da malato, e la scottatura non la frena (26 → 52).
+- **Maniereforti** e **Svegliopacca**: doppie sul bersaglio giusto (26 → 53), e
+  poi lo curano.
+
+**Altro:** **Liofilizzazione** superefficace sull'Acqua (45 contro i 14 di
+Geloraggio) — è l'unica eccezione scritta a mano alla tabella dei tipi;
+**Pulifumo** e **Scricchiagelo** azzerano gli sbalzi; **Canto Effimero** toglie la
+scottatura; **Calciosalto**/**Calcinvolo** costano metà PS a chi manca;
+**Giornopaga** dà soldi veri.
+
+**Dodici abilità, tre agganci:** Inversione (Danzaspada → −2 Attacco, verificato),
+Velentocco, Viscosità, Boccolidoro, Sopportazione (+1 Difesa a ogni colpo,
+verificato), Idrorinforzo, Giustizia, Vapormacchina, Lanugine, Grancollera,
+Cuordeciso.
+
+⚠️ **Restano 47 mosse e 129 abilità.** Non è un difetto nascosto: è una lista di
+lavoro, e adesso è scritta. Le prossime candidate ovvie, per quanto si incontrano:
+Traccia, Sosia, Mutatipo/Libero, Magispecchio, Illusione, Download, Altalena,
+Abillegame, le «Pelle-» che cambiano tipo alle Normali, e le quattro Nefaste.

@@ -1,11 +1,11 @@
 {
- "rev": 197,
+ "rev": 198,
  "assetsRev": 4,
- "generato": "2026-09-08 05:59:45",
+ "generato": "2026-09-08 06:17:25",
  "files": {
   "pokerogue-app.html": "9e6074593b438aff",
   "pokerogue.css": "53b1e14e4163c06c",
-  "pokerogue.js": "1e673e66a2fcf040",
+  "pokerogue.js": "b6b55d93edbe7f82",
   "data/abilities.json": "06df74b60da95c91",
   "data/anims-index.json": "09bada2adeafabab",
   "data/biomes.json": "5a1cf737d23ec9ef",
