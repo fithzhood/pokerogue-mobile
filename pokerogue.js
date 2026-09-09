@@ -282,14 +282,32 @@
     return "LEGENDARY";
   }
 
+  /* 🔴 DUE GIORNI DIVERSI NELLO STESSO GIOCO (§116).
+     Segnalazione: «assicurati di aggiornare il pokemon leggendario del Gacha e
+     i pokemon con pokerus alla mezzanotte».
+     Le due cose che cambiano ogni giorno contavano i giorni in due modi:
+       · il Pokerus da `new Date()`, cioe' anno/mese/giorno LOCALI;
+       · il leggendario del gacha da `Date.now() / 86400000`, cioe' i giorni
+         dall'epoca in UTC.
+     D'estate in Italia sono due ore di scarto: il Pokerus girava a mezzanotte
+     e il leggendario alle due del mattino. Adesso il giorno lo dice una
+     funzione sola, e a mezzanotte cambiano tutti e due insieme.
+     ⚠️ L'originale conta in UTC (`getLegendaryGachaSpeciesForTimestamp`).
+     Qui si stacca apposta: e' un gioco che gira su un telefono solo, e la
+     mezzanotte che conta e' quella di chi ci gioca. */
+  function giornoLocale(d) {
+    d = d || new Date();
+    // giorni dal 1970 contati sul calendario locale, non sull'orologio di Greenwich
+    return Math.floor((d - d.getTimezoneOffset() * 60000) / 86400000);
+  }
+
   /* SPECIE IN EVIDENZA del gacha leggendario: cambia ogni giorno, uguale per
      tutti i tiri di quel giorno (come `getLegendaryGachaSpeciesForTimestamp`,
      che ruota su base giornaliera). Eternatus è escluso, come nell'originale. */
   function specieInEvidenza() {
     const pool = SPECIES_KEYS.filter(k => S[k].eggTier === "LEGENDARY" && k !== "ETERNATUS");
     if (!pool.length) return null;
-    const giorno = Math.floor(Date.now() / 86400000);
-    return pool[giorno % pool.length];
+    return pool[giornoLocale() % pool.length];
   }
   function defaultMeta() {
     return {
@@ -375,8 +393,7 @@
   // Pokerus del giorno: 3 specie estratte in modo deterministico dalla data
   // (come getPokerusStarters dell'originale). Bonus: +1 livello per ondata.
   function pokerusToday() {
-    const d = new Date();
-    let seed = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+    let seed = giornoLocale();
     const out = [];
     for (let i = 0; out.length < 3 && i < 60; i++) {
       seed = (seed * 1103515245 + 12345) % 2147483648;
@@ -402,6 +419,24 @@
      «non vorrei mandare via l'unico col Pokerus», ed e' proprio la scelta in
      cui saperlo conta di piu'. Adesso la targhetta la fa questa, e la usano
      tutte — compresa la scheda di chi ARRIVA, che il Pokerus puo' averlo lui. */
+  /* 🔴 NESSUNO SI ACCORGEVA CHE ERA CAMBIATO GIORNO (§116).
+     Le due funzioni rifanno il conto ogni volta che le si chiama, quindi
+     bastava riaprire la schermata. Ma questo gioco sul telefono non si chiude
+     mai: si mette via e si riprende, e la schermata del gacha resta quella
+     disegnata ieri sera — col leggendario di ieri nella cupola.
+     Qui si guarda l'ora: quando il giorno cambia, o quando l'app torna in
+     primo piano, si ridisegna la schermata che dipende dal giorno. Le altre
+     non si toccano: ridisegnare la scelta degli starter a meta' scelta
+     perderebbe la squadra che si sta componendo. */
+  let giornoInCorso = giornoLocale();
+  function controllaCambioGiorno() {
+    const oggi = giornoLocale();
+    if (oggi === giornoInCorso) return;
+    giornoInCorso = oggi;
+    if (game && game.phase === "GACHA") showGacha(null, ultimoRitornoGacha);
+  }
+  let ultimoRitornoGacha = null;
+
   const badgePkrs = (p) => (p && p.pokerus)
     ? `<span class="status-badge st-PKRS" title="Pok\u00e9rus: +50% esperienza, contagia i vicini di posto">PKRS</span>`
     : "";
@@ -442,13 +477,26 @@
       if (!prima) nuovi.push(root);
     }
     for (const k of nuovi) messages.push(`🎀 ${S[k].it} ha ottenuto il suo primo Fiocco!`);
-    // un buono uovo per ogni specie al suo PRIMO fiocco, come nell'originale
+    /* 🔴 IL PREMIO DEL PRIMO FIOCCO ERA UN DECIMO DI QUELLO VERO (§116).
+       La' il primo fiocco di una specie frutta un VOUCHER_PLUS, e un
+       VOUCHER_PLUS vale CINQUE tiri al gacha (`egg-gacha-ui-handler`:
+       `[VoucherType.PLUS, 1, 5]`). Da noi ne dava uno. Duecento ondate per un
+       tiro solo: il premio non si vedeva nemmeno.
+       Da noi `meta.vouchers` conta i TIRI, non i biglietti, quindi il buono
+       «piu'» si scrive come cinque. */
     if (nuovi.length) {
-      meta.vouchers += nuovi.length;
-      messages.push(`${ico("voucher")} ${nuovi.length} Voucher Uovo per i primi fiocchi!`);
+      const tiri = nuovi.length * TIRI_BUONO_PLUS;
+      meta.vouchers += tiri;
+      messages.push(`${ico("voucher")} ${nuovi.length} Buono Uovo Plus (${tiri} tiri) per i primi fiocchi!`);
     }
     saveMeta();
+    return nuovi;
   }
+  /* Quanto vale un buono, in tiri: gli stessi numeri della'. */
+  const TIRI_BUONO_PLUS = 5, TIRI_BUONO_PREMIUM = 10;
+  /* Hai gia' completato la Classica almeno una volta? Da questo dipendono le
+     due cose che l'originale tiene chiuse fino alla prima vittoria. */
+  const giaCampione = () => (meta.stats.wins || 0) > 0;
   let meta = defaultMeta();
   function loadMeta() {
     try { const s = localStorage.getItem(META_KEY); if (s) meta = Object.assign(defaultMeta(), JSON.parse(s)); } catch (e) {}
@@ -2360,6 +2408,23 @@
       return Math.round(tot / 200);
     },
     showEnc: (id) => showMysteryEncounter(MYSTERY_ENCOUNTERS.find(e => e.id === id)),
+    /* Che forma esce davvero a un certo livello (§116): un Vaporeon in un pool
+       dev'essere un Eevee finche' il livello non regge la Pietraidrica.
+         __items.formaLv("VAPOREON", 5)   __items.formaLv("VENUSAUR", 20) */
+    formaLv: (k, lv) => ({ chiesta: k, esce: evolvedFormFor(k, lv == null ? 5 : lv) }),
+    /* Quanti pezzi di un oggetto regge ancora chi e' in campo (§116).
+         __items.tetto("leftovers")   __items.tetto()  -> tutti */
+    tetto: (k) => {
+      const p = game.player; if (!p) return "serve una run in corso";
+      const uno = (x) => ({ ha: quantiHeld(p, x), tetto: tettoHeld(x), posto: postoPerHeld(p, x) });
+      if (k) return uno(k);
+      const out = {}; for (const x in TETTO_HELD) out[x] = uno(x);
+      out["_bacche"] = BERRY_KEYS.reduce((o, b) => (o[b] = tettoBacca(b), o), {});
+      out["_vitamine"] = VITS.reduce((o, v) => (o[v] = tettoVitamina(p, v), o), {});
+      return out;
+    },
+    /* Perche' la ball e' vietata adesso (§116): null = si puo' tirare. */
+    ballOk: () => ballBlockReason(BALL_TYPES[0]) || "si puo' tirare",
   };
 
   // Ritmo della narrazione (ms per messaggio). ?fast = iper-veloce per il beta test.
@@ -3274,7 +3339,36 @@
     game.legendballs = 0;
     game.lastballs = 0;
     game.theftballs = 0;
+    game.masterballs = 0;
     game.pendingTheft = 0;
+    /* 🔴 SEI COSE DELLA RUN VECCHIA ENTRAVANO NELLA NUOVA (§116).
+       Segnalazione: «ricorda di resettare il contatore delle last ball quando
+       una run finisce. Controlla anche altri contatori se ci sono».
+       `CAMPI_RUN` — la lista di cio' che si salva PER RUN — ha 36 voci, e
+       `startRun` ne azzerava trenta. Le altre sei restavano di traverso:
+
+         cattureFallite  il contatore della pietà delle Last Ball. Perdi la run
+                         con nove catture mancate e la prima che sbagli nella
+                         run nuova te ne regala una: il premio arrivava da una
+                         partita che non esiste piu'.
+         masterballs     l'unica ball che non si azzerava. Le altre sette si',
+                         quindi era una svista, non una scelta.
+         gymRoster       i sei capipalestra sorteggiati per la run. Restando li'
+                         la run nuova rifaceva le stesse sei palestre, e il
+                         sorteggio del §71 non serviva a niente.
+         zoneViste       i pallini «ci sei gia' passato» sulla mappa: la run
+                         nuova cominciava con mezza mappa gia' segnata.
+         rivalRubati     i Pokemon che hai rubato al Rivale (§75): lui se li
+                         ricordava anche nella partita dopo e continuava a non
+                         schierarli.
+         evilRubati      lo stesso per il team cattivo.
+       Ricaricare un salvataggio li riscrive tutti da `CAMPI_RUN`, quindi
+       azzerarli qui non tocca le run in corso. */
+    game.cattureFallite = 0;
+    game.gymRoster = null;
+    game.zoneViste = [];
+    game.rivalRubati = [];
+    game.evilRubati = [];
     game.money = 400;
     game.stones = {};
     // amuleti e potenziamenti di run (Esperienzamuleto, Monetamuleto, Mappa, ecc.)
@@ -3855,9 +3949,51 @@
     applyOnSummon(f, game.player, messages);
   }
 
+  /* 🔴 LA CATENA SI PERCORREVA IN UNA DIREZIONE SOLA (§116).
+     Segnalazione: «nelle lotte in doppio sembra che il secondo pkmn avversario
+     abbia una pool meno limitata del primo: ho appena incontrato un vaporeon
+     livello 5, avrebbe dovuto essere eevee».
+     La pool e' la stessa per tutti e due gli slot — quella non era il
+     problema. Il problema e' che i pool dei biomi contengono anche le forme
+     EVOLUTE (Vaporeon sta in LAKE/SUPER_RARE) e noi la specie pescata la
+     facevamo solo salire, mai scendere. A livello 5 usciva Vaporeon perche'
+     era scritto nel pool, e nessuno lo riportava indietro.
+     Nell'originale questo pezzo c'e' e si chiama `getRequiredPrevo`: prima di
+     tutto guarda se il livello e' sotto la soglia della sua evoluzione e in
+     quel caso restituisce la PREEVO, senza nemmeno provare a far evolvere.
+     ⚠️ Scendere e basta, senza poi risalire: Eevee ha otto evoluzioni e
+     rifacendo il giro all'insu' un Vaporeon di livello 40 poteva tornare
+     Jolteon. L'originale ha la stessa cautela (`return requiredPrevo`). */
+  let PRE_SOGLIA = null;
+  function preEvoSoglie() {
+    if (PRE_SOGLIA) return PRE_SOGLIA;
+    PRE_SOGLIA = {};
+    for (const id in S) for (const e of S[id].evolutions || []) {
+      if (!S[e.to] || PRE_SOGLIA[e.to] || !specieUsabile(id)) continue;
+      // pietra o amicizia: la soglia e' 30, la stessa che usa `evolvedFormFor`
+      const soglia = (e.item || e.friendship) ? Math.max(30, e.level || 0) : (e.level || 1);
+      PRE_SOGLIA[e.to] = { da: id, soglia };
+    }
+    return PRE_SOGLIA;
+  }
+  /* La forma che questa specie deve avere a questo livello, scendendo. */
+  function formaPerLivello(speciesId, level) {
+    const pre = preEvoSoglie();
+    let cur = speciesId;
+    for (let g = 0; g < 4; g++) {
+      const p = pre[cur];
+      if (!p || level >= p.soglia) break;
+      cur = p.da;
+    }
+    return cur;
+  }
+
   // Fa evolvere una specie "sulla carta" fino al livello dato (per squadre
   // avversarie coerenti: al crescere delle onde il Rivale ha forme evolute).
   function evolvedFormFor(speciesId, level) {
+    // troppo poco per essere quello che e': si torna indietro e ci si ferma li'
+    const indietro = formaPerLivello(speciesId, level);
+    if (indietro !== speciesId) return indietro;
     let cur = speciesId;
     for (let step = 0; step < 3; step++) {
       const evo = (S[cur].evolutions || []).find(e => evoUsabile(e) && (
@@ -5559,7 +5695,19 @@
       saveMeta();
       // 🎀 IL FIOCCO si prende QUI, e solo qui: e' il premio della vittoria
       const fiocchi = [];
-      assegnaFiocchi(fiocchi);
+      /* Prima o dopo `assegnaFiocchi`? Prima: `meta.stats.wins` e' gia' salito
+         a 1 sopra, quindi «e' la prima volta» si legge sull'1, non sullo 0. */
+      const primaVolta = (meta.stats.wins || 0) <= 1;
+      game._fiocchiNuovi = assegnaFiocchi(fiocchi) || [];
+      game._primaVittoria = primaVolta;
+      /* Buono PREMIUM per chi ha gia' vinto altre volte: la' e' l'altro
+         premio della vittoria (`GameOverModifierRewardPhase` con
+         VOUCHER_PREMIUM, dato solo `if (!firstClear)`). */
+      if (!primaVolta) {
+        meta.vouchers += TIRI_BUONO_PREMIUM;
+        fiocchi.push(`${ico("voucher")} Buono Uovo Premium: ${TIRI_BUONO_PREMIUM} tiri al gacha!`);
+        saveMeta();
+      }
       /* 🔴 L'ULTIMA BALL SUL BOSS FINALE.
          Durante la lotta il boss finale E' catturabile — `ballBlockReason` lo
          lascia passare apposta, ed e' una scelta nostra, diversa
@@ -5576,11 +5724,11 @@
         `🏆 HAI COMPLETATO LA MODALITÀ CLASSICA!`,
       ]), () => {
         if (!game.capturedThisWave && totalBalls() > 0) {
-          dopoUltimaBall = () => renderRunVictory();
+          dopoUltimaBall = () => salutoDelRivale(renderRunVictory);
           offerCapture();
           return;
         }
-        renderRunVictory();
+        salutoDelRivale(renderRunVictory);
       });
       return;
     }
@@ -8879,6 +9027,23 @@
   };
   const primaBacca   = (f) => Object.keys(f.berries || {}).find(k => f.berries[k] > 0 && BACCA_DONO[k]);
   const primoOggetto = (f) => Object.keys(f.held || {}).find(k => k !== "typeboost" && f.held[k] > 0);
+  /* 🔴 LANCIO NON VEDEVA LE BACCHE (§116).
+     Segnalazione: «un pokemon aveva una bacca ma la mossa non ha fatto
+     nulla». `primoOggetto` guarda solo `held`, e le bacche da noi stanno in
+     un cassetto a parte (`berries`): con una Baccacedro in tasca e nient'altro
+     addosso, Lancio si fermava sul «non ha niente da lanciare».
+     Nei giochi le bacche si lanciano eccome — valgono 10 di potenza — e chi
+     le prende in faccia SE LE MANGIA, con l'effetto pieno e senza aspettare la
+     soglia di PS. Una Baccaprugna tirata addosso cura l'avversario: e' un
+     autogol, ed e' giusto che si possa fare. */
+  const primaBaccaQualunque = (f) => Object.keys(f.berries || {}).find(k => f.berries[k] > 0 && BERRY_DATA[k]);
+  /* Che cosa parte davvero: prima l'oggetto tenuto, poi la bacca. */
+  function cosaSiLancia(f) {
+    const o = primoOggetto(f);
+    if (o) return { dove: "held", k: o };
+    const b = primaBaccaQualunque(f);
+    return b ? { dove: "berries", k: b } : null;
+  }
 
   const pesoPotenza = (kg) => !kg ? 40
     : kg >= 200 ? 120 : kg >= 100 ? 100 : kg >= 50 ? 80 : kg >= 25 ? 60 : kg >= 10 ? 40 : 20;
@@ -9009,7 +9174,7 @@
     if (move.id === "NATURAL_GIFT" && !primaBacca(actor)) {
       stessoMomento(messages, `${actor.name} non ha bacche da usare!`); return false;
     }
-    if (move.id === "FLING" && !primoOggetto(actor)) {
+    if (move.id === "FLING" && !cosaSiLancia(actor)) {
       stessoMomento(messages, `${actor.name} non ha niente da lanciare!`); return false;
     }
     if (move.id === "SPIT_UP" && !(actor.volatile.accumulo || 0)) {
@@ -9017,7 +9182,7 @@
     }
 
     // potenza calcolata: da qui in poi è un colpo normale
-    let mossa = move, potenza;
+    let mossa = move, potenza, baccaLanciata = null;
     if (move.id === "NATURAL_GIFT") {
       const k = primaBacca(actor), b = BACCA_DONO[k];
       actor.berries[k]--; if (!actor.berries[k]) delete actor.berries[k];
@@ -9028,11 +9193,19 @@
       mossa = { ...move, type: b.tipo };
       stessoMomento(messages, `La ${BERRY_DATA[k].it} si trasforma in un colpo di tipo ${T[b.tipo].it}!`);
     } else if (move.id === "FLING") {
-      const k = primoOggetto(actor);
-      potenza = FLING_POT[k] || 30;
-      actor.held[k]--; if (!actor.held[k]) delete actor.held[k];
-      recomputeStats(actor);                 // l'oggetto se n'è andato
-      stessoMomento(messages, `${actor.name} scaglia il suo oggetto!`);
+      const tiro = cosaSiLancia(actor);
+      if (tiro.dove === "berries") {
+        // le bacche pesano poco: 10 di potenza, come nei giochi
+        potenza = 10;
+        actor.berries[tiro.k]--; if (!actor.berries[tiro.k]) delete actor.berries[tiro.k];
+        stessoMomento(messages, `${actor.name} scaglia la ${BERRY_DATA[tiro.k].it}!`);
+        baccaLanciata = tiro.k;      // chi la prende se la mangia, DOPO il danno
+      } else {
+        potenza = FLING_POT[tiro.k] || 30;
+        actor.held[tiro.k]--; if (!actor.held[tiro.k]) delete actor.held[tiro.k];
+        recomputeStats(actor);                 // l'oggetto se n'è andato
+        stessoMomento(messages, `${actor.name} scaglia il suo ${nomeHeld(tiro.k)}!`);
+      }
     } else if (move.id === "SPIT_UP") {
       potenza = 100 * actor.volatile.accumulo;
       scaricaAccumulo(actor, messages);
@@ -9040,7 +9213,13 @@
       const f = POTENZA_VARIABILE[move.id];
       potenza = f ? Math.max(1, Math.floor(f(actor, foe, move))) : POTENZA_RIPIEGO;
     }
-    return doDamage(actor, foe, mossa, messages, potenza);
+    const esito = doDamage(actor, foe, mossa, messages, potenza);
+    /* La bacca la mangia il BERSAGLIO, e solo se e' ancora in piedi: una
+       Baccacedro tirata addosso a chi cade non lo rimette su. */
+    if (baccaLanciata && foe && !foe.fainted) {
+      effettoBaccaAddosso(foe, baccaLanciata, messages);
+    }
+    return esito;
   }
 
   /* ----------------------------------------------------------------------
@@ -10091,6 +10270,47 @@
       return;
     }
   }
+  /* La bacca ADDOSSO (§116): niente soglie, niente condizioni. E' quella
+     tirata da Lancio, e nei giochi il bersaglio ne subisce l'effetto e basta.
+     Riusa gli stessi numeri di `checkBerries`, cosi' le due strade non possono
+     divergere. */
+  function effettoBaccaAddosso(f, kind, messages) {
+    if (!f || f.fainted) return;
+    const nome = (BERRY_DATA[kind] || {}).it || "bacca";
+    const cura = (quota) => {
+      if (f.hp >= f.maxHp) return false;
+      f.hp = Math.min(f.maxHp, f.hp + Math.max(1, Math.floor(f.maxHp / quota)));
+      messages.push(`La ${nome} rimette in sesto ${f.name}!`);
+      return true;
+    };
+    switch (kind) {
+      case "SITRUS": case "ENIGMA": cura(4); return;
+      case "LUM":
+        if (f.status || f.volatile.confusion > 0) {
+          f.status = null; f.sleepTurns = 0; f.volatile.confusion = 0;
+          messages.push(`La ${nome} rimette in sesto ${f.name}!`);
+        }
+        return;
+      case "LEPPA": {
+        const vuota = (f.moves || []).find(m => m.pp <= 0) || (f.moves || []).find(m => m.pp < m.maxPp);
+        if (vuota) { vuota.pp = Math.min(vuota.maxPp, vuota.pp + 10);
+          messages.push(`${M[vuota.id].it} di ${f.name} recupera PP!`); }
+        return;
+      }
+      case "LIECHI": applyStatStage(f, ["ATK"], 1, messages, true); return;
+      case "GANLON": applyStatStage(f, ["DEF"], 1, messages, true); return;
+      case "PETAYA": applyStatStage(f, ["SPATK"], 1, messages, true); return;
+      case "APICOT": applyStatStage(f, ["SPDEF"], 1, messages, true); return;
+      case "SALAC":  applyStatStage(f, ["SPD"], 1, messages, true); return;
+      case "LANSAT": f._lansat = true; messages.push(`${f.name} è pronto al colpo critico!`); return;
+      case "STARF": {
+        const st = VITS.filter(x => x !== "hp")[Math.floor(Math.random() * 5)];
+        applyStatStage(f, [st.toUpperCase()], 2, messages, true);
+        return;
+      }
+    }
+  }
+
   // Bacca Enigma: cura un quarto quando si viene colpiti superefficace
   function checkEnigmaBerry(f, eff, messages) {
     if (!f || f.fainted || !f.berries || eff <= 1) return;
@@ -11047,7 +11267,13 @@
   /* Toglie `quanti` pezzi a `da` e li dà a `a`. Le tre famiglie di oggetti
      stanno in posti diversi, quindi il travaso va scritto per ognuna. */
   function spostaOggetto(da, a, voce, quanti) {
-    const n = Math.min(quanti, voce.n);
+    /* Il tetto vale anche qui: senza, bastava raccogliere gli Avanzi con sei
+       Pokemon e poi ammucchiarli tutti sul primo. */
+    const posto = voce.tipo === "berry" ? postoPerBacca(a, voce.chiave)
+                : voce.tipo === "typeboost" ? 99
+                : postoPerHeld(a, voce.chiave);
+    const n = Math.min(quanti, voce.n, posto);
+    if (n <= 0) return 0;
     if (voce.tipo === "berry") {
       da.berries[voce.chiave] -= n;
       if (da.berries[voce.chiave] <= 0) delete da.berries[voce.chiave];
@@ -11134,24 +11360,39 @@
     }
 
     // 3. A CHI
-    const cards = game.party.map((p, i) =>
-      cardCompatta(p, i, i === trasf.da ? "spento" : "vivo",
-        i === trasf.da ? `<span class="pc-conta vuoto">da qui</span>` : "")).join("");
+    /* Quanti pezzi ci stanno ancora addosso a ciascuno (§116): chi è al tetto
+       si vede spento, con scritto quanti ne tiene già. Così il limite si
+       incontra qui, dove si sta decidendo, e non dopo con un travaso a vuoto. */
+    const capienza = (p) => trasf.voce.tipo === "berry" ? postoPerBacca(p, trasf.voce.chiave)
+                          : trasf.voce.tipo === "typeboost" ? 99
+                          : postoPerHeld(p, trasf.voce.chiave);
+    const tettoDi = trasf.voce.tipo === "berry" ? tettoBacca(trasf.voce.chiave)
+                  : trasf.voce.tipo === "typeboost" ? 99
+                  : tettoHeld(trasf.voce.chiave);
+    const cards = game.party.map((p, i) => {
+      if (i === trasf.da) return cardCompatta(p, i, "spento", `<span class="pc-conta vuoto">da qui</span>`);
+      const posto = capienza(p);
+      return cardCompatta(p, i, posto > 0 ? "vivo" : "spento",
+        posto > 0 ? "" : `<span class="pc-conta vuoto">già ${tettoDi}/${tettoDi}</span>`);
+    }).join("");
     showMetaScreen(`
       <div class="meta-title" style="font-size:clamp(19px,5.6vw,30px)">${trasf.voce.nome}${trasf.quanti > 1 ? ` ×${trasf.quanti}` : ""}</div>
-      <div class="meta-sub">a chi lo dai?</div>
+      <div class="meta-sub">a chi lo dai?${tettoDi < 99 ? ` · al massimo ${tettoDi} a testa` : ""}</div>
       <div class="pd-list griglia2">${cards}</div>
       <div class="meta-actions"><button class="meta-btn ghost" data-act="back">↩ Indietro</button></div>`);
     metaEl().querySelectorAll(".pd-card[data-i]").forEach(b => b.onclick = () => {
       const i = parseInt(b.dataset.i, 10);
       if (i === trasf.da) return;
       const a = game.party[i];
+      if (capienza(a) <= 0) return;          // pieno: il tocco non fa niente
+      const trasf0 = trasf.quanti;
       const n = spostaOggetto(da, a, trasf.voce, trasf.quanti);
       const nome = trasf.voce.nome;
       trasf = null;
       showMetaScreen(`
         <div class="meta-title" style="font-size:clamp(19px,5.6vw,30px)">Fatto</div>
-        <div class="meta-sub">${nome}${n > 1 ? ` ×${n}` : ""}: da ${da.name.replace("✨", "")} a ${a.name.replace("✨", "")}</div>
+        <div class="meta-sub">${nome}${n > 1 ? ` ×${n}` : ""}: da ${da.name.replace("✨", "")} a ${a.name.replace("✨", "")}${
+          n < trasf0 ? ` · gli altri ${trasf0 - n} non ci stavano` : ""}</div>
         <div class="meta-actions two-col">
           <button class="meta-btn ghost" data-act="squadra">↩ Squadra</button>
           <button class="meta-btn gacha" data-act="ancora">${ico("zaino")} Sposta ancora</button></div>`);
@@ -11471,12 +11712,25 @@
           vistePerDex[e.variant] ? "già vista" : "<b>forma mai vista</b>"} (${
           Object.keys(vistePerDex).length}/${totForme} di ${sp.it})</div>`
       : "";
+    /* 🔴 QUELLO CHE ENTRA IN SQUADRA E' LA FORMA BASE (§116).
+       Il boss finale scende in campo trasformato — Mewtwo Mega X, Lugia
+       Ombra — ma `risolviLancio` ricostruisce il Pokemon dalla SPECIE, non
+       dalla forma della fase: quello che si prende e' il Mewtwo normale. E'
+       giusto cosi' («ma sblocca la forma base, servira' un oggetto per avere
+       la forma finale in game»), ma nessuno lo diceva, e dalla schermata
+       sembrava di star catturando il colosso che si ha davanti. */
+    /* Basta che sia oltre la prima fase: certe fasi cambiano nome, tipi e
+       statistiche senza una chiave di forma (le versioni Ombra sono un
+       filtro sullo sprite), e anche quelle non entrano in squadra. */
+    const rigaFase = (e.finalBoss && (e.formKey || (e.finalPhase || 1) > 1))
+      ? `<div class="cap-riga">⚠️ Entrerà in squadra come <b>${S[e.speciesId].it}</b> normale: la forma di questo scontro resta qui</div>`
+      : "";
     const roba = heldSummary(e);
     const rigaHeld = roba
       ? `<div class="cap-riga">${ico("zaino")} Tiene: <b>${roba}</b></div>` : "";
     // Qui lo scanner è SEMPRE acceso: la lente spenta non nasconde nulla.
     const chipIv = e.ivs ? badgeIV(e, true) : "";
-    return `<div class="cap-info">${rigaDex}${rigaCrom}${rigaForma}${rigaAb}${rigaHeld}${
+    return `<div class="cap-info">${rigaFase}${rigaDex}${rigaCrom}${rigaForma}${rigaAb}${rigaHeld}${
       chipIv ? `<div class="cap-iv">${chipIv}</div>` : ""}</div>`;
   }
 
@@ -11595,6 +11849,11 @@
      possono lanciare quante ball si vuole. Le ball normali funzionano solo sui
      SELVATICI; la Clepto Ball (nostra aggiunta) ruba anche agli allenatori, ma
      non al Rivale. Il boss finale non è catturabile. */
+  /* Gli scudi ancora interi. `segBounds` sono i CONFINI fra i segmenti, quindi
+     sono uno in meno dei segmenti: rotti tutti, resta l'ultima barra. */
+  const scudiInPiedi = (f) => (f && f.segBounds && f.segBounds.length)
+    ? Math.max(0, f.segBounds.length - (f.segBroken || 0)) : 0;
+
   function ballBlockReason(ball) {
     const e = game.enemy;
     if (!e) return "Nessun bersaglio.";
@@ -11617,6 +11876,25 @@
          §75 e nessuno l'ha ricollegato. La richiesta di adesso — «i pkmn del
          rivale devono essere rubabili con cleptoball» — chiede esattamente
          quello che il §75 gia' prometteva. */
+    }
+    /* 🔴 SI CATTURAVA UN BOSS CHE NON ERA ANCORA STATO SCALFITO (§116).
+       Segnalazione: «i pkmn con scudi non devono essere catturabili finche'
+       hanno scudi attivi. Stesso dicasi per il boss finale se cambia forma:
+       solamente la forma finale e' catturabile».
+       Gli scudi sono la lotta contro un boss: si rompono uno alla volta, e a
+       ogni rottura lui cresce. Una Ultra Ball al primo turno saltava tutto
+       questo. Adesso la ball si puo' tirare solo nell'ULTIMA barra, cioe'
+       quando gli scudi sono caduti tutti — la cattura resta possibile, ma
+       bisogna essersela guadagnata. */
+    const scudi = scudiInPiedi(e);
+    if (scudi > 0) {
+      return `Gli scudi di ${e.name} respingono la ball! Ne restano ${scudi}: rompili tutti, poi riprova.`;
+    }
+    /* Il boss finale cambia forma a ogni fase, e le fasi intermedie non
+       possono nemmeno essere sconfitte (`bloccoFinale`): prenderlo li' vorrebbe
+       dire portarsi via una cosa a metà. Solo l'ultima forma. */
+    if (e.finalBoss && e.finalPhase < (e.bossFasi || 1)) {
+      return `${e.name} non ha ancora mostrato la sua vera forma. La ball non lo tocca.`;
     }
     return null;
   }
@@ -12629,6 +12907,7 @@
 
   function showGacha(result, dove) {
     game.phase = "GACHA";
+    ultimoRitornoGacha = dove;      // serve a `controllaCambioGiorno`
     const canPull = meta.vouchers > 0;
     const evid = specieInEvidenza();
     if (result && result.tipo) gachaScelto = result.tipo;
@@ -14840,9 +15119,75 @@
      ---------------------------------------------------------------------- */
   /* `_avevaOggetto` serve ad AGILTECNICA: distingue «non ho mai tenuto niente»
      da «l'ho perso», che e' la condizione che raddoppia la Velocita'. */
-  function addHeld(p, key) { p.held[key] = (p.held[key] || 0) + 1; p._avevaOggetto = true; }
+  /* 🔴 UN POKEMON POTEVA TENERE QUARANTA AVANZI (§116).
+     Segnalazione: «servono dei limiti al numero di oggetti posseduti da un
+     pkmn, guarda come viene gestito nell'originale».
+     La', ogni strumento sa quanti pezzi ne regge un Pokemon
+     (`getMaxHeldItemCount`), e sono numeri stretti: quattro Avanzi, tre
+     Rapidartigli, UNA Evolcondensa. Da noi non c'era nessun tetto, e siccome
+     gli strumenti si impilano — quattro Avanzi curano quattro volte tanto —
+     bastava impuntarsi su un Pokemon solo per farne una cosa che il gioco non
+     puo' piu' bilanciare.
+     I numeri qui sotto sono quelli dell'originale, presi uno per uno dalle
+     classi di `modifier.ts`:
+        Avanzi 4 (TurnHeal) · Conchinella 4 (HitHeal) · Bandana 5 (SurviveDamage)
+        Rapidartigli 3 (BypassSpeedChance) · Roccia di re 3 (FlinchChance)
+        Grandelente 3 (MoveAccuracyBooster) · Multilente 2 (MultiHit)
+        Rocciamistica 2 (FieldEffect) · Presartigli 5 (ContactHeldItemTransfer)
+        Cuorugiada 10 (NatureWeight)
+        Mirino, Porro, Evolcondensa, Revitalseme, Tossicsfera, Fiammosfera,
+        buco nero e tutti gli strumenti di specie: UNO.
+     ⚠️ I Boost di Tipo (`typeboost`) restano liberi: la' sono
+     AttackTypeBooster, tetto 99, cioe' nessun tetto in pratica. */
+  const TETTO_HELD = {
+    leftovers: 4, shellbell: 4, focusband: 5, gripclaw: 5,
+    quickclaw: 3, kingsrock: 3, widelens: 3,
+    multilens: 2, mysticalrock: 2,
+    souldew: 10,
+    scopelens: 1, leek: 1, eviolite: 1, reviverseed: 1,
+    toxicorb: 1, flameorb: 1, blackhole: 1,
+    lightball: 1, thickclub: 1, metalpowder: 1, quickpowder: 1,
+    deepseascale: 1, deepseatooth: 1,
+    sciarpanera: 99, typeboost: 99,
+  };
+  // uno strumento che dimenticassimo di elencare vale 3: stretto ma non uno solo
+  const tettoHeld = k => TETTO_HELD[k] != null ? TETTO_HELD[k] : 3;
+  const quantiHeld = (p, k) => ((p.held || {})[k]) || 0;
+  const postoPerHeld = (p, k) => Math.max(0, tettoHeld(k) - quantiHeld(p, k));
+  const puoTenere = (p, k) => postoPerHeld(p, k) > 0;
+
+  /* Le bacche: due per quelle che contano (Cedro, Prugna, Mela, Enigma), tre
+     per le altre. Sono i numeri di `BerryModifier`. */
+  const TETTO_BACCA = { SITRUS: 2, LUM: 2, LEPPA: 2, ENIGMA: 2 };
+  const tettoBacca = k => TETTO_BACCA[k] || 3;
+  const postoPerBacca = (p, k) => Math.max(0, tettoBacca(k) - (((p.berries || {})[k]) || 0));
+  const puoAvereBacca = (p, k) => postoPerBacca(p, k) > 0;
+  const puoAvereQualcheBacca = p => BERRY_KEYS.some(k => puoAvereBacca(p, k));
+
+  /* Le vitamine hanno il tetto piu' bello dell'originale: `BaseStatModifier`
+     ne regge tante quanto l'IV di QUELLA statistica. Un Pokemon con 4 di
+     Attacco base non diventa un attaccante a forza di Proteine — il talento
+     ce l'ha o non ce l'ha. */
+  const tettoVitamina = (p, stat) => {
+    const iv = p.ivs && p.ivs[stat];
+    return iv != null ? Math.max(1, iv) : 31;
+  };
+  const puoVitamina = (p, stat) => (((p.vits || {})[stat]) || 0) < tettoVitamina(p, stat);
+  const puoQualcheVitamina = p => VITS.some(st => puoVitamina(p, st));
+
+  /* Torna `false` se non ci stava: chi chiama puo' dirlo, e chi non guarda
+     semplicemente non sfonda il tetto. */
+  function addHeld(p, key) {
+    if (!puoTenere(p, key)) return false;
+    p.held[key] = (p.held[key] || 0) + 1; p._avevaOggetto = true;
+    return true;
+  }
   // Una vitamina: +10% lineare alla statistica base (usata anche dai mystery encounter)
-  function boostBase(p, stat) { p.vits[stat] = (p.vits[stat] || 0) + 1; recomputeStats(p); }
+  function boostBase(p, stat) {
+    if (!puoVitamina(p, stat)) return false;
+    p.vits[stat] = (p.vits[stat] || 0) + 1; recomputeStats(p);
+    return true;
+  }
   const VITS = ["atk", "def", "spatk", "spdef", "spd", "hp"];
   const VIT_IT = { atk: "ATT", def: "DIF", spatk: "A.SP", spdef: "D.SP", spd: "VEL", hp: "PS" };
   const VIT_NOME = { hp: "PS-su", atk: "Proteina", def: "Ferro", spatk: "Calcio", spdef: "Zinco", spd: "Carburante" };
@@ -15007,7 +15352,11 @@
     p.level += n + (game.charms.candyJar || 0);   // Barattolo di caramelle: +1 livello per caramella
     recomputeStats(p); checkLevelUpsQuiet(p);
   }
-  function addBerry(p, kind) { p.berries[kind] = (p.berries[kind] || 0) + 1; }
+  function addBerry(p, kind) {
+    if (!puoAvereBacca(p, kind)) return false;
+    p.berries[kind] = (p.berries[kind] || 0) + 1;
+    return true;
+  }
 
   /* ----------------------------------------------------------------------
      OGGETTI TENUTI DAGLI AVVERSARI
@@ -15242,7 +15591,8 @@
     { tier: "COMMON", weight: 2, id: "candy", label: "Caramella rara", desc: "+1 livello", icon: "rare_candy",
       target: "mon", valid: chiunque, apply: p => addLevels(p, 1) },
     { tier: "COMMON", weight: 2, id: "berry", label: "Bacca", desc: "held: si attiva da sola in lotta", icon: "sitrus_berry",
-      target: "mon", valid: chiunque, dyn: "berry", apply: (p, pk) => addBerry(p, pk.berry) },
+      target: "mon", dyn: "berry", valid: (p, pk) => puoAvereBacca(p, pk.berry),
+      avail: someone(puoAvereQualcheBacca), apply: (p, pk) => addBerry(p, pk.berry) },
     { tier: "COMMON", weight: 4, id: "xitem", label: "Strumento X", desc: "+20% a una statistica per 5 ondate", icon: "x_attack",
       target: "run", dyn: "xstat", apply: (p, pk) => {
         game.tempBoostN = game.tempBoostN || {};
@@ -15282,7 +15632,8 @@
     { tier: "GREAT", weight: 2, id: "ppup", label: "PP-su", desc: "alza i PP massimi di una mossa che scegli tu", icon: "pp_up",
       target: "mon", mossa: true, ppUp: true, valid: canPpUp, avail: someone(canPpUp), apply: (p, pk, i) => applyPpUp(p, 1, i) },
     { tier: "GREAT", weight: 3, id: "vit", label: "Vitamina", desc: "+10% a una statistica base", icon: "protein",
-      target: "mon", valid: chiunque, dyn: "stat", apply: (p, pk) => { p.vits[pk.stat] = (p.vits[pk.stat] || 0) + 1; recomputeStats(p); } },
+      target: "mon", dyn: "stat", valid: (p, pk) => puoVitamina(p, pk.stat),
+      avail: someone(puoQualcheVitamina), apply: (p, pk) => boostBase(p, pk.stat) },
     /* Le pepite dicono QUANTO valgono: dipende dall'ondata, quindi la
        descrizione e' una funzione (come `getDescription` dell'originale, che
        scrive "una contenuta quantita' di soldi (₽1.234)"). */
@@ -15301,7 +15652,8 @@
       apply: (p, pk) => insegnaTm(pk.tm) },
     { tier: "GREAT", weight: 2, id: "speciesboost", label: "Strumento di specie", desc: "raddoppia una stat a chi lo sa usare", icon: "light_ball",
       target: "mon", dyn: "specieboost", avail: () => boostSpecieDisponibili().length > 0,
-      valid: p => boostSpecieDisponibili().some(k => SPECIE_BOOST[k].specie.includes(p.speciesId)),
+      valid: (p, pk) => boostSpecieDisponibili().some(k => SPECIE_BOOST[k].specie.includes(p.speciesId))
+        && (!pk || !pk.boost || puoTenere(p, pk.boost)),
       apply: (p, pk) => addHeld(p, pk.boost) },
     /* ⚠️ L'icona era `big_mushroom`, che negli asset NON C'E': la richiesta
        tornava 404 e restava un riquadro vuoto. Il fungo che abbiamo si chiama
@@ -15369,17 +15721,30 @@
     { tier: "ULTRA", weight: 4, id: "rarercandy", label: "Caramella rarissima", desc: "+1 livello a TUTTA la squadra", icon: "rarer_candy",
       target: "party", apply: () => { for (const q of game.party) addLevels(q, 1); } },
     { tier: "ULTRA", weight: 4, id: "reviverseed", label: "Revitalseme", desc: "held: rianima una volta al 50%", icon: "reviver_seed",
-      target: "mon", valid: chiunque, apply: p => addHeld(p, "reviverseed") },
+      target: "mon", valid: p => puoTenere(p, "reviverseed"), avail: someone(p => puoTenere(p, "reviverseed")),
+      apply: p => addHeld(p, "reviverseed") },
     { tier: "ULTRA", weight: 3, id: "quickclaw", label: "Rapidartigli", desc: "held: 10% di attaccare per primo", icon: "quick_claw",
-      target: "mon", valid: chiunque, apply: p => addHeld(p, "quickclaw") },
+      target: "mon", valid: p => puoTenere(p, "quickclaw"), avail: someone(p => puoTenere(p, "quickclaw")),
+      apply: p => addHeld(p, "quickclaw") },
     { tier: "ULTRA", weight: 7, id: "widelens", label: "Grandelente", desc: "held: +5% precisione", icon: "wide_lens",
-      target: "mon", valid: chiunque, apply: p => addHeld(p, "widelens") },
+      target: "mon", valid: p => puoTenere(p, "widelens"), avail: someone(p => puoTenere(p, "widelens")),
+      apply: p => addHeld(p, "widelens") },
     { tier: "ULTRA", weight: 4, id: "eviolite", label: "Evolcondensa", desc: "held: +50% difese se non evoluto", icon: "eviolite",
-      target: "mon", valid: p => (S[p.speciesId].evolutions || []).length > 0, apply: p => addHeld(p, "eviolite") },
+      target: "mon", valid: p => (S[p.speciesId].evolutions || []).length > 0 && puoTenere(p, "eviolite"),
+      /* 🔴 SI APRE VINCENDO (§116). Nell'originale Evolcondensa e Piccolo
+         buco nero sono `Unlockables`: non esistono finche' non hai completato
+         la Classica almeno una volta (`handleUnlocks`). E' meta' del senso di
+         arrivare in fondo — la run dopo e' diversa perche' hai vinto quella
+         prima. Da noi erano li' dal primo giorno, e vincere non cambiava
+         niente. */
+      avail: () => giaCampione() && game.party.some(p => (S[p.speciesId].evolutions || []).length > 0 && puoTenere(p, "eviolite")),
+      apply: p => addHeld(p, "eviolite") },
     { tier: "ULTRA", weight: 3, id: "toxicorb", label: "Tossicsfera", desc: "held: ti avvelena a fine turno", icon: "toxic_orb",
-      target: "mon", valid: chiunque, apply: p => addHeld(p, "toxicorb") },
+      target: "mon", valid: p => puoTenere(p, "toxicorb"), avail: someone(p => puoTenere(p, "toxicorb")),
+      apply: p => addHeld(p, "toxicorb") },
     { tier: "ULTRA", weight: 3, id: "flameorb", label: "Fiammosfera", desc: "held: ti scotta a fine turno", icon: "flame_orb",
-      target: "mon", valid: chiunque, apply: p => addHeld(p, "flameorb") },
+      target: "mon", valid: p => puoTenere(p, "flameorb"), avail: someone(p => puoTenere(p, "flameorb")),
+      apply: p => addHeld(p, "flameorb") },
     { tier: "ULTRA", weight: 5, id: "candyjar", label: "Barattolo di caramelle", desc: "+1 livello per ogni caramella", icon: "candy_jar",
       target: "run", apply: () => { game.charms.candyJar = (game.charms.candyJar || 0) + 1; } },
     { tier: "ULTRA", weight: 8, id: "expcharm", label: "Esperienzamuleto", desc: "+25% esperienza", icon: "exp_charm",
@@ -15423,20 +15788,26 @@
     { tier: "ULTRA", weight: 5, id: "lastballs", label: "Last Ball ×3", desc: "solo per il tiro di fine ondata: lì il bersaglio è già a terra e si prende quasi sempre", icon: "xb", ball: true,
       target: "run", apply: () => { game.lastballs = (game.lastballs || 0) + 3; } },
     { tier: "ROGUE", weight: 3, id: "leftovers", label: "Avanzi", desc: "held: rigenera 1/16 a fine turno", icon: "leftovers",
-      target: "mon", valid: chiunque, apply: p => addHeld(p, "leftovers") },
+      target: "mon", valid: p => puoTenere(p, "leftovers"), avail: someone(p => puoTenere(p, "leftovers")),
+      apply: p => addHeld(p, "leftovers") },
     { tier: "ROGUE", weight: 3, id: "shellbell", label: "Conchinella", desc: "held: recuperi 1/8 del danno", icon: "shell_bell",
-      target: "mon", valid: chiunque, apply: p => addHeld(p, "shellbell") },
+      target: "mon", valid: p => puoTenere(p, "shellbell"), avail: someone(p => puoTenere(p, "shellbell")),
+      apply: p => addHeld(p, "shellbell") },
     { tier: "ROGUE", weight: 5, id: "focusband", label: "Bandana", desc: "held: 10% di resistere con 1 PS", icon: "focus_band",
-      target: "mon", valid: chiunque, apply: p => addHeld(p, "focusband") },
+      target: "mon", valid: p => puoTenere(p, "focusband"), avail: someone(p => puoTenere(p, "focusband")),
+      apply: p => addHeld(p, "focusband") },
     { tier: "ROGUE", weight: 3, id: "kingsrock", label: "Roccia di re", desc: "held: 10% di far tentennare", icon: "kings_rock",
-      target: "mon", valid: chiunque, apply: p => addHeld(p, "kingsrock") },
+      target: "mon", valid: p => puoTenere(p, "kingsrock"), avail: someone(p => puoTenere(p, "kingsrock")),
+      apply: p => addHeld(p, "kingsrock") },
     { tier: "ROGUE", weight: 4, id: "scopelens", label: "Mirino", desc: "held: +1 stadio di brutto colpo", icon: "scope_lens",
-      target: "mon", valid: chiunque, apply: p => addHeld(p, "scopelens") },
+      target: "mon", valid: p => puoTenere(p, "scopelens"), avail: someone(p => puoTenere(p, "scopelens")),
+      apply: p => addHeld(p, "scopelens") },
     { tier: "ROGUE", weight: 7, id: "souldew", label: "Cuorugiada", desc: "held: rinforza l'effetto della natura", icon: "soul_dew",
       target: "mon", valid: p => NATURES[p.nature] && NATURES[p.nature].su,
       apply: p => addHeld(p, "souldew") },
     { tier: "ULTRA", weight: 3, id: "mysticalrock", label: "Rocciamistica", desc: "held: il meteo dura più a lungo", icon: "mystical_rock",
-      target: "mon", valid: chiunque, apply: p => addHeld(p, "mysticalrock") },
+      target: "mon", valid: p => puoTenere(p, "mysticalrock"), avail: someone(p => puoTenere(p, "mysticalrock")),
+      apply: p => addHeld(p, "mysticalrock") },
     { tier: "ULTRA", weight: 3, id: "leek", label: "Porro", desc: "held: brutto colpo quasi garantito", icon: "leek",
       target: "mon", valid: p => ["FARFETCHD", "SIRFETCHD"].includes(p.speciesId),
       avail: () => game.party.some(p => ["FARFETCHD", "SIRFETCHD"].includes(p.speciesId)),
@@ -15466,13 +15837,19 @@
     { tier: "MASTER", weight: 18, id: "healingcharm", label: "Curamuleto", desc: "+10% a tutte le cure", icon: "healing_charm",
       target: "run", apply: () => { game.charms.healing = (game.charms.healing || 0) + 1; } },
     { tier: "MASTER", weight: 18, id: "multilens", label: "Multilente", desc: "held: un colpo in più a danno ridotto", icon: "multi_lens",
-      target: "mon", valid: chiunque, apply: p => addHeld(p, "multilens") },
+      target: "mon", valid: p => puoTenere(p, "multilens"), avail: someone(p => puoTenere(p, "multilens")),
+      apply: p => addHeld(p, "multilens") },
     { tier: "ROGUE", weight: 5, id: "gripclaw", label: "Presartigli", desc: "held: 10% al contatto di rubargli un oggetto (se ne ha)", icon: "grip_claw",
-      target: "mon", valid: chiunque, apply: p => addHeld(p, "gripclaw") },
+      target: "mon", valid: p => puoTenere(p, "gripclaw"), avail: someone(p => puoTenere(p, "gripclaw")),
+      apply: p => addHeld(p, "gripclaw") },
     { tier: "ULTRA", weight: 6, id: "sciarpanera", label: "Sciarpa nera", desc: "held: +50% alla probabilità degli effetti aggiuntivi", icon: "sciarpa_nera",
-      target: "mon", valid: chiunque, apply: p => addHeld(p, "sciarpanera") },
+      target: "mon", valid: p => puoTenere(p, "sciarpanera"), avail: someone(p => puoTenere(p, "sciarpanera")),
+      apply: p => addHeld(p, "sciarpanera") },
     { tier: "MASTER", weight: 10, id: "blackhole", label: "Piccolo buco nero", desc: "held: ruba un oggetto ogni turno", icon: "mini_black_hole",
-      target: "mon", valid: chiunque, apply: p => addHeld(p, "blackhole") },
+      target: "mon", valid: p => puoTenere(p, "blackhole"),
+      // come Evolcondensa: si apre completando la Classica (§116)
+      avail: () => giaCampione() && game.party.some(p => puoTenere(p, "blackhole")),
+      apply: p => addHeld(p, "blackhole") },
     { tier: "MASTER", weight: 4, id: "voucherpremium", label: "Buono Uovo Premium", desc: "+10 tiri al gacha", icon: "coupon",
       target: "run", apply: () => { meta.vouchers += 10; saveMeta(); } },
 
@@ -17249,7 +17626,10 @@
      ---------------------------------------------------------------------- */
   function chooseTarget(pick, onDone, onBack) {
     const item = pick.item;
-    const valid = item.valid || alive;
+    /* ⚠️ `valid` riceve anche la SCELTA (§116): per la Vitamina e per la
+       Bacca il tetto dipende da QUALE vitamina e QUALE bacca sono uscite, e
+       quello lo sa solo `fillPick`. */
+    const valid = item.valid ? (p => item.valid(p, pick)) : alive;
     const usable = game.party.filter(valid);
     if (!usable.length) { onBack(); return; }
     // un solo destinatario possibile: niente schermata, si applica e via
@@ -17715,17 +18095,99 @@
   /*  GAME OVER                                                             */
   /* ---------------------------------------------------------------------- */
   // Schermata di vittoria della run (ondata 200 completata).
+  /* ======================================================================
+     🔴 IL FINALE ERA UN CARTELLO (§116)
+
+     Richiesta: «migliora il finale, guarda come e' fatto nell'originale».
+     Da noi duecento ondate finivano cosi': il boss cade, tre righe di testo, e
+     un riquadro con scritto CAMPIONE e due bottoni. Nient'altro.
+     La' il finale e' una SCENA, e ha tre pezzi (`GameOverPhase`):
+       1. il campo si spegne e compare il RIVALE, che ti parla per l'ultima
+          volta (`miscDialogue:ending`, con due versioni a seconda di chi e');
+       2. la carta di chiusura (`EndCardPhase`) con «Congratulazioni»;
+       3. gli sblocchi e i premi — buoni uovo per i primi fiocchi, il buono
+          premium se non e' la prima vittoria, e le due cose che si aprono solo
+          finendo la Classica.
+     Qui ci sono tutti e tre. Il dialogo non e' tradotto parola per parola:
+     e' lo stesso discorso detto in italiano, e sta attento a non dare un
+     genere a CHI GIOCA — il gioco non glielo ha mai chiesto.
+     ====================================================================== */
+  const SALUTO_RIVALE_M = [
+    "Eccoti… vuol dire che ce l'hai fatta?",
+    "Lo sapevo che ce l'avevi dentro. L'ho sempre pensato, sul serio.",
+    "È finita, allora. Il giro si è chiuso.",
+    "E anche il tuo sogno, no? Nemmeno una sconfitta.",
+    "Sarò l'unico a ricordare quello che hai fatto. Proverò a non dimenticarlo!",
+    "…scherzo. Non lo dimenticherei mai.",
+    "La tua leggenda resta nei nostri cuori.",
+    "Qui dentro non si capisce mai che ora sia, ma credo sia tardi. Torniamo a casa.",
+    "Domani, magari, un'altra lotta. Per i vecchi tempi.",
+  ];
+  const SALUTO_RIVALE_F = [
+    "Oh? Hai vinto?",
+    "Avrei dovuto immaginarmelo. Comunque, adesso sei qui.",
+    "È finita. Il giro si è chiuso.",
+    "E anche il tuo sogno, no? Nemmeno una sconfitta.",
+    "Sarò l'unica a ricordare quello che hai fatto. Va bene lo stesso, credo.",
+    "La tua leggenda resta nei nostri cuori.",
+    "Comunque, di questo posto ne ho abbastanza. Anche tu, vero? Andiamo a casa.",
+    "E quando torniamo… magari un'altra lotta. Se te la senti.",
+  ];
+
+  function salutoDelRivale(poi) {
+    const rf = !!game.rivalFemale;
+    const chi = rf ? "la Rivale" : "il Rivale";
+    /* Il ritratto compare al posto del boss caduto: da un campo vuoto il
+       dialogo non arriva da nessuno. */
+    showTrainerPortrait(rf ? "rival_f" : "rival_m");
+    const righe = (rf ? SALUTO_RIVALE_F : SALUTO_RIVALE_M).map(t => `${chi}: «${t}»`);
+    queueMessages(righe, () => { hideTrainerPortrait(); poi(); });
+  }
+
+  /* La CARTA DI CHIUSURA. La' e' un disegno con sopra «Congratulazioni»
+     (`EndCardPhase`), e quel disegno noi non ce l'abbiamo. Ma una cosa
+     l'abbiamo che la' non c'e': i sei Pokemon che hanno vinto, con la loro
+     faccia. La carta la fanno loro. */
   function renderRunVictory() {
     game.phase = "GAMEOVER";
     cancellaSlot(game.slot);      // run completata: lo slot torna libero (§26)
     clearTimeout(game.timer);
     hideTrainerPortrait();
-    const team = game.party.map(p => `${p.name} Lv.${p.level}`).join(" · ");
+
+    const squadra = game.party.map(p => `
+      <div class="vt-mon">
+        <span class="vt-ic" style="${miniIconStyle(p.dex, 1.5)}"></span>
+        <span class="vt-nome">${p.name.replace("✨", "")}${p.shiny ? " ✨" : ""}</span>
+        <span class="vt-lv">Lv.${p.level}</span>
+      </div>`).join("");
+
+    // i fiocchi conquistati adesso: sono il segno che quella specie c'era
+    const nuovi = game._fiocchiNuovi || [];
+    const rigaFiocchi = nuovi.length
+      ? `<div class="vt-riga">🎀 Primo Fiocco per ${nuovi.map(k => S[k].it).join(", ")}</div>`
+      : `<div class="vt-riga">🎀 Un Fiocco a tutta la squadra</div>`;
+
+    /* Gli sblocchi si mostrano SOLO la prima volta: dalla seconda in poi non
+       sono una notizia. */
+    const rigaSblocchi = game._primaVittoria ? `
+      <div class="vt-sblocchi">
+        <div class="vt-sb-tit">Da adesso compaiono fra i premi</div>
+        <div class="vt-sb-lista">
+          <span class="vt-sb"><img class="ico-sp" src="${itemIcon("eviolite")}" alt=""> Evolcondensa</span>
+          <span class="vt-sb"><img class="ico-sp" src="${itemIcon("mini_black_hole")}" alt=""> Piccolo buco nero</span>
+        </div>
+      </div>` : "";
+
     showMetaScreen(`
-      <div class="meta-title" style="color:#ffcf4a">🏆 CAMPIONE!</div>
-      <div class="meta-sub">Hai superato tutte le 200 ondate della modalità Classica.</div>
-      <div class="me-text" style="margin-top:2vh"><b>La tua squadra vincente</b><br>${team}</div>
-      <div class="meta-stats"><span>Vittorie totali: ${meta.stats.wins || 1}</span><span>${ico("voucher")} ${meta.vouchers}</span></div>
+      <div class="vt-carta">
+        <div class="vt-tit">CAMPIONE</div>
+        <div class="vt-sub">Duecento ondate. Il giro si è chiuso.</div>
+        <div class="vt-squadra">${squadra}</div>
+        ${rigaFiocchi}
+        <div class="vt-riga">${ico("voucher")} ${meta.vouchers} tiri al gacha da spendere</div>
+        <div class="vt-riga vt-conta">Vittoria n° ${meta.stats.wins || 1}</div>
+        ${rigaSblocchi}
+      </div>
       <div class="meta-actions">
         <button class="meta-btn primary" data-act="again">▶ Nuova Run</button>
         <button class="meta-btn ghost" data-act="home">🏠 Home</button>
@@ -18063,6 +18525,14 @@
   /* Ridisegno su resize/rotazione: ricalcola le scale degli sprite e ridipinge
      bioma e pedane. Serve sul telefono (rotazione, barra URL che compare) e
      ripulisce eventuali layer "fantasma" degli emulatori da browser. */
+  /* Il giorno lo si controlla ogni minuto e a ogni ritorno in primo piano:
+     un minuto di ritardo su una mezzanotte non lo nota nessuno, e un timer al
+     minuto non pesa niente. */
+  setInterval(controllaCambioGiorno, 60000);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) controllaCambioGiorno();
+  });
+
   let resizeTimer = null;
   window.addEventListener("resize", () => {
     clearTimeout(resizeTimer);

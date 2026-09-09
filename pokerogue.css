@@ -2169,3 +2169,49 @@ button.zn:active { transform: translateY(1px); }
   font-size: 10px; font-weight: 800; letter-spacing: .3px; text-shadow: none;
 }
 .ab-gia { font-size: 11px; opacity: .75; }
+
+/* ======================================================================
+   CARTA DI CHIUSURA (§116) — la schermata di chi ha finito la Classica.
+   Nell'originale e' un disegno con sopra «Congratulazioni». Il disegno noi
+   non ce l'abbiamo, ma abbiamo i sei che hanno vinto: la carta la fanno
+   loro. Sta dentro #meta, quindi non deve traboccare in altezza.
+   ====================================================================== */
+.vt-carta {
+  /* `flex: 0 1 auto`: la carta e' alta quanto il suo contenuto e non si
+     stiracchia a tutto lo schermo. Ci pensa gia' #meta a centrarla
+     (`justify-content: safe center`), e col contenuto lungo si accorcia e
+     scorre invece di traboccare. */
+  flex: 0 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: none;
+  display: flex; flex-direction: column; align-items: center; gap: 1vh;
+  padding: 2vh 3vw;
+  background: radial-gradient(120% 80% at 50% 0%, #3a3050 0%, #171a24 62%, #0b0d14 100%);
+  border-radius: 18px;
+  box-shadow: inset 0 0 0 1px rgba(255,207,74,.28), 0 6px 22px rgba(0,0,0,.5);
+}
+.vt-carta::-webkit-scrollbar { width: 0; height: 0; }
+.vt-tit {
+  font-size: clamp(28px, 9vw, 52px); font-weight: 900; letter-spacing: 3px;
+  color: #ffcf4a; text-shadow: 0 2px 0 #7a5300, 0 0 18px rgba(255,207,74,.45);
+}
+.vt-sub { font-size: clamp(12px, 3.4vw, 17px); opacity: .85; text-align: center; }
+.vt-squadra {
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 1.2vh 3vw;
+  margin: 1vh 0;
+}
+.vt-mon { display: flex; flex-direction: column; align-items: center; width: 22vw; max-width: 92px; }
+.vt-ic { display: block; }
+.vt-nome { font-size: clamp(10px, 2.9vw, 13px); text-align: center; line-height: 1.15; }
+.vt-lv { font-size: clamp(9px, 2.5vw, 12px); opacity: .7; }
+.vt-riga {
+  font-size: clamp(12px, 3.3vw, 16px); text-align: center;
+  background: rgba(255,255,255,.07); border-radius: 999px; padding: 5px 14px;
+}
+.vt-conta { opacity: .7; background: none; padding: 0; }
+.vt-sblocchi {
+  margin-top: 1vh; width: 100%; padding: 1.2vh 3vw;
+  border-radius: 14px; background: rgba(255,207,74,.1);
+  box-shadow: inset 0 0 0 1px rgba(255,207,74,.3);
+}
+.vt-sb-tit { text-align: center; font-size: clamp(11px, 3vw, 14px); color: #ffcf4a; margin-bottom: .6vh; }
+.vt-sb-lista { display: flex; flex-wrap: wrap; justify-content: center; gap: .8vh 4vw; }
+.vt-sb { display: flex; align-items: center; gap: 6px; font-size: clamp(11px, 3.1vw, 15px); }

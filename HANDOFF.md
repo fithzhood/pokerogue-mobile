@@ -7179,3 +7179,171 @@ fatto con un memo, non ingenuamente.
 **Lo strumento resta**: `python tools/audit-attrs.py` rifà il conto delle mosse
 quando serve, e lo stesso confronto vale per le abilità cambiando il file
 sorgente dell'originale.
+
+---
+
+## §116 — Sette segnalazioni dal telefono (rev 201)
+
+Sette messaggi arrivati insieme su Spola. Non hanno un tema comune, ma cinque su
+sette sono lo stesso genere di difetto: **una regola dell'originale implementata
+a metà**, cioè in una direzione sola.
+
+### 1. Lancio non vedeva le bacche
+
+«Un pokemon aveva una bacca ma la mossa non ha fatto nulla». `primoOggetto`
+guarda solo `held`, e le bacche da noi stanno in `berries`: con una Baccacedro e
+nient'altro addosso, Lancio si fermava sul «non ha niente da lanciare».
+
+Adesso `cosaSiLancia()` guarda prima gli strumenti e poi le bacche. Una bacca
+lanciata vale **10 di potenza** e **chi la prende se la mangia**, con
+`effettoBaccaAddosso()` — senza soglie di PS, come nei giochi. Vuol dire che
+tirare una Baccaprugna addosso all'avversario lo cura: è un autogol, ed è giusto
+che si possa fare.
+
+⚠️ Nell'originale Lancio è `.unimplemented()`. Qui siamo più avanti di loro, non
+più indietro: il riferimento sono i giochi, non PokéRogue.
+
+### 2. Sei contatori sopravvivevano alla fine della run
+
+«Ricorda di resettare il contatore delle last ball quando una run finisce.
+Controlla anche altri contatori se ci sono.» `CAMPI_RUN` ha 36 voci e `startRun`
+ne azzerava trenta. Le sei rimaste:
+
+| campo | che cosa perdeva la run nuova |
+|---|---|
+| `cattureFallite` | la pietà delle Last Ball arrivava da una partita finita |
+| `masterballs` | l'unica ball che non si azzerava (le altre sette sì) |
+| `gymRoster` | stesse sei palestre della run precedente |
+| `zoneViste` | mezza mappa già segnata come «ci sei passato» |
+| `rivalRubati` | il Rivale ricordava i furti della partita prima |
+| `evilRubati` | idem per il team cattivo |
+
+Ricaricare un salvataggio li riscrive da `CAMPI_RUN`, quindi azzerarli in
+`startRun` non tocca le run in corso.
+
+### 3. La catena evolutiva si percorreva in una direzione sola
+
+«Nelle lotte in doppio sembra che il secondo pkmn avversario abbia una pool meno
+limitata del primo: ho appena incontrato un vaporeon livello 5.»
+
+La pool è la stessa per i due slot — quella non era il problema. Il problema è
+che i pool dei biomi contengono anche le **forme evolute** (Vaporeon sta in
+LAKE/SUPER_RARE) e `evolvedFormFor` faceva solo salire. A livello 5 usciva
+Vaporeon perché era scritto nel pool.
+
+Nell'originale il pezzo mancante si chiama `getRequiredPrevo`: prima di provare a
+evolvere, guarda se il livello è sotto la soglia e restituisce la **preevo**.
+Adesso `formaPerLivello()` fa lo stesso ed `evolvedFormFor` ci passa per prima
+cosa.
+
+⚠️ **Scendere e basta, senza risalire.** Eevee ha otto evoluzioni: rifacendo il
+giro all'insù un Vaporeon di livello 40 poteva tornare Jolteon. L'originale ha la
+stessa cautela (`return requiredPrevo` esce subito).
+
+Misurato: `VAPOREON@5 → EEVEE`, `VAPOREON@40 → VAPOREON`, `VENUSAUR@20 →
+IVYSAUR`, `IVYSAUR@5 → BULBASAUR`, `BULBASAUR@40 → VENUSAUR`, `RAYQUAZA@5`
+invariato.
+
+### 4. Due giorni diversi nello stesso gioco
+
+«Assicurati di aggiornare il pokemon leggendario del Gacha e i pokemon con
+pokerus alla mezzanotte.» Le due cose contavano i giorni in due modi: il Pokérus
+da `new Date()` (locale), il leggendario da `Date.now() / 86400000` (**UTC**).
+D'estate in Italia sono due ore di scarto.
+
+Adesso il giorno lo dice `giornoLocale()` e lo usano tutti e due.
+`controllaCambioGiorno()` gira ogni minuto e a ogni `visibilitychange`: sul
+telefono l'app non si chiude mai, si mette via — e la schermata del gacha
+restava quella di ieri sera.
+
+⚠️ Deviazione voluta: l'originale conta in UTC. Qui la mezzanotte che conta è
+quella di chi ci gioca.
+
+### 5. Con gli scudi alzati non si cattura
+
+«I pkmn con scudi non devono essere catturabili finché hanno scudi attivi. Stesso
+dicasi per il boss finale se cambia forma: solamente la forma finale è
+catturabile.»
+
+`ballBlockReason` ha adesso due controlli in più, **dopo** quello
+dell'allenatore (l'ordine conta: su un Pokémon di allenatore il messaggio giusto
+è quello della Clepto Ball):
+
+- `scudiInPiedi(e) > 0` → la ball rimbalza, e dice quanti scudi restano;
+- boss finale con `finalPhase < bossFasi` → «non ha ancora mostrato la sua vera
+  forma».
+
+Gli scudi sono `segBounds.length - segBroken`: i confini sono uno in meno dei
+segmenti, quindi rotti tutti resta l'ultima barra — e lì la cattura si può
+tentare. La cattura resta possibile, ma va guadagnata.
+
+**La forma base**: `risolviLancio` ricostruisce il Pokémon dalla SPECIE, non dalla
+forma della fase, quindi quello che entra in squadra era già il Mewtwo normale.
+Adesso la schermata di cattura lo **dice** (`rigaFase` in `infoCattura`).
+
+### 6. Tetti agli oggetti tenuti
+
+«Servono dei limiti al numero di oggetti posseduti da un pkmn, guarda come viene
+gestito nell'originale.» Là ogni strumento ha `getMaxHeldItemCount`. Da noi non
+c'era nessun tetto, e gli strumenti si impilano.
+
+`TETTO_HELD`, coi numeri presi uno per uno dalle classi di `modifier.ts`:
+
+| pezzi | strumenti |
+|---|---|
+| 5 | Bandana, Presartigli |
+| 4 | Avanzi, Conchinella |
+| 3 | Rapidartigli, Roccia di re, Grandelente |
+| 2 | Multilente, Rocciamistica |
+| 10 | Cuorugiada |
+| 1 | Mirino, Porro, Evolcondensa, Revitalseme, Tossicsfera, Fiammosfera, buco nero, strumenti di specie |
+| 99 | Boost di Tipo, Sciarpa nera (là `AttackTypeBooster`) |
+
+Bacche: **2** per Cedro/Prugna/Mela/Enigma, **3** per le altre.
+Vitamine: il tetto è **l'IV di quella statistica** (`BaseStatModifier` fa
+`return pokemon.ivs[this.stat]`). È il più bello dei tre: un Pokémon con 1 di IV
+in Difesa regge **una** Ferro, e non diventa un difensore a forza di vitamine.
+
+Il tetto vale in tre punti: `addHeld`/`addBerry`/`boostBase` (che ora tornano
+`false` se non ci sta), i `valid`/`avail` dei premi, e `spostaOggetto` — senza
+quest'ultimo bastava raccogliere gli Avanzi con sei Pokémon e ammucchiarli sul
+primo. Nella schermata «a chi lo dai» chi è al tetto si vede spento, con scritto
+quanti ne tiene.
+
+⚠️ `chooseTarget` passa adesso anche la SCELTA a `valid(p, pick)`: per Vitamina e
+Bacca il tetto dipende da *quale* è uscita, e quello lo sa solo `fillPick`.
+
+⚠️ Il furto in lotta (`muoviOggetto`) **non** è capato: è un trasferimento a metà
+turno, e bloccarlo romperebbe Furto, Bramarapina e il buco nero.
+
+### 7. Il finale era un cartello
+
+«Migliora il finale, guarda come è fatto nell'originale.» Duecento ondate
+finivano con tre righe di testo e un riquadro con due bottoni.
+
+Là il finale è una scena in tre pezzi (`GameOverPhase`), e adesso ci sono tutti e
+tre:
+
+1. **Il Rivale saluta** (`salutoDelRivale`). Ritratto in campo e il discorso di
+   chiusura, due versioni a seconda di chi è. Non è tradotto parola per parola da
+   `dialogue-misc.json`: è lo stesso discorso in italiano, e sta attento a non
+   dare un genere a **chi gioca** — il gioco non gliel'ha mai chiesto.
+2. **La carta di chiusura** (`.vt-carta`). Là è un disegno con «Congratulazioni»,
+   e quel disegno non ce l'abbiamo; ma abbiamo i sei che hanno vinto, con la loro
+   faccia. La carta la fanno loro, più i fiocchi nuovi, i tiri al gacha e il
+   conto delle vittorie.
+3. **Gli sblocchi.** Evolcondensa e Piccolo buco nero sono `Unlockables`
+   nell'originale: non esistono finché non hai completato la Classica almeno una
+   volta (`handleUnlocks`). Da noi erano lì dal primo giorno, e vincere non
+   cambiava niente. Adesso il loro `avail` chiede `giaCampione()`.
+
+E i **premi valevano un decimo** del vero: il primo fiocco di una specie dà un
+VOUCHER_PLUS, che là vale **cinque** tiri (`[VoucherType.PLUS, 1, 5]`), non uno.
+Chi ha già vinto altre volte prende in più un VOUCHER_PREMIUM, cioè **dieci**
+(`GameOverModifierRewardPhase`, dato solo `if (!firstClear)`).
+
+### Sonde di collaudo aggiunte
+
+    __items.formaLv("VAPOREON", 5)   -> { chiesta, esce }
+    __items.tetto("leftovers")       -> { ha, tetto, posto }   (senza argomento: tutti)
+    __items.ballOk()                 -> perche' la ball e' vietata adesso
